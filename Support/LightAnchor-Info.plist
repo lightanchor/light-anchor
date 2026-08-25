@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>zh-Hans</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>zh-Hans</string>
+		<string>en</string>
+	</array>
+	<key>CFBundleDisplayName</key>
+	<string>轻锚</string>
+	<key>CFBundleExecutable</key>
+	<string>LightAnchor</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.lightanchor.app</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>LightAnchor</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>15.0</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>轻锚只在你明确确认环境动作时运行自动化。</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>轻锚只读取你授权的会议时间和链接，用于智能等待。</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>轻锚只在你主动开始语音捕获时录音。</string>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>轻锚只在你主动选择截图区域时保存截图。</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>轻锚使用本机语音识别把主动录制的短语音转成文字。</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>Light Anchor Capture</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>lightanchor</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

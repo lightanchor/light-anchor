@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build and test
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Show toolchain
+        run: swift --version
+
+      - name: Build
+        run: swift build
+
+      - name: Test
+        run: swift test
+
+  scripts:
+    name: Scripts and boundaries
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+
+      # Declared here because several scripts refuse to run without them rather
+      # than silently reporting a skipped check as passed.
+      - name: Install script dependencies
+        run: brew install ripgrep jq
+
+      - name: Shell syntax
+        run: |
+          for script in Scripts/*.sh; do
+            zsh -n "$script" || exit 1
+          done
+
+      - name: Local data backup and restore smoke
+        run: Scripts/smoke-data-backup.sh
+

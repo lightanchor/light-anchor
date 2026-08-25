@@ -1,0 +1,16 @@
+侧栏导航字形取自 Lucide。
+
+来源：https://github.com/lucide-icons/lucide（icons/ 目录）
+授权：ISC License（见同目录 LICENSE），允许商用与闭源分发，
+      不强制署名；分发时保留本许可与版权声明即可。
+版权：Copyright (c) 2026 Lucide Icons and Contributors
+      其中源自 Feather 的部分：Copyright (c) 2013-2022 Cole Bemis（MIT）
+
+Lucide 是纯描边字库：viewBox 0 0 24 24、fill=none、stroke=currentColor、
+原稿线宽 2、圆头圆角。线宽由渲染侧给（侧栏用 1.75），端点样式必须是
+.round，否则和原图对不上。
+
+这里只保留实际用到的 6 个 SVG。改动图标时：
+  1. 从上游仓库 icons/ 里补充 SVG 到本目录（旧的删掉）；
+  2. 跑 python3 Scripts/import-lucide-glyphs.py Support/Icons/lucide \
+       Sources/LightAnchor/Design/LightAnchorNavGlyphs.swift

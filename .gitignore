@@ -1,0 +1,8 @@
+.DS_Store
+.build/
+build/
+dist/
+.swiftpm/
+.alma-snapshots
+**/xcuserdata/
+*.xcuserstate
