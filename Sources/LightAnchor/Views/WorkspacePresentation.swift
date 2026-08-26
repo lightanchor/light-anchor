@@ -814,8 +814,8 @@ struct LightAnchorSegSoft<Value: Hashable>: View {
             RoundedRectangle(cornerRadius: 11, style: .continuous)
                 .strokeBorder(LightAnchorTheme.sidebarHairline, lineWidth: 1)
         }
-        .padding(.leading, 2)
-        .padding(.bottom, 14)
+        // 不带外边距：组件自带的 bottom 14 曾把胶囊重心抬得比同行标签高 7pt
+        // （HStack 居中对齐的是「带垫的框」），行距和对齐都交给调用处。
         .accessibilityElement(children: .contain)
     }
 }
@@ -1079,6 +1079,8 @@ struct LightAnchorTagPicker: View {
 
 /// 中性组标签（样机 .setgroup-label 语感）：12.5/550 淡墨，
 /// 用于 listpanel 之上不需要语义色的分组名。
+/// 不带下边距：在「标签 + 控件」的组头行里，自带垫会让居中对齐
+/// 对到「带垫的框」上，文字视觉上沉下去；行距由调用处统一给。
 struct LightAnchorSectionLabel: View {
     let title: String
 
@@ -1091,7 +1093,6 @@ struct LightAnchorSectionLabel: View {
             .font(LightAnchorTheme.interfaceFont(size: 12.5, weight: .medium))
             .foregroundStyle(LightAnchorTheme.faintInk)
             .padding(.leading, 2)
-            .padding(.bottom, 8)
     }
 }
 

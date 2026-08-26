@@ -39,5 +39,53 @@ final class ZZDemoSeedTests: XCTestCase {
             completionCondition: "看失败用例列表"
         )
         _ = workspace.resumeEpisode(episode.id)
+
+        // 给 episode 一个丰富的 context 胶囊：应用内切换/放下时,
+        // boundaryContext 在实时采集为空的环境（无辅助功能权限）会回退到它,
+        // 「已放下」确认卡的端到端演示才有素材。
+        _ = workspace.updateContext(for: episode.id, context: ContextCapsule(
+            applications: ["Safari"],
+            applicationBundleIdentifiers: ["com.apple.Safari"],
+            files: [URL(fileURLWithPath: NSHomeDirectory() + "/Developer/light-anchor/README.md")],
+            links: [URL(string: "https://example.com/spec")!],
+            terminalWorkingDirectories: [URL(fileURLWithPath: NSHomeDirectory() + "/Developer/light-anchor")],
+            terminalCommands: ["swift test"],
+            clipboardText: "lightanchor/light-anchor"
+        ))
+
+        // 现场卡演示条目：覆盖四类条目（应用图标解析各走一条路径）。
+        _ = workspace.commitSceneSnapshot(SceneSnapshot(
+            targetID: target.id,
+            episodeID: episode.id,
+            items: [
+                SceneItem(
+                    kind: .application,
+                    title: "Safari",
+                    address: "com.apple.Safari",
+                    sourceApplication: "Safari"
+                ),
+                SceneItem(
+                    kind: .terminal,
+                    title: "light-anchor",
+                    address: "file://" + NSHomeDirectory() + "/Developer/light-anchor",
+                    sourceApplication: "终端",
+                    detail: "swift test"
+                ),
+                SceneItem(
+                    kind: .file,
+                    title: "README.md",
+                    address: NSHomeDirectory() + "/Developer/light-anchor/README.md",
+                    sourceApplication: "Visual Studio Code"
+                ),
+                SceneItem(
+                    kind: .link,
+                    title: "排版规范参考页",
+                    address: "https://example.com/spec",
+                    sourceApplication: "Safari"
+                )
+            ],
+            filterMode: .saveAll,
+            clipboardText: "lightanchor/light-anchor"
+        ))
     }
 }

@@ -150,6 +150,7 @@ enum LightAnchorSystemIcon {
         "alert-triangle": "exclamationmark.triangle",
         "app-window": "app.dashed",
         "archive": "archivebox",
+        "arrow-left-right": "arrow.left.arrow.right",
         "arrow-up": "arrow.up",
         "arrow-up-right": "arrow.up.right",
         "bell": "bell",
@@ -635,8 +636,9 @@ struct LightAnchorDestructiveQuietButtonStyle: ButtonStyle {
     }
 }
 
-/// 完成/就绪类动作：宜绿水洗底 + 加深绿文字——与「恢复现场 →」的
-/// 水洗+着色文字同一语言（实底绿+投影被否：跳出整体风格）。
+/// 完成/就绪类动作：与主按钮同一副实底家族，换成宜绿——「完成」和「开始」
+/// 同等分量、不同性格，几何、投影语言全部沿用主按钮，只换色相
+/// （灰底绿字、绿水洗药丸、白面绿描边三版都被否：前两版不像按钮，描边版发虚）。
 struct LightAnchorSuccessButtonStyle: ButtonStyle {
     /// 样机 .btn.sm：27 高 / 12.5 字号 / 圆角 8（菜单栏浮窗等紧凑场合）。
     var compact = false
@@ -648,14 +650,17 @@ struct LightAnchorSuccessButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(LightAnchorTheme.controlFont(size: compact ? 12.5 : 13, weight: .medium))
-            .padding(.horizontal, compact ? 12 : 16)
+            .padding(.horizontal, compact ? 12 : 14)
             .frame(minHeight: compact ? 27 : 32)
             .controlSize(.regular)
-            .foregroundStyle(LightAnchorTheme.success)
+            .foregroundStyle(LightAnchorTheme.onAction)
             .background(
-                LightAnchorTheme.successBadge.opacity(isHovered && isEnabled ? 0.26 : 0.16),
+                LightAnchorTheme.successBadge,
                 in: RoundedRectangle(cornerRadius: compact ? 8 : 10, style: .continuous)
             )
+            // 与主按钮的淡蓝投影同构：宜绿（#3E9B4F）的一层淡绿投影。
+            .shadow(color: .init(red: 62/255, green: 155/255, blue: 79/255).opacity(0.35), radius: 4, y: 2)
+            .brightness(isHovered && isEnabled ? 0.05 : 0)
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1)
             .opacity(isEnabled ? (configuration.isPressed ? 0.86 : 1) : 0.4)
             .onHover { isHovered = $0 }

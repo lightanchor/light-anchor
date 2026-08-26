@@ -20,7 +20,8 @@ final class BlueDotAuditTests: XCTestCase {
         // NavigationSplitView——它自带的分栏线/拖拽柄样机里没有，
         // 其安全区管理还会和 ignoresSafeArea 互相触发布局死循环。
         XCTAssertFalse(source.contains("NavigationSplitView("))
-        XCTAssertTrue(source.contains(".frame(width: LightAnchorDesign.sidebarWidth)"))
+        // 侧栏内容固定 226pt 排版；收进蓝点时外层宽度收拢到 0（经典分栏收拢）。
+        XCTAssertTrue(source.contains(".frame(width: LightAnchorDesign.sidebarWidth, alignment: .leading)"))
         // 现场舱（样机 .dock）：内容岛旁 258pt 的第二座圆角岛，推拉进出。
         XCTAssertTrue(source.contains("if showingInspector {"))
         XCTAssertTrue(source.contains("WorkspaceContextRail("))

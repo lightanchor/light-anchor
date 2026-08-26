@@ -58,6 +58,8 @@ struct WorkspaceSettingsView: View {
                 case .data:
                     DataManagementView()
                         .environmentObject(workspace)
+                case .about:
+                    AboutSettingsPane()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -120,7 +122,7 @@ private struct SettingsTabButtonStyle: ButtonStyle {
     }
 }
 
-/// 设置六页。曾经还有一页「接收」，里面只有 Agent / 终端两个自动等待开关——
+/// 设置七页。曾经还有一页「接收」，里面只有 Agent / 终端两个自动等待开关——
 /// 和「连接」页的接入/移除是同一件事的两个闸，删掉了：一个来源一个真相。
 private enum SettingsPane: String, CaseIterable, Identifiable {
     case appearance
@@ -129,6 +131,7 @@ private enum SettingsPane: String, CaseIterable, Identifiable {
     case intelligence
     case connections
     case data
+    case about
 
     var id: String { rawValue }
 
@@ -140,6 +143,7 @@ private enum SettingsPane: String, CaseIterable, Identifiable {
         case .intelligence: tr("intelligence")
         case .connections: tr("connections")
         case .data: tr("data")
+        case .about: tr("about")
         }
     }
 }
@@ -400,6 +404,99 @@ private struct DiagonalHalf: Shape {
         path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
         path.closeSubpath()
         return path
+    }
+}
+
+/// 关于页：品牌行（图标 + 名字 + 版本）+ 开源信息（仓库 / 作者 / 贡献者）。
+/// 链接一律开浏览器，不在应用里嵌网页。
+private struct AboutSettingsPane: View {
+    private static let repositoryURL = URL(string: "https://github.com/lightanchor/light-anchor")!
+    private static let contributorsURL = URL(
+        string: "https://github.com/lightanchor/light-anchor/graphs/contributors"
+    )!
+
+    private var versionLabel: String {
+        let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        switch (short, build) {
+        case let (short?, build?) where short != build: return "\(short) (\(build))"
+        case let (short?, _): return short
+        case let (nil, build?): return build
+        default: return tr("dev_build")
+        }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                settingsGroupLabel(tr("about"))
+                settingsCard {
+                    HStack(spacing: 14) {
+                        Image(nsImage: NSApp.applicationIconImage)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 52, height: 52)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(tr("app_name"))
+                                .font(LightAnchorTheme.interfaceFont(size: 16, weight: .semibold))
+                                .foregroundStyle(LightAnchorTheme.ink)
+                            Text(String(format: tr("version_x"), versionLabel))
+                                .font(LightAnchorTheme.supportingFont(size: 12))
+                                .monospacedDigit()
+                                .foregroundStyle(LightAnchorTheme.mutedInk)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 16)
+                }
+
+                settingsGroupLabel(tr("open_source"))
+                settingsCard {
+                    linkRow(
+                        title: tr("source_repository"),
+                        detail: "github.com/lightanchor/light-anchor",
+                        url: Self.repositoryURL
+                    )
+                    settingsRowDivider
+                    settingsRow(title: tr("author"), detail: nil) {
+                        Text(verbatim: "Chttiu")
+                            .font(LightAnchorTheme.interfaceFont(size: 13, weight: .medium))
+                            .foregroundStyle(LightAnchorTheme.mutedInk)
+                    }
+                    settingsRowDivider
+                    linkRow(
+                        title: tr("contributors"),
+                        detail: tr("everyone_who_helped_light_anchor"),
+                        url: Self.contributorsURL
+                    )
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(EdgeInsets(top: 22, leading: 26, bottom: 26, trailing: 26))
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    /// 链接行：整行可点、右侧出「在 GitHub 上打开 ↗」，落在浏览器里。
+    private func linkRow(title: String, detail: String?, url: URL) -> some View {
+        Button {
+            NSWorkspace.shared.open(url)
+        } label: {
+            settingsRow(title: title, detail: detail) {
+                HStack(spacing: 5) {
+                    Text(tr("view_on_github"))
+                        .font(LightAnchorTheme.controlFont(size: 12, weight: .medium))
+                    LightAnchorIcon("arrow-up-right", size: 11)
+                }
+                .foregroundStyle(LightAnchorTheme.accentInk)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .lightAnchorHoverFill(cornerRadius: 0)
+        .accessibilityLabel("\(title)，\(tr("view_on_github"))")
     }
 }
 

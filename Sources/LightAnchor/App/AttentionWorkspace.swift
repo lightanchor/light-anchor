@@ -10,6 +10,18 @@ final class AttentionWorkspace: ObservableObject {
     @Published private(set) var snapshot: AttentionSnapshot
     @Published private(set) var lastError: String?
     @Published private(set) var lastNotice: String?
+    /// 刚放下并存好现场的一件事（仅会话内，不落盘）：「现在」页据此出确认卡，
+    /// 让用户看到保存了什么、能逐条剔除，由用户点掉。
+    @Published private(set) var recentSetAside: RecentSetAside?
+
+    struct RecentSetAside: Equatable, Identifiable {
+        let targetID: UUID
+        let targetName: String
+        let snapshotID: UUID
+        let at: Date
+
+        var id: UUID { snapshotID }
+    }
 
     private let store: LocalEventStore
     private let assetStore: LocalAssetStore
@@ -718,11 +730,15 @@ final class AttentionWorkspace: ObservableObject {
         }
         events.append(.episodeChanged(episode, at: now))
         guard commit(events) else { return nil }
-        // 切换目标时，为被暂停的 episode 自动捕获现场
+        // 回到某件事时，它旧的「已放下」确认卡就过时了。
+        if recentSetAside?.targetID == targetID {
+            recentSetAside = nil
+        }
+        // 切换目标时，为被暂停的 episode 自动捕获现场，并把结果亮给用户。
         if shouldCapturePreviousScene,
            let previousEpisode,
            previousEpisode.id != episode.id {
-            scheduleSceneAutoCapture(for: previousEpisode.id)
+            scheduleSceneAutoCapture(for: previousEpisode.id, announcingSetAside: true)
         }
         #if os(macOS)
         transitionNotifications.forEach {
@@ -769,7 +785,7 @@ final class AttentionWorkspace: ObservableObject {
         }
         let changed = commit([.episodeChanged(episode, at: now)])
         if changed {
-            scheduleSceneAutoCapture(for: episodeID)
+            scheduleSceneAutoCapture(for: episodeID, announcingSetAside: true)
         }
         return changed
     }
@@ -778,6 +794,10 @@ final class AttentionWorkspace: ObservableObject {
     func resumeEpisode(_ episodeID: UUID, now: Date = Date()) -> Bool {
         guard let episode = snapshot.episodes[episodeID], episode.state != .ended else {
             return false
+        }
+        // 接着做这件事：它的「已放下」确认卡到此为止。
+        if recentSetAside?.targetID == episode.targetID {
+            recentSetAside = nil
         }
         return changeEpisodeState(episodeID, state: .active, now: now)
     }
@@ -1266,9 +1286,9 @@ final class AttentionWorkspace: ObservableObject {
         events.append(.captureChanged(attachedCapture, at: now))
         guard commit(events) else { return nil }
 
-        // 被放下的那一段异步存一张现场快照（同 startEpisode）。
+        // 被放下的那一段异步存一张现场快照，并把结果亮给用户（同 startEpisode）。
         if shouldCapturePreviousScene, let previousEpisode {
-            scheduleSceneAutoCapture(for: previousEpisode.id)
+            scheduleSceneAutoCapture(for: previousEpisode.id, announcingSetAside: true)
         }
         #if os(macOS)
         transitionNotifications.forEach {
@@ -1786,13 +1806,66 @@ final class AttentionWorkspace: ObservableObject {
 
     /// 切换/暂停/等待时自动捕获现场。fire-and-forget，不阻塞状态流转。
     /// 无 AI 时引擎立即返回（相关性不猜、全部保留），不会在测试环境挂起。
-    private func scheduleSceneAutoCapture(for episodeID: UUID) {
+    /// announcingSetAside：这次捕获属于「放下」——存好后把结果亮给用户
+    /// （「现在」页的已放下确认卡），而不是只在背后默默存一份。
+    private func scheduleSceneAutoCapture(
+        for episodeID: UUID,
+        announcingSetAside: Bool = false
+    ) {
         guard !sceneCapturePreferences.isAutomaticCapturePaused,
               snapshot.episodes[episodeID]?.context.hasSceneContent == true
         else { return }
         Task { [weak self] in
-            await self?.captureSceneSnapshot(for: episodeID)
+            guard let self else { return }
+            let captured = await self.captureSceneSnapshot(for: episodeID)
+            guard announcingSetAside,
+                  let captured,
+                  !captured.restorableItems.isEmpty || !captured.clipboardText.isEmpty,
+                  let episode = self.snapshot.episodes[episodeID],
+                  let target = self.snapshot.targets[episode.targetID]
+            else { return }
+            self.recentSetAside = RecentSetAside(
+                targetID: target.id,
+                targetName: target.name,
+                snapshotID: captured.id,
+                at: Date()
+            )
         }
+    }
+
+    /// 用户看过「已放下」确认卡后收起它。
+    func dismissRecentSetAside() {
+        recentSetAside = nil
+    }
+
+    #if DEBUG
+    /// 调试后门（截图/验收用）：真实放下当前这件，但确认弹窗用这件事已有的
+    /// 现场快照亮出来——不依赖这台机器的实时捕获权限。
+    func debugAnnounceSetAside(of episodeID: UUID) {
+        guard let episode = snapshot.episodes[episodeID],
+              let target = snapshot.targets[episode.targetID] else { return }
+        _ = pauseEpisode(episodeID, returnCue: episode.returnCue)
+        let existing = snapshot.sceneSnapshots.values
+            .filter { $0.targetID == episode.targetID }
+            .max { $0.capturedAt < $1.capturedAt }
+        guard let existing else { return }
+        recentSetAside = RecentSetAside(
+            targetID: target.id,
+            targetName: target.name,
+            snapshotID: existing.id,
+            at: Date()
+        )
+    }
+    #endif
+
+    /// 从一份现场快照删除一条（「已放下」确认卡 / 现场卡里的手动剔除）。
+    @discardableResult
+    func removeSceneItem(_ snapshotID: UUID, itemID: UUID, now: Date = Date()) -> Bool {
+        guard var sceneSnapshot = snapshot.sceneSnapshots[snapshotID] else { return false }
+        let countBefore = sceneSnapshot.items.count
+        sceneSnapshot.items.removeAll { $0.id == itemID }
+        guard sceneSnapshot.items.count < countBefore else { return false }
+        return commit([.sceneSnapshotChanged(sceneSnapshot, at: now)])
     }
 
     /// 直接提交一份现场快照到事件存储（同步）。
@@ -2006,6 +2079,10 @@ final class AttentionWorkspace: ObservableObject {
     ) -> ContextRestoreReport {
         guard let sceneSnapshot = snapshot.sceneSnapshots[snapshotID] else {
             return ContextRestoreReport()
+        }
+        // 现场既已恢复，「已放下」确认卡的使命就结束了。
+        if recentSetAside?.snapshotID == snapshotID {
+            recentSetAside = nil
         }
         let items: [SceneItem]
         if let selectedKinds {

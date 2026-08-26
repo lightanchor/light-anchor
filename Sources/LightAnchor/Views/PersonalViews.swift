@@ -24,9 +24,12 @@ struct LightAnchorContributionGrid: View {
     var durations: [Date: TimeInterval] = [:]
     var metric: Metric = .count
 
-    private static let cellSize: CGFloat = 10
     private static let cellGap: CGFloat = 2
     private static let weekCount = 52
+    /// 星期标签列宽（一/三/五）。
+    private static let weekdayLabelWidth: CGFloat = 16
+    /// 图例小方块保持定长，不随格子伸缩。
+    private static let legendSwatchSize: CGFloat = 10
 
     private var calendar: Calendar { Calendar.current }
 
@@ -145,16 +148,22 @@ struct LightAnchorContributionGrid: View {
                 }
             }
 
-            HStack(alignment: .top, spacing: 6) {
-                weekdayLabels
-                VStack(alignment: .leading, spacing: 3) {
-                    monthLabels(weeks: weeks)
-                    HStack(alignment: .top, spacing: Self.cellGap) {
-                        ForEach(Array(weeks.enumerated()), id: \.offset) { _, week in
-                            VStack(spacing: Self.cellGap) {
-                                ForEach(week, id: \.self) { day in
-                                    cell(for: day, today: today)
-                                }
+            // 弹性网格：52 列等分铺满可用宽度，格子随列宽保持正方形。
+            // 不量宽、不反推——窄到放不下时列自己收窄，永远不会把容器撑破
+            // （上一版按测量宽反推格长，窄窗下会溢出，把整窗内容挤偏）。
+            VStack(alignment: .leading, spacing: 3) {
+                monthLabelsRow(weeks: weeks)
+                VStack(alignment: .leading, spacing: Self.cellGap) {
+                    ForEach(0..<7, id: \.self) { weekdayIndex in
+                        HStack(spacing: Self.cellGap) {
+                            // 隔行标注（GitHub 惯例）：一 / 三 / 五。
+                            // macOS 系统最小字级是 10（caption2），9.5 的中文字形在非视网膜屏退化。
+                            Text([tr("weekday_mon_short"), "", tr("weekday_wed_short"), "", tr("weekday_fri_short"), "", ""][weekdayIndex])
+                                .font(LightAnchorTheme.supportingFont(size: 10))
+                                .foregroundStyle(LightAnchorTheme.faintInk)
+                                .frame(width: Self.weekdayLabelWidth, alignment: .trailing)
+                            ForEach(Array(weeks.enumerated()), id: \.offset) { _, week in
+                                cell(for: week[weekdayIndex], today: today)
                             }
                         }
                     }
@@ -169,13 +178,14 @@ struct LightAnchorContributionGrid: View {
                 ForEach(0..<5, id: \.self) { level in
                     RoundedRectangle(cornerRadius: 3, style: .continuous)
                         .fill(fill(forLevel: level))
-                        .frame(width: Self.cellSize, height: Self.cellSize)
+                        .frame(width: Self.legendSwatchSize, height: Self.legendSwatchSize)
                 }
                 Text(tr("more"))
                     .font(LightAnchorTheme.supportingFont(size: 10.5))
                     .foregroundStyle(LightAnchorTheme.faintInk)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(String(format: tr("focus_heatmap_over_the_past_year_2"), totalLabel.value, totalLabel.unit))
         // 单格数值只在悬停 tooltip 里，旁白/键盘拿不到——指路到有同一数据的地方。
@@ -184,42 +194,32 @@ struct LightAnchorContributionGrid: View {
 
     @ViewBuilder
     private func cell(for day: Date, today: Date) -> some View {
-        if day > today {
-            // 未来的日子留空占位，保持列高一致。
-            Color.clear
-                .frame(width: Self.cellSize, height: Self.cellSize)
-        } else {
-            RoundedRectangle(cornerRadius: 3, style: .continuous)
-                .fill(fill(forLevel: level(on: day)))
-                .frame(width: Self.cellSize, height: Self.cellSize)
-                .help(helpText(on: day))
-        }
-    }
-
-    private var weekdayLabels: some View {
-        VStack(alignment: .trailing, spacing: Self.cellGap) {
-            // 顶部先空出月份标签那一行的高度。
-            Color.clear.frame(width: 16, height: 12)
-            // 隔行标注（GitHub 惯例）：一 / 三 / 五。
-            ForEach(0..<7, id: \.self) { index in
-                Text([tr("weekday_mon_short"), "", tr("weekday_wed_short"), "", tr("weekday_fri_short"), "", ""][index])
-                    // macOS 系统最小字级是 10（caption2），9.5 的中文字形在非视网膜屏退化。
-                    .font(LightAnchorTheme.supportingFont(size: 10))
-                    .foregroundStyle(LightAnchorTheme.faintInk)
-                    .frame(width: 16, height: Self.cellSize, alignment: .trailing)
+        Group {
+            if day > today {
+                // 未来的日子留空占位，保持列宽一致。
+                Color.clear
+            } else {
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .fill(fill(forLevel: level(on: day)))
+                    .help(helpText(on: day))
             }
         }
+        .aspectRatio(1, contentMode: .fit)
+        .frame(maxWidth: .infinity)
     }
 
-    private func monthLabels(weeks: [[Date]]) -> some View {
-        HStack(alignment: .top, spacing: Self.cellGap) {
-            ForEach(Array(weeks.enumerated()), id: \.offset) { index, week in
+    private func monthLabelsRow(weeks: [[Date]]) -> some View {
+        HStack(spacing: Self.cellGap) {
+            Color.clear.frame(width: Self.weekdayLabelWidth, height: 12)
+            ForEach(Array(weeks.enumerated()), id: \.offset) { _, week in
                 let showsMonth = week.contains { calendar.component(.day, from: $0) == 1 }
+                // fixedSize 让月名溢出自己那格、盖到后续空格上；等分框架不受影响。
                 Text(showsMonth ? shortMonth(of: week) : "")
                     .font(LightAnchorTheme.supportingFont(size: 10))
                     .foregroundStyle(LightAnchorTheme.faintInk)
                     .fixedSize()
-                    .frame(width: Self.cellSize, height: 12, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(height: 12)
             }
         }
     }
@@ -321,7 +321,10 @@ struct ReviewView: View {
                 }
                 groupGap
 
-                HStack(alignment: .firstTextBaseline) {
+                // 组头行统一构图：标签与控件真垂直居中（两个组件都不再自带
+                // 外边距，居中就是对文字/胶囊本体），行下与行上同款 14——
+                // 上边是 groupGap 的 14，组头到自家卡也给 14，上下间距相同。
+                HStack(alignment: .center) {
                     LightAnchorSectionLabel(tr("focus_heatmap"))
                     Spacer(minLength: 12)
                     LightAnchorSegSoft(
@@ -329,8 +332,8 @@ struct ReviewView: View {
                         options: LightAnchorContributionGrid.Metric.allCases,
                         title: \.title
                     )
-                    .padding(.bottom, -14)
                 }
+                .padding(.bottom, 14)
                 LightAnchorContributionGrid(
                     counts: dailyFocusCounts,
                     durations: workspace.focusDayDurations(),
@@ -416,7 +419,9 @@ struct ReviewView: View {
 
     private var narrativeSection: some View {
         VStack(alignment: .leading, spacing: 0) {
+            // 与两个组头行同一节奏：标签到卡 14。
             LightAnchorSectionLabel(tr("narrative_review"))
+                .padding(.bottom, 14)
             VStack(alignment: .leading, spacing: 10) {
                 if let narrativeText {
                     Text(narrativeText)
@@ -501,6 +506,7 @@ struct ReviewView: View {
     private var ledgerSection: some View {
         let summary = workspace.focusPeriodSummary(in: ledgerPeriod.interval())
         return VStack(alignment: .leading, spacing: 0) {
+            // 与专注热力的组头同一构图（见上）：真居中、行下同款 14。
             HStack(alignment: .center, spacing: 10) {
                 LightAnchorSectionLabel(tr("time_ledger"))
                 Spacer(minLength: 12)
@@ -509,9 +515,9 @@ struct ReviewView: View {
                     options: ReviewPeriodUnit.allCases,
                     title: \.title
                 )
-                .padding(.bottom, -14)
                 periodStepper
             }
+            .padding(.bottom, 14)
             LightAnchorListPanel {
                 ledgerSummaryRow(summary)
                 if !summary.targetStats.isEmpty {
@@ -639,7 +645,9 @@ struct ReviewView: View {
     private var recentWorkSection: some View {
         let traces = workspace.recentWorkTraces(in: ledgerPeriod.interval())
         return VStack(alignment: .leading, spacing: 0) {
+            // 与两个组头行同一节奏：标签到卡 14。
             LightAnchorSectionLabel(tr("recent_activity"))
+                .padding(.bottom, 14)
             LightAnchorListPanel {
                 if traces.isEmpty {
                     Text(tr("no_work_story_for_this_day"))

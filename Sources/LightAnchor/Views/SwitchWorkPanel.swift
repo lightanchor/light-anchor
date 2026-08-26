@@ -1,110 +1,127 @@
 import SwiftUI
 
-/// 「换一件事」浮层：把「开始/切换到某件事」的三条来源收进一个框。
+/// 「换一件事」：应用的标准 sheet——和「开始一件事」「等待编辑器」
+/// 「重返现场」同一个家族（LightAnchorSheetHeader + 分组 + 动作条）。
 ///
-/// 在这之前，这三条散在三个页面里——放下的事要去稍后页点「继续」，捕获要去
-/// 稍后页点「立为一件事」，新开一件只在「现在」页没有当前工作时才露出入口。
-/// 最常做的那个动作（我现在要换一件事）在有当前工作时根本没有按钮，用户得先
-/// 点一次「暂停」把现在页清空，才能看见「开始一件事」。
+/// 形态走过四版：命令面板（被否：过滤和新建挤在一个搜索框里）、黑纱浮层卡
+/// （被否：和安静语言不合）、舞台接管（被否：中心舞台上悬一张选择卡，
+/// 既不像页面也不像对话框）。定稿回到系统 sheet：这本来就是一个「做个选择」
+/// 的对话，应用里所有同类对话都是 sheet，用户已经认识它。
 ///
-/// 顶上的输入框同时是过滤器和新建框：打字过滤已有的，回车开始选中的那条；
-/// 没有命中时回车就是用这个名字新开一件。所以「从稍后中选取」和「手动新增」
-/// 不是两个按钮两条路，而是同一个框里的连续动作。
-///
+/// 三条来源平级陈列：接着做、从稍后拿一条是列表，新开一件是常驻命名框。
 /// 切换本身不在这里实现：`startEpisode(targetID:)` 早就会把手上那件按下放下、
 /// 固定现场，并在遇到同一目标的未完成段时接着做那一段。这里缺的一直只是入口。
-struct SwitchWorkPanel: View {
+struct SwitchWorkSheet: View {
     @EnvironmentObject private var workspace: AttentionWorkspace
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dismiss) private var dismiss
 
-    let onClose: () -> Void
-    /// 切换成功：主视图负责回到「现在」页并清掉回顾态。
+    /// 切换成功：主视图负责翻回「现在」并清掉回顾态。
     let onSwitched: () -> Void
-    /// 「更多设置…」：带着已经敲好的名字打开完整的开始表单（环境、备注）。
+    /// 「填写环境和备注后开始…」：带着已经敲好的名字打开完整的开始表单。
     let onNewWorkDetails: (String) -> Void
 
-    @State private var query = ""
+    @State private var newWorkName = ""
     @State private var selectionIndex = 0
+    /// 列表实际内容高：ScrollView 是贪高的，条目少时会把 sheet 撑出空白。
+    @State private var listContentHeight: CGFloat = 0
     @FocusState private var fieldFocused: Bool
 
-    /// 每段最多列这么多：面板是用来快速换一件事的，不是第二个稍后页。
+    /// 每段最多列这么多：这张 sheet 是用来快速换一件事的，不是第二个稍后页。
     private static let sectionLimit = 6
+    /// 列表区最多长到这么高，再多就滚动。
+    private static let listMaxHeight: CGFloat = 264
 
     var body: some View {
-        ZStack {
-            Rectangle()
-                .fill(LightAnchorTheme.ink.opacity(0.18))
-                .ignoresSafeArea()
-                .contentShape(Rectangle())
-                .onTapGesture { onClose() }
-                .accessibilityHidden(true)
-
-            VStack(alignment: .leading, spacing: 0) {
-                queryField
-                Rectangle()
-                    .fill(LightAnchorTheme.hairlineBorder)
-                    .frame(height: 1)
-                results
-                footer
-            }
-            .frame(width: 560)
-            .background(
-                LightAnchorTheme.elevatedSurface,
-                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+        VStack(alignment: .leading, spacing: 14) {
+            LightAnchorSheetHeader(
+                eyebrow: tr("switching"),
+                title: tr("switch_to_something_else"),
+                subtitle: tr("sets_this_one_aside_with_its"),
+                icon: "arrow-left-right"
             )
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .shadow(color: .black.opacity(0.08), radius: 3, y: 2)
-            .shadow(color: .black.opacity(0.22), radius: 34, y: 18)
-            .frame(maxHeight: .infinity, alignment: .top)
-            .padding(.top, 72)
-            .onExitCommand { onClose() }
-            .onAppear { fieldFocused = true }
-            .onDisappear { fieldFocused = false }
+
+            if let entry = currentEntry {
+                currentWorkBanner(entry)
+            }
+
+            existingSections
+
+            createGroup
+
+            LightAnchorSheetActionBar {
+                Button(tr("cancel")) { dismiss() }
+                    .buttonStyle(LightAnchorQuietButtonStyle())
+                    .keyboardShortcut(.cancelAction)
+                Button(tr("start")) {
+                    confirmDefaultAction()
+                }
+                .buttonStyle(LightAnchorPrimaryButtonStyle())
+                .disabled(newName.isEmpty && candidates.isEmpty)
+            }
         }
+        .padding(24)
+        .frame(width: 540)
+        .onAppear { fieldFocused = true }
     }
 
-    // MARK: - 输入框
+    // MARK: - 正在进行的那件
 
-    private var queryField: some View {
-        HStack(spacing: 11) {
-            Image(systemName: "arrow.triangle.swap")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(LightAnchorTheme.faintInk)
-
-            TextField(tr("filter_what_s_here_or_type"), text: $query)
-                .textFieldStyle(.plain)
-                .font(LightAnchorTheme.interfaceFont(size: 15))
-                .focused($fieldFocused)
-                .onKeyPress(.downArrow) {
-                    moveSelection(by: 1)
-                    return .handled
-                }
-                .onKeyPress(.upArrow) {
-                    moveSelection(by: -1)
-                    return .handled
-                }
-                .onSubmit {
-                    let all = candidates
-                    guard !all.isEmpty else { return }
-                    activate(all[min(selectionIndex, all.count - 1)])
-                }
-                .onChange(of: query) { selectionIndex = 0 }
-
-            Text(verbatim: "esc")
-                .font(LightAnchorTheme.monoFont(size: 10, weight: .semibold))
-                .foregroundStyle(LightAnchorTheme.faintInk)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 3)
-                .background(
-                    LightAnchorTheme.recessed,
-                    in: RoundedRectangle(cornerRadius: 6, style: .continuous)
-                )
+    /// 换走之前先亮出来——被放下的是谁、已经专注多久。
+    private func currentWorkBanner(
+        _ entry: (episode: AttentionEpisode, target: AttentionTarget)
+    ) -> some View {
+        HStack(spacing: 9) {
+            LightAnchorStatusDot(entry.episode.state, size: 8)
+            Text(entry.target.name)
+                .font(LightAnchorTheme.interfaceFont(size: 13, weight: .semibold))
+                .foregroundStyle(LightAnchorTheme.ink)
+                .lineLimit(1)
+            Text("· " + String(
+                format: tr("focused_for"),
+                UserFacingCopy.focusDuration(workspace.snapshot.focusMinutes(of: entry.episode.id))
+            ))
+            .font(LightAnchorTheme.supportingFont(size: 12))
+            .monospacedDigit()
+            .foregroundStyle(LightAnchorTheme.faintInk)
+            .lineLimit(1)
+            .fixedSize()
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 14)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(
+            LightAnchorTheme.recessed,
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+        )
     }
 
-    // MARK: - 三段候选
+    private var currentEntry: (episode: AttentionEpisode, target: AttentionTarget)? {
+        guard let episode = workspace.currentEpisode,
+              let target = workspace.snapshot.targets[episode.targetID] else { return nil }
+        return (episode, target)
+    }
+
+    /// 米灰凹陷分组（现场卡语言）：图标组头 + 内容。
+    private func sourceGroup<Content: View>(
+        title: String,
+        icon: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            LightAnchorLabel(title: title, icon: icon, spacing: 6)
+                .font(LightAnchorTheme.supportingFont(size: 12, weight: .semibold))
+                .foregroundStyle(LightAnchorTheme.mutedInk)
+            content()
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            LightAnchorTheme.recessed,
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
+    }
+
+    // MARK: - 候选来源
 
     /// 放下的未完成事。排掉手上正在做的那件——它不是「换过去」的目标。
     private var resumeEntries: [(target: AttentionTarget, episode: AttentionEpisode)] {
@@ -116,92 +133,111 @@ struct SwitchWorkPanel: View {
                 else { return nil }
                 return (target: target, episode: episode)
             }
-            .filter { matches($0.target.name) }
             .prefix(Self.sectionLimit)
             .map { $0 }
     }
 
     private var captureEntries: [CaptureItem] {
         workspace.snapshot.inbox
-            .filter { matches(captureTitle($0)) }
             .prefix(Self.sectionLimit)
             .map { $0 }
     }
 
     private var newName: String {
-        query.trimmingCharacters(in: .whitespacesAndNewlines)
+        newWorkName.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// ↑↓ 走的平铺顺序，和界面从上到下一致。
+    /// ↑↓ 走的平铺顺序，和界面从上到下一致（新开一件走命名框，不进这个序列）。
     private var candidates: [SwitchCandidate] {
-        var all = resumeEntries.map { SwitchCandidate.resume($0.target.id) }
-        all += captureEntries.map { SwitchCandidate.capture($0.id) }
-        if !newName.isEmpty { all.append(.create(newName)) }
-        return all
-    }
-
-    private func matches(_ text: String) -> Bool {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return true }
-        return text.localizedCaseInsensitiveContains(trimmed)
+        resumeEntries.map { SwitchCandidate.resume($0.target.id) }
+            + captureEntries.map { SwitchCandidate.capture($0.id) }
     }
 
     private func captureTitle(_ capture: CaptureItem) -> String {
         capture.body.isEmpty ? (capture.title ?? tr("saved_items")) : capture.body
     }
 
-    // MARK: - 结果区
+    private func isSelected(_ candidate: SwitchCandidate) -> Bool {
+        let all = candidates
+        return all.firstIndex(of: candidate) == min(selectionIndex, max(0, all.count - 1))
+    }
+
+    // MARK: - 已有的事（接着做 / 从稍后拿一条）
 
     @ViewBuilder
-    private var results: some View {
-        let all = candidates
-        if all.isEmpty {
-            Text(tr("nothing_to_switch_to_yet_type"))
-                .font(LightAnchorTheme.supportingFont(size: 12))
-                .foregroundStyle(LightAnchorTheme.mutedInk)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 18)
-                .padding(.vertical, 16)
-        } else {
+    private var existingSections: some View {
+        if !candidates.isEmpty {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 12) {
                     if !resumeEntries.isEmpty {
-                        sectionHead(tr("pick_up_where_you_left_off"))
-                        ForEach(resumeEntries, id: \.episode.id) { entry in
-                            resumeRow(entry, isSelected: isSelected(.resume(entry.target.id), in: all))
+                        sourceGroup(title: tr("pick_up_where_you_left_off"), icon: "circle-pause") {
+                            VStack(spacing: 5) {
+                                ForEach(resumeEntries, id: \.episode.id) { entry in
+                                    resumeRow(entry, isSelected: isSelected(.resume(entry.target.id)))
+                                }
+                            }
                         }
                     }
                     if !captureEntries.isEmpty {
-                        sectionHead(tr("take_one_from_later"))
-                        ForEach(captureEntries) { capture in
-                            captureRow(capture, isSelected: isSelected(.capture(capture.id), in: all))
+                        sourceGroup(title: tr("take_one_from_later"), icon: "inbox") {
+                            VStack(spacing: 5) {
+                                ForEach(captureEntries) { capture in
+                                    captureRow(capture, isSelected: isSelected(.capture(capture.id)))
+                                }
+                            }
                         }
                     }
-                    if !newName.isEmpty {
-                        sectionHead(tr("start_a_new_one"))
-                        createRow(isSelected: isSelected(.create(newName), in: all))
-                    }
                 }
-                .padding(.horizontal, 8)
-                .padding(.bottom, 8)
+                .onGeometryChange(for: CGFloat.self) { proxy in
+                    proxy.size.height
+                } action: { height in
+                    listContentHeight = height
+                }
             }
-            .frame(maxHeight: 320)
+            .frame(height: min(max(listContentHeight, 1), Self.listMaxHeight))
+            .scrollIndicators(.never)
         }
     }
 
-    private func sectionHead(_ title: String) -> some View {
-        Text(title)
-            .font(LightAnchorTheme.labelFont(size: 10.5, weight: .semibold))
-            .tracking(0.4)
-            .foregroundStyle(LightAnchorTheme.faintInk)
-            .padding(.horizontal, 10)
-            .padding(.top, 8)
-            .padding(.bottom, 2)
+    // MARK: - 新开一件（与上面两组平级的常驻区块）
+
+    private var createGroup: some View {
+        sourceGroup(title: tr("start_a_new_one"), icon: "plus") {
+            VStack(alignment: .leading, spacing: 6) {
+                TextField(tr("e_g_organise_the_interview_notes"), text: $newWorkName)
+                    .textFieldStyle(LightAnchorTextFieldStyle())
+                    .font(LightAnchorTheme.interfaceFont(size: 13))
+                    .focused($fieldFocused)
+                    .onKeyPress(.downArrow) {
+                        moveSelection(by: 1)
+                        return .handled
+                    }
+                    .onKeyPress(.upArrow) {
+                        moveSelection(by: -1)
+                        return .handled
+                    }
+                    .onSubmit { confirmDefaultAction() }
+
+                // 环境和备注不进这张 sheet——换一件事是高频动作，中间不能有
+                // 表单。需要它们时从这里进完整的开始表单，名字带过去。
+                Button {
+                    onNewWorkDetails(newName)
+                } label: {
+                    Text(tr("start_with_details"))
+                        .font(LightAnchorTheme.supportingFont(size: 12))
+                        .foregroundStyle(LightAnchorTheme.mutedInk)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 4)
+                        .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .lightAnchorHoverFill(cornerRadius: 7)
+                .padding(.leading, -6)
+            }
+        }
     }
 
-    private func isSelected(_ candidate: SwitchCandidate, in all: [SwitchCandidate]) -> Bool {
-        all.firstIndex(of: candidate) == min(selectionIndex, max(0, all.count - 1))
-    }
+    // MARK: - 行
 
     private func resumeRow(
         _ entry: (target: AttentionTarget, episode: AttentionEpisode),
@@ -223,12 +259,12 @@ struct SwitchWorkPanel: View {
                     .foregroundStyle(LightAnchorTheme.faintInk)
                     .lineLimit(1)
             }
-            .padding(.horizontal, 10)
+            .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
-        .buttonStyle(WorkspaceSearchRowButtonStyle(isSelected: isSelected))
+        .buttonStyle(SwitchWorkRowButtonStyle(isSelected: isSelected))
     }
 
     private func resumeMeta(_ episode: AttentionEpisode) -> String {
@@ -257,72 +293,25 @@ struct SwitchWorkPanel: View {
                     .foregroundStyle(LightAnchorTheme.faintInk)
                     .lineLimit(1)
             }
-            .padding(.horizontal, 10)
+            .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
-        .buttonStyle(WorkspaceSearchRowButtonStyle(isSelected: isSelected))
-    }
-
-    private func createRow(isSelected: Bool) -> some View {
-        HStack(spacing: 8) {
-            Button {
-                activate(.create(newName))
-            } label: {
-                HStack(spacing: 10) {
-                    Circle()
-                        .fill(LightAnchorTheme.primary)
-                        .frame(width: 7, height: 7)
-                    Text(String(format: tr("start_x_now"), newName))
-                        .font(LightAnchorTheme.interfaceFont(size: 13, weight: .medium))
-                        .foregroundStyle(LightAnchorTheme.ink)
-                        .lineLimit(1)
-                    Spacer(minLength: 12)
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-            }
-            .buttonStyle(WorkspaceSearchRowButtonStyle(isSelected: isSelected))
-
-            // 环境和备注不进这个框——换一件事是高频动作，中间不能有表单。
-            // 需要它们的时候从这里进完整的开始表单，名字带过去。
-            Button(tr("more_settings")) {
-                onNewWorkDetails(newName)
-            }
-            .buttonStyle(LightAnchorQuietButtonStyle(compact: true))
-            .padding(.trailing, 6)
-        }
-    }
-
-    // MARK: - 页脚
-
-    private var footer: some View {
-        HStack(spacing: 14) {
-            footHint(key: "↑↓", label: tr("choose"))
-            footHint(key: "↩", label: tr("start"))
-            footHint(key: "esc", label: tr("close"))
-            Spacer()
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 9)
-        .background(LightAnchorTheme.windowBackground)
-    }
-
-    private func footHint(key: String, label: String) -> some View {
-        HStack(spacing: 5) {
-            Text(verbatim: key)
-                .font(LightAnchorTheme.monoFont(size: 10, weight: .semibold))
-                .foregroundStyle(LightAnchorTheme.mutedInk)
-            Text(label)
-                .font(LightAnchorTheme.supportingFont(size: 11))
-                .foregroundStyle(LightAnchorTheme.faintInk)
-        }
+        .buttonStyle(SwitchWorkRowButtonStyle(isSelected: isSelected))
     }
 
     // MARK: - 选择与执行
+
+    /// 回车 / 动作条「开始」的语义跟着字走：框里有名字就开始它，
+    /// 空着就开始 ↑↓ 选中的那条。
+    private func confirmDefaultAction() {
+        if !newName.isEmpty {
+            activate(.create(newName))
+        } else if !candidates.isEmpty {
+            activate(candidates[min(selectionIndex, candidates.count - 1)])
+        }
+    }
 
     private func moveSelection(by offset: Int) {
         let count = candidates.count
@@ -345,13 +334,6 @@ struct SwitchWorkPanel: View {
     }
 
     private func activate(_ candidate: SwitchCandidate) {
-        // 先记下手上那件是谁：切换成功之后它已经变成 paused，问不出「刚才是谁」。
-        let previous = workspace.currentEpisode
-        let previousName = previous
-            .flatMap { workspace.snapshot.targets[$0.targetID]?.name }
-        let previousTargetID = previous?.targetID
-        let wasHeld = previous.map { $0.state != .paused && $0.state != .ended } ?? false
-
         let switchedTargetID: UUID?
         switch candidate {
         case .resume(let targetID):
@@ -359,24 +341,52 @@ struct SwitchWorkPanel: View {
         case .capture(let captureID):
             switchedTargetID = workspace.createTargetFromCapture(captureID)?.id
         case .create(let name):
+            guard !name.isEmpty else { return }
             switchedTargetID = workspace.createTarget(name: name)
                 .flatMap { workspace.startEpisode(targetID: $0.id)?.targetID }
         }
-        guard let switchedTargetID else { return }
-
-        // 只有真的换走了才报「已放下」：接着做手上那件时什么也没被放下。
-        if wasHeld, let previousName, previousTargetID != switchedTargetID {
-            workspace.presentNotice(
-                String(format: tr("set_aside_x_and_recorded_the"), previousName)
-            )
-        }
+        guard switchedTargetID != nil else { return }
+        // 「已放下 + 现场存了什么」由随后的确认弹窗承接（RecentSetAsideSheet）。
         onSwitched()
     }
 }
 
-/// 面板里一行代表的东西。三种来源共用一个 ↑↓ 序列，所以要能互相比较。
+/// sheet 里一行代表的东西。几种来源共用一个 ↑↓ 序列，所以要能互相比较。
 private enum SwitchCandidate: Equatable {
     case resume(UUID)
     case capture(UUID)
     case create(String)
+}
+
+/// 凹陷分组里的白面行（现场卡语言）：白底圆角 + 发丝描边，
+/// 键盘选中转宜蓝水洗 + 蓝描边，悬停提亮。
+private struct SwitchWorkRowButtonStyle: ButtonStyle {
+    var isSelected = false
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isHovered = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(
+                isSelected
+                    ? LightAnchorTheme.accentWash
+                    : (isHovered ? LightAnchorTheme.elevatedSurface : LightAnchorTheme.surface),
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(
+                        isSelected
+                            ? LightAnchorTheme.accentInk.opacity(0.35)
+                            : LightAnchorTheme.hairlineBorder.opacity(0.7),
+                        lineWidth: 1
+                    )
+            }
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.99 : 1)
+            .opacity(configuration.isPressed ? 0.88 : 1)
+            .onHover { isHovered = $0 }
+            .animation(.easeOut(duration: 0.15), value: isHovered)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: configuration.isPressed)
+    }
 }

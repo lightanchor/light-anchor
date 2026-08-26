@@ -101,10 +101,21 @@ struct SceneCardView: View {
                 filterButton
             }
 
-            // 现场条目列表
+            // 刚放下这件事时，现场卡自己说一句「已保存」——反馈就落在
+            // 用户正看着的这份清单上（换到别件事的场合走「已放下」确认卡）。
+            if workspace.recentSetAside?.snapshotID == snapshot.id {
+                Text(tr("scene_saved_note"))
+                    .font(LightAnchorTheme.supportingFont(size: 12))
+                    .foregroundStyle(LightAnchorTheme.accentInk)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            // 现场条目列表：条目由用户做主，不需要的直接剔掉。
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(snapshot.restorableItems) { item in
-                    SceneItemRow(item: item)
+                    SceneItemRow(item: item, onRemove: {
+                        _ = workspace.removeSceneItem(snapshot.id, itemID: item.id)
+                    })
                 }
             }
 
@@ -371,25 +382,27 @@ struct SceneCardView: View {
 
 // MARK: - 剪贴板与截图行（现场卡片和重返面板共用）
 
-/// 采集瞬间的剪贴板内容：显示前两行，一键放回系统剪贴板。
+/// 采集瞬间的剪贴板内容：与条目行同一副行体——图标瓦片垂直居中、
+/// 内容做主行、「当时的剪贴板」做出处小字，混在同一列里不另起一套构图。
+/// 全文进 tooltip，一键放回系统剪贴板。
 struct SceneClipboardRow: View {
     let text: String
     @State private var justCopied = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            LightAnchorIcon("clipboard", size: 15)
-                .foregroundStyle(LightAnchorTheme.mutedInk)
+        HStack(spacing: 10) {
+            SceneGlyphTile(name: "clipboard")
                 .frame(width: 20)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(tr("clipboard_at_the_time"))
-                    .font(LightAnchorTheme.supportingFont(size: 11, weight: .semibold))
-                    .foregroundStyle(LightAnchorTheme.mutedInk)
+            VStack(alignment: .leading, spacing: 1) {
                 Text(text)
-                    .font(LightAnchorTheme.bodyFont(size: 12))
+                    .font(LightAnchorTheme.bodyFont(size: 13, weight: .medium))
                     .foregroundStyle(LightAnchorTheme.ink)
-                    .lineLimit(2)
+                    .lineLimit(1)
+                    .help(text)
                     .textSelection(.enabled)
+                Text(tr("clipboard_at_the_time"))
+                    .font(LightAnchorTheme.supportingFont(size: 11))
+                    .foregroundStyle(LightAnchorTheme.faintInk)
             }
             Spacer(minLength: 10)
             Button(justCopied ? tr("put_back") : tr("put_back_on_clipboard")) {
@@ -405,7 +418,7 @@ struct SceneClipboardRow: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(LightAnchorTheme.surface)
+        .background(LightAnchorTheme.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 
@@ -451,7 +464,7 @@ struct SceneScreenshotRow: View {
             .buttonStyle(.plain)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(LightAnchorTheme.surface)
+            .background(LightAnchorTheme.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .accessibilityLabel(tr("view_the_desktop_screenshot_from_when"))
         }
         #endif
@@ -464,11 +477,12 @@ struct SceneItemRow: View {
     let item: SceneItem
     var isTucked: Bool = false
     var onAddBack: (() -> Void)? = nil
+    /// 手动剔除（现场卡 / 「已放下」确认卡）：现场里不需要的条目由用户删。
+    var onRemove: (() -> Void)? = nil
 
     var body: some View {
         HStack(spacing: 10) {
-            LightAnchorIcon(item.kind.iconName, size: 15)
-                .foregroundStyle(isTucked ? LightAnchorTheme.faintInk : LightAnchorTheme.mutedInk)
+            SceneItemIconView(item: item, isTucked: isTucked)
                 .frame(width: 20)
 
             VStack(alignment: .leading, spacing: 1) {
@@ -509,12 +523,272 @@ struct SceneItemRow: View {
                 .help(tr("add_back_to_scene"))
                 .accessibilityLabel(tr("add_back_to_scene"))
             }
+
+            if let onRemove {
+                Button {
+                    onRemove()
+                } label: {
+                    LightAnchorIcon("x", size: 13)
+                }
+                .buttonStyle(LightAnchorInlineButtonStyle())
+                .help(tr("remove_from_scene"))
+                .accessibilityLabel(tr("remove_from_scene"))
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(isTucked ? LightAnchorThemeColor.clear : LightAnchorTheme.surface)
+        // 白面行也要说圆角语言：直角白条在米灰卡里是全应用唯一的方角，扎眼。
+        .background(
+            isTucked ? LightAnchorThemeColor.clear : LightAnchorTheme.surface,
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+        )
     }
 }
+
+// MARK: - 「已放下」确认弹窗
+
+/// 放下一件事（暂时放下 / 换一件事）后的确认 sheet（用户定：要弹窗形式）。
+/// 内容按「放下这一刻要什么」组织：这段专注了多久（收个尾）、趁记忆
+/// 还热写下「回来先看」、现场存了什么（条目可逐条剔除）。
+struct RecentSetAsideSheet: View {
+    @EnvironmentObject private var workspace: AttentionWorkspace
+    @Environment(\.dismiss) private var dismiss
+    let info: AttentionWorkspace.RecentSetAside
+
+    @State private var cueDraft = ""
+    /// 打开时现场里已有的「回来先看」（AI 草拟或早先写的）：没改就不写回。
+    @State private var loadedCue = ""
+    /// 弹窗的正事就是趁记忆热写这句话：打开即聚焦，写完回车就是「知道了」。
+    @FocusState private var cueFocused: Bool
+
+    private var sceneSnapshot: SceneSnapshot? {
+        workspace.snapshot.sceneSnapshots[info.snapshotID]
+    }
+
+    /// 这段的专注时长：快照记着产生它的工作段；旧数据没有段号就不硬凑。
+    private var focusLabel: String? {
+        guard let episodeID = sceneSnapshot?.episodeID else { return nil }
+        let minutes = workspace.snapshot.focusMinutes(of: episodeID)
+        guard minutes > 0 else { return nil }
+        return UserFacingCopy.focusDuration(minutes)
+    }
+
+    private var subtitle: String {
+        if let focusLabel {
+            return String(format: tr("set_aside_sheet_meta"), focusLabel)
+        }
+        return tr("set_aside_sheet_meta_no_duration")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            LightAnchorSheetHeader(
+                eyebrow: tr("set_aside"),
+                title: String(format: tr("set_aside_sheet_title"), info.targetName),
+                subtitle: subtitle,
+                icon: "circle-check"
+            )
+
+            // 回来先看：放下的这一刻记忆最热，是写这句话的唯一好时机——
+            // 回来时它就是重返面板的第一行。
+            VStack(alignment: .leading, spacing: 6) {
+                sheetSectionLabel(tr("look_at_this_first"))
+                TextField(tr("what_to_look_at_first_2"), text: $cueDraft)
+                    .textFieldStyle(LightAnchorTextFieldStyle())
+                    .focused($cueFocused)
+            }
+
+            if let snapshot = sceneSnapshot {
+                VStack(alignment: .leading, spacing: 6) {
+                    sheetSectionLabel(tr("scene"))
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(snapshot.restorableItems) { item in
+                                SceneItemRow(item: item, onRemove: {
+                                    _ = workspace.removeSceneItem(snapshot.id, itemID: item.id)
+                                })
+                            }
+                            if !snapshot.clipboardText.isEmpty {
+                                SceneClipboardRow(text: snapshot.clipboardText)
+                            }
+                        }
+                        .lightAnchorRecessed(radius: 14, padding: 13)
+                        .padding(.vertical, 1)
+                    }
+                    // 300 恰好放下五行（应用/文件/链接若干 + 剪贴板）不裁行；
+                    // 更多条目时从整行边界起卷。
+                    .frame(maxHeight: 300)
+                    .scrollIndicators(.never)
+                }
+            }
+
+            LightAnchorSheetActionBar {
+                Button(tr("got_it")) {
+                    commitCue()
+                    dismiss()
+                }
+                .buttonStyle(LightAnchorPrimaryButtonStyle())
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(24)
+        .frame(width: 480)
+        .onAppear {
+            let cue = sceneSnapshot?.returnCue ?? ""
+            cueDraft = cue
+            loadedCue = cue
+            cueFocused = true
+        }
+        // Esc / 点外面关掉也不丢刚写的话。
+        .onDisappear(perform: commitCue)
+    }
+
+    private func sheetSectionLabel(_ title: String) -> some View {
+        Text(title)
+            .font(LightAnchorTheme.supportingFont(size: 11, weight: .semibold))
+            .foregroundStyle(LightAnchorTheme.mutedInk)
+    }
+
+    private func commitCue() {
+        let trimmed = cueDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed != loadedCue else { return }
+        guard let snapshot = sceneSnapshot else { return }
+        _ = workspace.updateSceneReturnCue(snapshot.id, returnCue: trimmed)
+        // 段上的「回来先看」与现场快照是同一句话的两个落点，一起更新。
+        if let episodeID = snapshot.episodeID,
+           let episode = workspace.snapshot.episodes[episodeID] {
+            _ = workspace.updateContext(for: episodeID, context: episode.context, returnCue: trimmed)
+        }
+        loadedCue = trimmed
+    }
+}
+
+// MARK: - 现场条目图标
+
+/// 线框图标坐进 17pt 圆角瓦片：与真实应用图标同一个剪影和尺寸，
+/// 混排在同一列里天然对齐（裸线框和实心应用图标怎么调字号都对不齐）。
+struct SceneGlyphTile: View {
+    let name: String
+    var dimmed: Bool = false
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 4.5, style: .continuous)
+                .fill(LightAnchorTheme.recessed)
+            RoundedRectangle(cornerRadius: 4.5, style: .continuous)
+                .strokeBorder(LightAnchorTheme.hairlineBorder, lineWidth: 1)
+            LightAnchorIcon(name, size: 11)
+                .foregroundStyle(dimmed ? LightAnchorTheme.faintInk : LightAnchorTheme.mutedInk)
+        }
+        .frame(width: 17, height: 17)
+        .accessibilityHidden(true)
+    }
+}
+
+/// 现场条目的图标：能认出真实来源就用系统里的真图标——应用条目直接是
+/// 应用图标，终端/网页跟来源应用走，文件用文件本身的图标；认不出（应用
+/// 已卸载、演示数据等）退回同尺寸的线框瓦片。
+private struct SceneItemIconView: View {
+    let item: SceneItem
+    var isTucked: Bool = false
+
+    var body: some View {
+        #if os(macOS)
+        if let image = SceneItemIconResolver.icon(for: item) {
+            // 17pt：应用图标自带内边距，画到 17 视觉上才和瓦片同一量级。
+            Image(nsImage: image)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 17, height: 17)
+                .saturation(isTucked ? 0 : 1)
+                .opacity(isTucked ? 0.55 : 1)
+                .accessibilityHidden(true)
+        } else {
+            SceneGlyphTile(name: item.kind.iconName, dimmed: isTucked)
+        }
+        #else
+        SceneGlyphTile(name: item.kind.iconName, dimmed: isTucked)
+        #endif
+    }
+}
+
+#if os(macOS)
+/// 只在主线程的视图渲染路径里被调用，缓存也就锚在 MainActor 上。
+@MainActor
+enum SceneItemIconResolver {
+    /// 每分钟的 TimelineView 重渲染会反复走到这里，查一次记一次；
+    /// NSCache 自己管内存压力下的淘汰。
+    private static let cache = NSCache<NSString, NSImage>()
+    /// 查过且没查到的键也要记住，否则每帧都去扫 runningApplications。
+    private static var misses = Set<String>()
+
+    static func icon(for item: SceneItem) -> NSImage? {
+        let key = "\(item.kind.rawValue)|\(item.address)|\(item.sourceApplication)"
+        if let hit = cache.object(forKey: key as NSString) { return hit }
+        if misses.contains(key) { return nil }
+        guard let image = resolve(item) else {
+            misses.insert(key)
+            return nil
+        }
+        cache.setObject(image, forKey: key as NSString)
+        return image
+    }
+
+    private static func resolve(_ item: SceneItem) -> NSImage? {
+        let workspace = NSWorkspace.shared
+        switch item.kind {
+        case .application:
+            if let url = workspace.urlForApplication(withBundleIdentifier: item.address) {
+                return workspace.icon(forFile: url.path)
+            }
+            return appIcon(named: item.sourceApplication)
+        case .terminal:
+            return appIcon(named: item.sourceApplication)
+        case .file:
+            if let url = fileURL(from: item.address),
+               FileManager.default.fileExists(atPath: url.path) {
+                return workspace.icon(forFile: url.path)
+            }
+            return appIcon(named: item.sourceApplication)
+        case .link:
+            if let icon = appIcon(named: item.sourceApplication) { return icon }
+            // 来源浏览器认不出时退而求其次：这个网址的默认打开方。
+            if let url = URL(string: item.address),
+               let handler = workspace.urlForApplication(toOpen: url) {
+                return workspace.icon(forFile: handler.path)
+            }
+            return nil
+        }
+    }
+
+    private static func fileURL(from address: String) -> URL? {
+        if address.hasPrefix("file://") { return URL(string: address) }
+        if address.hasPrefix("/") { return URL(fileURLWithPath: address) }
+        return nil
+    }
+
+    /// 按来源应用名找图标：先在正在运行的应用里找（现场条目的来源多半
+    /// 还开着，且 localizedName 与采集时记下的名字同源），退出了再去
+    /// 常见安装位置按 .app 名兜底。
+    private static func appIcon(named name: String) -> NSImage? {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+        if let app = NSWorkspace.shared.runningApplications.first(where: {
+            $0.localizedName?.caseInsensitiveCompare(trimmed) == .orderedSame
+        }) {
+            return app.icon
+        }
+        for directory in ["/Applications", "/System/Applications", "/System/Applications/Utilities",
+                          "\(NSHomeDirectory())/Applications"] {
+            let path = "\(directory)/\(trimmed).app"
+            if FileManager.default.fileExists(atPath: path) {
+                return NSWorkspace.shared.icon(forFile: path)
+            }
+        }
+        return nil
+    }
+}
+#endif
 
 // MARK: - 筛选模式切换
 

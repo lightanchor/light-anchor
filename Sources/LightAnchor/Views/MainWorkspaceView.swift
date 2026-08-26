@@ -36,22 +36,29 @@ struct MainWorkspaceView: View {
     @State private var reviewingTargetID: UUID?
     @FocusState private var workspaceSearchFieldFocused: Bool
     @Namespace private var sidebarDotNamespace
-    /// 「收进蓝点」：侧栏沉入呼吸蓝点，蓝点带着当前任务浮到窗顶红绿灯旁（重启保持）。
+    /// 「收进蓝点」：侧栏沉入呼吸蓝点，当前任务显示在窗顶红绿灯旁（重启保持）。
     @AppStorage("workspace.sidebarAnchored") private var sidebarAnchored = false
     @State private var hoveringAnchorPlate = false
-    @Namespace private var anchorDotNamespace
-    /// 蓝点当前坐在哪个座位。和 sidebarAnchored 分开是为了让「飞」只发生在
-    /// 收起那一程：展开时先无动画把座位交还侧栏底，蓝点就地出现，不再横穿
-    /// 整扇窗往下坠。启动时（@AppStorage 记住了收起态）在 onAppear 里对齐。
-    @State private var dotSeatAnchored = false
-    /// 侧栏进出的这半秒。内容岛的宽度在逐帧变化，AppKit 每次文档尺寸变化
-    /// 都会闪一下覆盖式滚动条——一次收起要闪二三十回，看着就是「抖几下」。
-    /// 飞行期间把滚动条指示器收起来，落地后再交还给系统。
-    @State private var sidebarFlightInProgress = false
-    @State private var sidebarFlightToken = 0
 
     private var activeDestination: WorkspaceDestination {
         selectedDestination ?? WorkspaceDestination(rawValue: destinationRawValue) ?? .now
+    }
+
+    /// 「已放下」确认弹窗的开关：暂时放下、换一件事都会弹（放下的事
+    /// 不再占「现在」页）；等待结果不弹——那件事还在现在页，现场卡
+    /// 原地说「已保存」。关掉即视为用户已确认。
+    private var recentSetAsideSheetItem: Binding<AttentionWorkspace.RecentSetAside?> {
+        Binding(
+            get: {
+                guard let aside = workspace.recentSetAside,
+                      aside.targetID != workspace.currentEpisode?.targetID
+                else { return nil }
+                return aside
+            },
+            set: { value in
+                if value == nil { workspace.dismissRecentSetAside() }
+            }
+        )
     }
 
     /// 弹簧蓝点滑动（样机 .side-dot：transform .5s cubic-bezier(.3,1.7,.4,1)）。
@@ -65,76 +72,22 @@ struct MainWorkspaceView: View {
         reduceMotion ? nil : .timingCurve(0.3, 1.3, 0.4, 1, duration: 0.45)
     }
 
-    /// 「收进蓝点」的飞行：蓝点在侧栏底与窗顶铭牌之间用弹簧点曲线飞；
-    /// 岛的涨潮走 dockAnimation，轻的东西活泼、重的东西沉稳。
-    private var anchorFlightAnimation: Animation? {
-        reduceMotion ? nil : .timingCurve(0.3, 1.7, 0.4, 1, duration: 0.5)
+    /// 侧栏收展与舞台镶边的推拉曲线：干净的 ease-out、不回弹——
+    /// 宽度收拢式的动画回弹会变成负宽度/挤压岛，观感是抖。
+    private var anchorAnimation: Animation? {
+        reduceMotion ? nil : .timingCurve(0.3, 1, 0.4, 1, duration: 0.38)
     }
 
     /// 收进蓝点 / 放出侧栏的唯一入口——三个触发点（⌃⌘S、岛工具行的钮、
-    /// 窗顶铭牌）都走这里，好让座位交接和滚动条静默只写一遍。
+    /// 窗顶铭牌）都走这里。侧栏走经典 macOS 分栏收拢（宽度归零、内容随
+    /// 右缘滑出被裁掉），与现场舱的推拉是两种性格，各自干净。
     private func setSidebarAnchored(_ anchored: Bool) {
         guard anchored != sidebarAnchored else { return }
-        guard !reduceMotion else {
-            // 全静态：座位和侧栏一起瞬时切换，没有飞行也就没有要压的抖动。
-            dotSeatAnchored = anchored
-            sidebarAnchored = anchored
-            return
-        }
-        if anchored {
-            // 收起：蓝点带着当前任务从侧栏底飞上窗顶铭牌（原定稿的那一程）。
-            withAnimation(anchorFlightAnimation) {
-                dotSeatAnchored = true
-                sidebarAnchored = true
-            }
-        } else {
-            // 展开：座位先无动画回到侧栏底，蓝点原地落座；铭牌只管淡出。
-            var instant = Transaction()
-            instant.disablesAnimations = true
-            withTransaction(instant) { dotSeatAnchored = false }
-            withAnimation(anchorFlightAnimation) { sidebarAnchored = false }
-        }
-        beginSidebarFlight()
+        withAnimation(anchorAnimation) { sidebarAnchored = anchored }
     }
 
     private func toggleSidebarAnchored() {
         setSidebarAnchored(!sidebarAnchored)
-    }
-
-    /// 标记「岛正在改宽度」，到点自动解除。中途再次切换时用令牌作废上一轮，
-    /// 免得后一程的滚动条被前一程的计时器提前放出来。
-    private func beginSidebarFlight() {
-        sidebarFlightToken += 1
-        let token = sidebarFlightToken
-        sidebarFlightInProgress = true
-        Task { @MainActor in
-            // 岛的涨潮是 dockAnimation 的 0.45s，留一点余量再交还滚动条。
-            try? await Task.sleep(nanoseconds: 520_000_000)
-            guard sidebarFlightToken == token else { return }
-            sidebarFlightInProgress = false
-        }
-    }
-
-    /// 侧栏沉没编排：自上而下每行差 22ms，淡出并向左下轻坠；浮回同序。
-    private func sinkAnimation(order: Int) -> Animation? {
-        reduceMotion
-            ? nil
-            : .easeOut(duration: 0.28).delay(Double(order) * 0.022)
-    }
-
-    /// 给侧栏的一段内容套上沉没编排。蓝点不在此列——它是飞去窗顶的那一个。
-    /// reduceMotion 下只留透明度的瞬时切换，不做坠落位移。
-    private func sunkWhenAnchored<Content: View>(
-        order: Int,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        content()
-            .opacity(sidebarAnchored ? 0 : 1)
-            .offset(
-                x: sidebarAnchored && !reduceMotion ? -10 : 0,
-                y: sidebarAnchored && !reduceMotion ? 8 : 0
-            )
-            .animation(sinkAnimation(order: order), value: sidebarAnchored)
     }
 
     /// 当前可展示在蓝点铭牌/侧栏底部的进行中工作。
@@ -146,30 +99,41 @@ struct MainWorkspaceView: View {
 
     /// 样机 .win：固定 226pt 宽侧栏 + 内容舞台的双栏。不用
     /// NavigationSplitView——它自带的分栏线和拖拽柄样机里都没有。
-    /// 「收进蓝点」时叠放起作用：侧栏原地沉没，内容岛（自带米白底）
-    /// 涨潮漫到左缘盖住它，窗顶只留呼吸带（红绿灯 + 蓝点铭牌）。
+    /// 「收进蓝点」= 经典 macOS 分栏收拢：侧栏宽度收到 0，内容钉在
+    /// 右缘随收拢滑出、被裁掉。侧栏是常驻成员而不是条件成员——
+    /// 成员进出的 transition 在现场舱开着时会被布局吞掉（收展直接瞬变），
+    /// 常驻 + 宽度动画在任何组合下都稳定。alignment .top：默认的垂直
+    /// 居中会因内容岛的负上边距把侧栏往下挤出一截空白。
     private var workspaceShell: some View {
-        ZStack(alignment: .topLeading) {
+        HStack(alignment: .top, spacing: 0) {
             workspaceSidebar
-                .frame(width: LightAnchorDesign.sidebarWidth)
+                .frame(width: LightAnchorDesign.sidebarWidth, alignment: .leading)
+                .frame(
+                    width: sidebarAnchored ? 0 : LightAnchorDesign.sidebarWidth,
+                    alignment: .trailing
+                )
+                .clipped()
+                // 动画必须钉在值上，不能只靠 setSidebarAnchored 的 withAnimation：
+                // 现场舱开着时那个环境事务到不了这棵子树（帧拍实证：关舱收展有
+                // 中间帧，开舱 237→11 瞬变）。按值驱动在任何组合下都稳定。
+                .animation(anchorAnimation, value: sidebarAnchored)
                 .allowsHitTesting(!sidebarAnchored)
                 .accessibilityHidden(sidebarAnchored)
             workspaceDetail
-                .padding(.leading, sidebarAnchored ? 0 : LightAnchorDesign.sidebarWidth)
-                .animation(dockAnimation, value: sidebarAnchored)
         }
         .overlay(alignment: .topLeading) { anchorStripControls }
-        .overlay(alignment: .topLeading) { anchorFlyingDot }
         // 要求 2「无灰条」：标题栏区域的工具栏/材质底一律隐掉，
         // 暖米白直通窗顶；标题文字也不要（样机窗顶没有任何文字）。
         .navigationTitle("")
         .toolbarBackground(.hidden, for: .windowToolbar)
+        // topLeading 而不是 top：万一哪页内容超宽，溢出只向右越界，
+        // 不会把整窗内容（连侧栏一起）水平居中挤偏。
         .frame(
             minWidth: 980,
             maxWidth: .infinity,
             minHeight: 640,
             maxHeight: .infinity,
-            alignment: .top
+            alignment: .topLeading
         )
         .background(LightAnchorTheme.sidebarBackground)
         .background(LightAnchorWindowConfigurator(chrome: .workspace))
@@ -195,9 +159,6 @@ struct MainWorkspaceView: View {
                 sidebarAnchored = anchored == "1"
             }
             #endif
-            // @AppStorage 记住的收起态要把座位一起摆好，否则启动即收起时
-            // 蓝点会坐在空的侧栏底座上。
-            dotSeatAnchored = sidebarAnchored
             #if DEBUG
             switch ProcessInfo.processInfo.environment["LIGHTANCHOR_DEBUG_OPEN"] {
             case "capture": openCaptureWindow()
@@ -206,6 +167,12 @@ struct MainWorkspaceView: View {
             case "inspector": inspectorSceneValue = true
             case "menubar": openMenuBarPreviewPanel()
             case "waiting-editor": showWaitingEditor()
+            case "switch": showingSwitchWork = true
+            // 「已放下」确认弹窗：放下当前这件、用它已有的现场快照亮出弹窗。
+            case "set-aside":
+                if let episode = workspace.currentEpisode {
+                    workspace.debugAnnounceSetAside(of: episode.id)
+                }
             default: break
             }
             #endif
@@ -227,7 +194,7 @@ struct MainWorkspaceView: View {
                 .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: [.command])
                 .hidden()
             }
-            Button(tr("switch_to_something_else"), action: openSwitchWork)
+            Button(tr("switch_to_something_else"), action: toggleSwitchWork)
                 .keyboardShortcut("k", modifiers: [.command])
                 .hidden()
         }
@@ -249,6 +216,32 @@ struct MainWorkspaceView: View {
         }
         .sheet(isPresented: $showingStartWork) {
             StartWorkView(initialName: startWorkInitialName)
+                .environmentObject(workspace)
+        }
+        .sheet(isPresented: $showingSwitchWork) {
+            SwitchWorkSheet(
+                onSwitched: {
+                    showingSwitchWork = false
+                    // 换过去之后要看到的是那件事本身，不是刚才的回顾页。
+                    reviewingTargetID = nil
+                    selectedSearchResult = nil
+                    withAnimation(sideDotAnimation) {
+                        selectedDestination = .now
+                    }
+                },
+                onNewWorkDetails: { name in
+                    showingSwitchWork = false
+                    startWorkInitialName = name
+                    showingStartWork = true
+                }
+            )
+            .environmentObject(workspace)
+        }
+        // 「已放下」确认弹窗：暂时放下 / 换一件事、现场存好后弹出——这段
+        // 专注了多久、保存了什么摆在眼前，趁记忆还热写下「回来先看」，
+        // 条目可逐条剔除。等待结果不弹（那件事还在现在页，现场卡原地说已保存）。
+        .sheet(item: recentSetAsideSheetItem) { info in
+            RecentSetAsideSheet(info: info)
                 .environmentObject(workspace)
         }
         .sheet(item: $waitingEditorContext) { context in
@@ -298,19 +291,15 @@ struct MainWorkspaceView: View {
     private var workspaceSidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
             // 样机 .snav：六行连排（gap 2），组间不画分隔线。
-            sidebarGroup(title: tr("attention"), destinations: attentionDestinations, firstOrder: 0)
+            sidebarGroup(title: tr("attention"), destinations: attentionDestinations)
                 .padding(.bottom, 2)
-            sidebarGroup(
-                title: tr("workbench"),
-                destinations: toolDestinations,
-                firstOrder: attentionDestinations.count
-            )
+            sidebarGroup(title: tr("workbench"), destinations: toolDestinations)
 
-            sunkWhenAnchored(order: 5) { sidebarRecentSection }
+            sidebarRecentSection
 
             Spacer(minLength: 12)
 
-            sunkWhenAnchored(order: 6) { sidebarStatusFooter }
+            sidebarStatusFooter
         }
         // 样机 .side：padding 16 14 14。
         .padding(.horizontal, 14)
@@ -325,15 +314,12 @@ struct MainWorkspaceView: View {
     @ViewBuilder
     private func sidebarGroup(
         title: String,
-        destinations: [WorkspaceDestination],
-        firstOrder: Int
+        destinations: [WorkspaceDestination]
     ) -> some View {
         // 组名只服务旁白：视觉上按 V7 只用一条发丝线分隔两组。
         VStack(alignment: .leading, spacing: 2) {
-            ForEach(Array(destinations.enumerated()), id: \.element) { index, destination in
-                sunkWhenAnchored(order: firstOrder + index) {
-                    workspaceNavigationRow(destination)
-                }
+            ForEach(destinations, id: \.self) { destination in
+                workspaceNavigationRow(destination)
             }
         }
         .accessibilityElement(children: .contain)
@@ -558,8 +544,8 @@ struct MainWorkspaceView: View {
     }
 
     /// 侧栏底部常驻当前状态：呼吸点 + 任务名 + 已持续时长。
-    /// 呼吸点本体是窗级的 anchorFlyingDot，这里只放它的「座位」——
-    /// 收进蓝点时座位换到窗顶铭牌，点就飞过去。
+    /// 呼吸点铭牌与侧栏底各画各的——原「飞行交接」被否：用户不要蓝点
+    /// 横穿窗口，且座位交接的无动画事务曾把整个展开动画一并吞掉。
     @ViewBuilder
     private var sidebarStatusFooter: some View {
         if let entry = currentAnchorEntry {
@@ -571,17 +557,7 @@ struct MainWorkspaceView: View {
                 }
             } label: {
                 HStack(spacing: 9) {
-                    if dotSeatAnchored {
-                        Color.clear.frame(width: 20, height: 20)
-                    } else {
-                        Color.clear
-                            .frame(width: 20, height: 20)
-                            .matchedGeometryEffect(
-                                id: "anchor-dot-seat",
-                                in: anchorDotNamespace,
-                                isSource: true
-                            )
-                    }
+                    anchorStatusDot
                     VStack(alignment: .leading, spacing: 1) {
                         Text(target.name)
                             .font(LightAnchorTheme.interfaceFont(size: 12.5, weight: .semibold))
@@ -625,25 +601,15 @@ struct MainWorkspaceView: View {
         }
     }
 
-    /// 蓝点铭牌：收起后窗顶仅存的东西——蓝点座位 + 当前任务名 + 已专注时长。
-    /// 点击即退潮展开；文字晚 0.28s 淡入，让位给蓝点的飞行。
+    /// 蓝点铭牌：收起后窗顶仅存的东西——呼吸点 + 当前任务名 + 已专注时长。
+    /// 点击即退潮展开；随侧栏收起小幅延迟淡入，不与推拉动画抢戏。
     private var anchorPlate: some View {
         Button {
             setSidebarAnchored(false)
         } label: {
-            // 座位 20 宽自带 6pt 空气，间距给 0，文字正好落在样机的 x=98。
+            // 点位 20 宽自带 6pt 空气，间距给 0，文字正好落在样机的 x=98。
             HStack(spacing: 0) {
-                if dotSeatAnchored {
-                    Color.clear
-                        .frame(width: 20, height: 20)
-                        .matchedGeometryEffect(
-                            id: "anchor-dot-seat",
-                            in: anchorDotNamespace,
-                            isSource: true
-                        )
-                } else {
-                    Color.clear.frame(width: 20, height: 20)
-                }
+                anchorStatusDot
                 if let entry = currentAnchorEntry {
                     Text(entry.target.name)
                         .font(LightAnchorTheme.interfaceFont(size: 12.5, weight: .semibold))
@@ -691,39 +657,42 @@ struct MainWorkspaceView: View {
         )
         .transition(.asymmetric(
             insertion: .opacity.animation(
-                reduceMotion ? .easeOut(duration: 0.12) : .easeOut(duration: 0.25).delay(0.28)
+                reduceMotion ? .easeOut(duration: 0.12) : .easeOut(duration: 0.22).delay(0.15)
             ),
             removal: .opacity.animation(.easeOut(duration: 0.12))
         ))
     }
 
-    /// 呼吸蓝点本体：常驻窗级、永不熄灭，跟随「座位」在侧栏底部与
-    /// 窗顶铭牌之间飞行（matchedGeometryEffect 的跟随端）。
-    @ViewBuilder
-    private var anchorFlyingDot: some View {
-        if dotSeatAnchored || currentAnchorEntry != nil {
-            Group {
-                if let entry = currentAnchorEntry {
-                    LightAnchorStatusDot(entry.episode.state, size: 8)
-                } else {
-                    // 收起且无进行中的事：静息灰点压阵。
-                    LightAnchorStatusDot(LightAnchorStatusDotForm.ended, size: 8)
-                }
+    /// 呼吸蓝点：铭牌与侧栏底各画各的，20×20 点位与图标列对齐。
+    private var anchorStatusDot: some View {
+        Group {
+            if let entry = currentAnchorEntry {
+                LightAnchorStatusDot(entry.episode.state, size: 8)
+            } else {
+                // 无进行中的事：静息灰点压阵。
+                LightAnchorStatusDot(LightAnchorStatusDotForm.ended, size: 8)
             }
-            .matchedGeometryEffect(
-                id: "anchor-dot-seat",
-                in: anchorDotNamespace,
-                isSource: false
-            )
-            .allowsHitTesting(false)
         }
+        .frame(width: 20, height: 20)
+        .allowsHitTesting(false)
+    }
+
+    /// 两边都收起（侧栏收进蓝点、现场舱关闭）时岛铺满整窗：舞台底转岛色、
+    /// 发丝描边和四周留缝一并退场——只剩一块内容面，不再有「岛浮在底上」的边缘区分。
+    private var stageChromeHidden: Bool {
+        sidebarAnchored && !showingInspector
     }
 
     private var workspaceDetail: some View {
         ZStack(alignment: .top) {
             // 舞台底与侧栏同色，内容住在浅一档的奶油白圆角岛上（V7 内容岛）。
             Rectangle()
-                .fill(LightAnchorTheme.sidebarBackground)
+                .fill(
+                    stageChromeHidden
+                        ? LightAnchorTheme.windowBackground
+                        : LightAnchorTheme.sidebarBackground
+                )
+                .animation(anchorAnimation, value: stageChromeHidden)
             HStack(spacing: 10) {
                 VStack(spacing: 0) {
                     // 工具行住在内容岛里（样机 .toolbar：48 高、靠右三键），
@@ -742,7 +711,10 @@ struct MainWorkspaceView: View {
                 )
                 .overlay {
                     RoundedRectangle(cornerRadius: LightAnchorDesign.radiusCard, style: .continuous)
-                        .strokeBorder(LightAnchorTheme.sidebarHairline, lineWidth: 1)
+                        .strokeBorder(
+                            LightAnchorTheme.sidebarHairline.opacity(stageChromeHidden ? 0 : 1),
+                            lineWidth: 1
+                        )
                 }
 
                 // 现场舱（样机 .dock）：内容岛旁的第二座圆角岛，推拉进出。
@@ -773,57 +745,43 @@ struct MainWorkspaceView: View {
                 }
             }
             // 样机：内容岛四周留 10 的缝，直通窗顶（不给隐藏标题栏留安全区）。
-            // 收进蓝点时岛漫到左缘，顶部让出米白呼吸带给红绿灯和蓝点铭牌。
-            .padding([.horizontal, .bottom], 10)
+            // 收进蓝点时岛漫到左缘，顶部让出米白呼吸带给红绿灯和蓝点铭牌；
+            // 两边都收起时缝也归零，岛直接铺满整窗。
+            .padding([.horizontal, .bottom], stageChromeHidden ? 0 : 10)
             .padding(.top, sidebarAnchored ? LightAnchorDesign.anchorStripHeight : 10)
+            .animation(anchorAnimation, value: stageChromeHidden)
+            // 顶边距跟的是 sidebarAnchored 本身：现场舱开着时 stageChromeHidden
+            // 不变，只钉上一个键会让呼吸带高度瞬跳（与侧栏帧同一个教训）。
+            .animation(anchorAnimation, value: sidebarAnchored)
         }
         // 样机：内容岛顶缝 10pt。不能用 ignoresSafeArea——它和
         // NavigationSplitView 的安全区管理互相触发，布局每帧重跑
         // 直到主线程被吃满；负上边距把内容拉进标题栏区即可
         // （抵掉 28pt 的标题栏安全区，顶缝由上面的 padding(.top, 10) 给出）。
         .padding(.top, -28)
-        // 侧栏进出时岛在改宽度，逐帧的重排会把覆盖式滚动条一遍遍闪出来。
-        // 这半秒先把指示器收走（沿环境传给里面所有 ScrollView），落地再交还。
-        .scrollIndicators(sidebarFlightInProgress ? .hidden : .automatic)
+        // 覆盖式滚动条在这块画布上只会刷存在感：岛每次改宽（收展侧栏、
+        // 开合现场舱、拉伸窗口）AppKit 都要闪它几下；「藏一阵再交还」也不行
+        // ——重新挂载的那一刻又主动闪一次。无边框的安静画布干脆不要指示器，
+        // 滚动本身不受影响。
+        .scrollIndicators(.never)
         .overlay {
             if showingWorkspaceSearch {
                 workspaceSearchOverlay
             }
         }
-        .overlay {
-            if showingSwitchWork {
-                SwitchWorkPanel(
-                    onClose: closeSwitchWork,
-                    onSwitched: {
-                        closeSwitchWork()
-                        // 换过去之后要看到的是那件事本身，不是刚才的回顾页。
-                        reviewingTargetID = nil
-                        selectedSearchResult = nil
-                        withAnimation(sideDotAnimation) {
-                            selectedDestination = .now
-                        }
-                    },
-                    onNewWorkDetails: { name in
-                        closeSwitchWork()
-                        startWorkInitialName = name
-                        showingStartWork = true
-                    }
-                )
-                .environmentObject(workspace)
-            }
-        }
     }
 
+    /// 打开「换一件事」：应用的标准 sheet（和开始一件事/等待编辑器同族）。
     private func openSwitchWork() {
-        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) {
-            showingSwitchWork = true
-        }
+        showingSwitchWork = true
     }
 
     private func closeSwitchWork() {
-        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) {
-            showingSwitchWork = false
-        }
+        showingSwitchWork = false
+    }
+
+    private func toggleSwitchWork() {
+        showingSwitchWork.toggle()
     }
 
     /// 内容岛工具行（样机 .toolbar）：48 高——最左是常驻的侧栏收起/展开钮
@@ -844,45 +802,16 @@ struct MainWorkspaceView: View {
             Spacer(minLength: 0)
 
             // 对话页整条工具行都不出现（用户定），这里无需再按页隐藏。
-            // + 是两个去向的分岔口：记到稍后（要做的事）或存进暂存箱（想法/链接）。
-            // ⌥⌘N 走应用级快捷键，直接开窗、沿用上次去向。
-            Menu {
-                Button {
-                    UserDefaults.standard.set(
-                        CaptureStatus.inbox.rawValue,
-                        forKey: LightAnchorCaptureDestinationPreference.storageKey
-                    )
-                    openCaptureWindow()
-                } label: {
-                    Text(tr("capture_to_later"))
-                }
-                Button {
-                    UserDefaults.standard.set(
-                        CaptureStatus.reference.rawValue,
-                        forKey: LightAnchorCaptureDestinationPreference.storageKey
-                    )
-                    openCaptureWindow()
-                } label: {
-                    Text(tr("capture_to_staging"))
-                }
-            } label: {
+            // + 直接开捕获窗（沿用上次去向，去向在捕获窗里改）——
+            // 原来的「记到稍后 / 存进暂存箱」下拉被否：多一步选择才见到输入框。
+            Button(action: openCaptureWindow) {
                 Image(systemName: "plus")
                     .font(.system(size: 14, weight: .medium))
             }
-            .menuStyle(.button)
             .buttonStyle(LightAnchorToolbarIconButtonStyle())
-            .menuIndicator(.hidden)
-            .fixedSize()
             .help(tr("capture_a_thought_n"))
             .accessibilityLabel(UserFacingCopy.capture)
-            // 窗口级 ⌥⌘N 照旧直接开捕获窗（沿用上次去向）；上面的菜单只负责分岔。
-            .background {
-                Button(action: openCaptureWindow) { EmptyView() }
-                    .keyboardShortcut("n", modifiers: [.command, .option])
-                    .opacity(0)
-                    .frame(width: 0, height: 0)
-                    .accessibilityHidden(true)
-            }
+            .keyboardShortcut("n", modifiers: [.command, .option])
 
             Button {
                 withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) {
@@ -2014,8 +1943,14 @@ private struct NowSpaceView: View {
             }
             if episode.state != .ended {
                 Spacer(minLength: 8)
-                Button(UserFacingCopy.finishWork) {
+                Button {
                     _ = workspace.endEpisode(episode.id)
+                } label: {
+                    // 勾形给「完成」一个身份记号——三颗灰字按钮里它是收束的那颗。
+                    HStack(spacing: 6) {
+                        LightAnchorIcon("check", size: 12)
+                        Text(UserFacingCopy.finishWork)
+                    }
                 }
                 .buttonStyle(LightAnchorSuccessButtonStyle())
             }
@@ -2257,6 +2192,10 @@ private struct LaterSpaceView: View {
                 options: LaterScope.allCases,
                 title: { $0.title }
             )
+            // SegSoft 不再自带外边距（会破坏组头行的居中对齐），这里自己给：
+            // 左 2 与眉题文字光学对齐，下 14 是分段到列表的组距。
+            .padding(.leading, 2)
+            .padding(.bottom, 14)
 
             if visibleCount == 0 {
                 LightAnchorEmptyState(
@@ -3057,12 +2996,12 @@ struct StartWorkView: View {
                 eyebrow: tr("start_working"),
                 title: UserFacingCopy.startWork,
                 subtitle: tr("just_write_down_what_you_re"),
-                icon: "focus"
+                icon: "play"
             )
             LightAnchorSettingsSection(
                 title: tr("what_you_re_doing_now"),
                 detail: tr("the_name_becomes_your_way_back"),
-                icon: "focus"
+                icon: "pencil"
             ) {
                 TextField(tr("e_g_organise_the_interview_notes"), text: $name)
                     .textFieldStyle(LightAnchorTextFieldStyle())
@@ -3400,12 +3339,12 @@ private struct CaptureTargetEditorView: View {
                 eyebrow: tr("capture"),
                 title: tr("start_from_this_capture"),
                 subtitle: capture.body.isEmpty ? (capture.sourceURL?.absoluteString ?? "") : capture.body,
-                icon: "focus"
+                icon: "play"
             )
             LightAnchorSettingsSection(
                 title: tr("what_it_is"),
                 detail: tr("turn_this_capture_into_work_you"),
-                icon: "focus"
+                icon: "pencil"
             ) {
                 TextField(tr("name_of_this_work"), text: $name)
                     .textFieldStyle(LightAnchorTextFieldStyle())
