@@ -24,6 +24,34 @@ Scripts/lightanchor-event.sh publish --help
 
 `Scripts/smoke-macos-app.sh` 在临时 `LIGHTANCHOR_DATA_ROOT` 下启动真实 App 包，验证进程存活、`lightanchor://event` 深链、事件落盘和退出清理，不污染默认数据目录；日常运行也可以用同一变量指定隔离数据根。
 
+## 提交信息
+
+提交信息遵循 [Conventional Commits 1.0.0](https://www.conventionalcommits.org/zh-hans/v1.0.0/)：
+
+```text
+type(scope): 一句话说清这次提交做了什么
+
+（可选正文：动机、取舍、影响面。）
+
+（可选脚注：BREAKING CHANGE: …、Refs #123、Co-Authored-By: … 等。）
+```
+
+- **type**（必填）：`feat` 新能力或新界面形态 · `fix` 修行为或视觉问题 · `refactor` 不改行为的整理 · `perf` 性能 · `test` 测试 · `docs` 文档 · `build` 构建与依赖 · `ci` 持续集成 · `chore` 杂务（脚本、种子数据、仓库配置等）· `style` 纯代码排版 · `revert` 还原。
+- **scope**（可选）：小写，按目录或功能面取，如 `scene`、`sidebar`、`review`、`settings`、`design`、`l10n`、`release`。
+- **主题行**：中文或英文都行（本仓库以中文为主），直接陈述改了什么，结尾不加句号，整行 ≤ 72 字符。破坏性变更在冒号前加 `!`，并在脚注写 `BREAKING CHANGE:`。
+- 一次提交聚焦一件事；界面改动在 PR 里附截图（见 [`../AGENTS.md`](../AGENTS.md)）。
+
+克隆后执行一次 `Scripts/setup-git.sh`，启用 `.githooks/commit-msg` 校验与 `.gitmessage` 模板。应急可 `git commit --no-verify` 绕过，但不合规的主题不要推上 main。
+
+示例：
+
+```text
+feat(scene): 放下确认弹窗加「回来先看」输入框
+fix(sidebar): 现场舱开着时收展动画被吞——宽度动画钉在 sidebarAnchored 上
+refactor(design): SegSoft 与 SectionLabel 去掉自带外边距，行距交调用处
+chore(release): 更新 manifest 校验和与签名脚本
+```
+
 ## 发布与更新
 
 `Scripts/build-release.sh` 生成 `dist/LightAnchor.app`、可分发 zip、带 checksum 的 update manifest 和可选 RSA 签名。没有 Developer ID 或更新私钥时仍可出未签名本地包；正式分发需要 `LIGHTANCHOR_SIGNING_IDENTITY`、`LIGHTANCHOR_UPDATE_PRIVATE_KEY` 与对应公钥。
