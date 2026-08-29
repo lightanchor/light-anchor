@@ -33,6 +33,8 @@
 	<string>轻锚只在你明确确认环境动作时运行自动化。</string>
 	<key>NSCalendarsUsageDescription</key>
 	<string>轻锚只读取你授权的会议时间和链接，用于智能等待。</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>轻锚只在你为定时任务挑选时间时读取日历事件的标题和时间，不写入、不上传。</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>

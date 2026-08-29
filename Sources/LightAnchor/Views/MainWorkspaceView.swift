@@ -122,6 +122,14 @@ struct MainWorkspaceView: View {
             workspaceDetail
         }
         .overlay(alignment: .topLeading) { anchorStripControls }
+        // 悬浮动作组（新建定时 / 录制过程）：工具类动作不占侧栏，
+        // 右下角收着，点开展开；录制中带红点指示，任何页面都可见。
+        .overlay(alignment: .bottomTrailing) {
+            WorkspaceToolCluster()
+                .environmentObject(workspace)
+                .padding(.trailing, 18)
+                .padding(.bottom, 18)
+        }
         // 要求 2「无灰条」：标题栏区域的工具栏/材质底一律隐掉，
         // 暖米白直通窗顶；标题文字也不要（样机窗顶没有任何文字）。
         .navigationTitle("")
@@ -1940,6 +1948,16 @@ private struct NowSpaceView: View {
             if episode.state != .waiting && episode.state != .ended {
                 Button(UserFacingCopy.waitForResult, action: onWait)
                     .buttonStyle(LightAnchorQuietButtonStyle())
+            }
+            // 单次开启「记录本次」：给这件事录一份过程，生命周期随它走
+            // （放下暂停、恢复继续、结束收尾）。已在录时入口在悬浮动作组。
+            if episode.state != .ended,
+               workspace.activeRecordingSession == nil {
+                Button(tr("record_this_one")) {
+                    _ = workspace.startRecordingCurrentEpisode()
+                }
+                .buttonStyle(LightAnchorQuietButtonStyle())
+                .help(tr("auto_record_episodes_detail"))
             }
             if episode.state != .ended {
                 Spacer(minLength: 8)

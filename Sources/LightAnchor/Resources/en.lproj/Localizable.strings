@@ -1062,3 +1062,95 @@
 "couldn_t_save_the_scene" = "Couldn't save the scene";
 "brought_in_from_the_current_scene" = "Brought in from the current scene";
 "actions_from_scene_summary" = "%1$d actions in total: %2$d apps, %3$d files, %4$d pages — trim, then save.";
+
+/* Scheduled tasks */
+"schedule" = "Schedule";
+"tomorrow" = "Tomorrow";
+"repeat_once" = "Once";
+"repeat_daily" = "Daily";
+"repeat_weekdays" = "Weekdays";
+"repeat_weekly" = "Weekly";
+"repeat_monthly" = "Monthly";
+"add_a_schedule" = "New schedule";
+"edit_schedule" = "Edit schedule";
+"nothing_scheduled_yet" = "Nothing scheduled yet";
+"set_a_one_off_alarm_or" = "Set a one-off alarm or a repeating reminder — it comes to find you, no pop-ups, no focus stealing.";
+"already_reminded" = "Already reminded";
+"time_from_calendar_event" = "Time from calendar event “%@”";
+"scene_attached" = "Scene collected";
+"it_comes_to_find_you" = "It comes to find you on time; repeating tasks queue the next occurrence after each fire.";
+"what_to_do_then" = "What to do then";
+"phrase_it_so_future_you" = "Phrase it so future you picks it up at a glance.";
+"e_g_get_back_to_the" = "e.g. Get back to the release script";
+"when_it_fires" = "When it fires";
+"one_off_alarms_finish_after_firing" = "One-off alarms finish after firing once; repeating tasks roll to the next occurrence.";
+"fire_time" = "Fire time";
+"repeat" = "Repeat";
+"pick_from_calendar" = "Pick from calendar";
+"pick_a_calendar_event" = "Pick a calendar event";
+"no_upcoming_events" = "No calendar events in the next two weeks";
+"allow_calendar_access" = "Allow calendar access";
+"calendar_access_denied" = "Calendar access denied — enable it in System Settings";
+"collect_the_scene" = "Collect the scene";
+"scheduled_task_time_arrived" = "A scheduled task is due";
+"scene_saved_open_to_restore" = "The scene was collected — open Light Anchor to restore it in one click.";
+"untitled_event" = "(Untitled event)";
+"calendar_access" = "Calendar";
+"reads_event_times_you_pick_for" = "Reads event titles and times only while you pick a time for a scheduled task; never writes.";
+
+/* Records */
+"records" = "Records";
+"no_records_yet" = "No records yet";
+"untitled_record" = "Untitled record";
+"record_style_guide" = "For people";
+"record_style_skill" = "For AI (skill)";
+"record_style_guide_detail" = "Composes a shareable document: background, steps, pitfalls — ready to send to a friend.";
+"record_style_skill_detail" = "Composes a SKILL.md: frontmatter plus agent-facing instructions an AI can follow.";
+"composed_by_engine" = "Composed by %@";
+"what_this_record_is" = "This record";
+"record_title_placeholder" = "e.g. How I fixed the signature check";
+"record_audience" = "Audience";
+"composed_markdown" = "Composed markdown";
+"compose_with_ai" = "Compose with AI";
+"composing" = "Composing…";
+"copy_markdown" = "Copy Markdown";
+"export_file" = "Export file";
+"compose_failed_please_retry" = "Composing failed — please retry.";
+
+/* Schedule (review section) */
+"all_scheduled_tasks" = "All scheduled tasks";
+"only_fires_with_scenes" = "Only fires with scenes";
+"will_collect_a_scene" = "Collects a scene on fire";
+"deleted_scheduled_task" = "(Deleted scheduled task)";
+"view_the_scene" = "View that scene";
+"each_fire_collects_a_checkpoint" = "Each fire collects a scene checkpoint — the files, pages and terminals on screen at that moment, regardless of what you were doing.";
+"collect_a_scene_when_it_fires" = "Collect a scene checkpoint on fire";
+
+/* Recordings */
+"work_session" = "Work session";
+"recording_note" = "Note";
+"recording_now" = "Recording";
+"recording_paused" = "Paused";
+"recording_detail" = "Detail";
+"recording_detail_subtitle" = "The app's automatic trace of this process; compose a shareable recap or an AI skill from it.";
+"recording_section_intro" = "While recording, app switches, opened files and terminal commands are traced automatically; compose a document after stopping.";
+"recording_started_at_time" = "Recording started at %@";
+"recording_episode_started" = "Started working on “%@”";
+"recording_episode_paused" = "Set aside";
+"recording_episode_resumed" = "Back on it";
+"recording_episode_ended" = "Finished this one";
+"recording_wait_started" = "Started waiting";
+"recording_hit_the_entry_limit" = "Entry limit reached; the rest of the process is not traced";
+"this_recording_has_no_entries" = "This recording captured no entries.";
+"n_trace_entries" = "%lld trace entries";
+"n_more_entries_omitted" = "%lld more omitted";
+"trace_timeline" = "Process timeline";
+"not_composed_yet_open_to_compose" = "(Not composed yet — open the detail and use “Compose with AI”.)";
+"compose_turns_the_trace_into" = "\"Compose with AI\" turns the trace into Markdown in the chosen style; edit freely afterwards.";
+"record_this_one" = "Record this one";
+"auto_record_episodes" = "Auto-record work sessions";
+"auto_record_episodes_detail" = "Start a task and a process recording starts with it: pauses when set aside, resumes on return, wraps up at the end. Traces stay on this Mac.";
+"tools" = "Tools";
+"record_a_process" = "Record a process";
+"stop_process_recording" = "Stop recording";
+"recording_for_duration" = "Recording · %@";

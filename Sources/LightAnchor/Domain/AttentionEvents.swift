@@ -9,6 +9,11 @@ enum AttentionEventKind: String, Codable, Equatable {
     case captureDeleted
     case waitingChanged
     case sceneSnapshotChanged
+    case scheduledTaskChanged
+    case scheduledTaskDeleted
+    case scheduledFireChanged
+    case recordingSessionChanged
+    case recordingSessionDeleted
     /// 已经移除的历史事件类型（例如 factChanged / experimentChanged / dayNoteChanged）。
     /// 旧事件日志仍能整体解码，加载时这些事件会被丢掉。
     case unsupported
@@ -30,6 +35,9 @@ struct AttentionEvent: Codable, Equatable, Identifiable {
     let capture: CaptureItem?
     let waiting: WaitingItem?
     let sceneSnapshot: SceneSnapshot?
+    let scheduledTask: ScheduledTask?
+    let scheduledFire: ScheduledTaskFire?
+    let recordingSession: RecordingSession?
 
     private init(
         id: UUID = UUID(),
@@ -41,7 +49,10 @@ struct AttentionEvent: Codable, Equatable, Identifiable {
         episode: AttentionEpisode? = nil,
         capture: CaptureItem? = nil,
         waiting: WaitingItem? = nil,
-        sceneSnapshot: SceneSnapshot? = nil
+        sceneSnapshot: SceneSnapshot? = nil,
+        scheduledTask: ScheduledTask? = nil,
+        scheduledFire: ScheduledTaskFire? = nil,
+        recordingSession: RecordingSession? = nil
     ) {
         self.id = id
         self.occurredAt = occurredAt
@@ -53,6 +64,9 @@ struct AttentionEvent: Codable, Equatable, Identifiable {
         self.capture = capture
         self.waiting = waiting
         self.sceneSnapshot = sceneSnapshot
+        self.scheduledTask = scheduledTask
+        self.scheduledFire = scheduledFire
+        self.recordingSession = recordingSession
     }
 
     static func targetChanged(_ target: AttentionTarget, at date: Date = Date()) -> Self {
@@ -126,6 +140,49 @@ struct AttentionEvent: Codable, Equatable, Identifiable {
         )
     }
 
+    static func scheduledTaskChanged(_ task: ScheduledTask, at date: Date = Date()) -> Self {
+        Self(
+            occurredAt: date,
+            kind: .scheduledTaskChanged,
+            entityID: task.id,
+            scheduledTask: task
+        )
+    }
+
+    static func scheduledTaskDeleted(id: UUID, at date: Date = Date()) -> Self {
+        Self(
+            occurredAt: date,
+            kind: .scheduledTaskDeleted,
+            entityID: id
+        )
+    }
+
+    static func scheduledFireChanged(_ fire: ScheduledTaskFire, at date: Date = Date()) -> Self {
+        Self(
+            occurredAt: date,
+            kind: .scheduledFireChanged,
+            entityID: fire.id,
+            scheduledFire: fire
+        )
+    }
+
+    static func recordingSessionChanged(_ session: RecordingSession, at date: Date = Date()) -> Self {
+        Self(
+            occurredAt: date,
+            kind: .recordingSessionChanged,
+            entityID: session.id,
+            recordingSession: session
+        )
+    }
+
+    static func recordingSessionDeleted(id: UUID, at date: Date = Date()) -> Self {
+        Self(
+            occurredAt: date,
+            kind: .recordingSessionDeleted,
+            entityID: id
+        )
+    }
+
     /// 物理清除事件日志里的现场事实。返回 nil 表示整条现场事件应移除；
     /// episode / waiting 的状态与用户备注保留，只擦掉采集到的上下文。
     func scrubbingSceneContent(capturedSince cutoff: Date?) -> Self? {
@@ -175,7 +232,10 @@ struct AttentionEvent: Codable, Equatable, Identifiable {
             episode: episode ?? self.episode,
             capture: capture,
             waiting: waiting ?? self.waiting,
-            sceneSnapshot: sceneSnapshot
+            sceneSnapshot: sceneSnapshot,
+            scheduledTask: scheduledTask,
+            scheduledFire: scheduledFire,
+            recordingSession: recordingSession
         )
     }
 }
@@ -187,6 +247,9 @@ struct AttentionSnapshot: Codable, Equatable {
     var captures: [UUID: CaptureItem] = [:]
     var waitingItems: [UUID: WaitingItem] = [:]
     var sceneSnapshots: [UUID: SceneSnapshot] = [:]
+    var scheduledTasks: [UUID: ScheduledTask] = [:]
+    var scheduledFires: [UUID: ScheduledTaskFire] = [:]
+    var recordingSessions: [UUID: RecordingSession] = [:]
     /// 每段工作累计的专注时长（只计 active/returning 的区间，暂停和等待
     /// 不计入）——回放 episodeChanged 事件时按状态迁移累加。
     var episodeFocusDurations: [UUID: TimeInterval] = [:]
@@ -251,6 +314,24 @@ struct AttentionSnapshot: Codable, Equatable {
         case .sceneSnapshotChanged:
             guard let sceneSnapshot = event.sceneSnapshot else { return }
             sceneSnapshots[sceneSnapshot.id] = sceneSnapshot
+
+        case .scheduledTaskChanged:
+            guard let scheduledTask = event.scheduledTask else { return }
+            scheduledTasks[scheduledTask.id] = scheduledTask
+
+        case .scheduledTaskDeleted:
+            scheduledTasks.removeValue(forKey: event.entityID)
+
+        case .scheduledFireChanged:
+            guard let scheduledFire = event.scheduledFire else { return }
+            scheduledFires[scheduledFire.id] = scheduledFire
+
+        case .recordingSessionChanged:
+            guard let recordingSession = event.recordingSession else { return }
+            recordingSessions[recordingSession.id] = recordingSession
+
+        case .recordingSessionDeleted:
+            recordingSessions.removeValue(forKey: event.entityID)
 
         case .unsupported:
             // 已移除的历史事件类型：读得进来，但不参与任何状态。
@@ -359,6 +440,36 @@ struct AttentionSnapshot: Codable, Equatable {
         waitingItems.values
             .filter { $0.status == .ready }
             .sorted { ($0.completedAt ?? $0.startedAt) > ($1.completedAt ?? $1.startedAt) }
+    }
+
+    /// 排定中的定时任务，按触发时间升序（最近的先来）。
+    var upcomingScheduledTasks: [ScheduledTask] {
+        scheduledTasks.values
+            .filter { $0.status == .scheduled }
+            .sorted { $0.fireAt < $1.fireAt }
+    }
+
+    /// 全部触发史，新的在前。
+    var allScheduledFires: [ScheduledTaskFire] {
+        scheduledFires.values
+            .sorted { $0.firedAt > $1.firedAt }
+    }
+
+    /// 全部录制会话，按开始时间倒序；进行中/暂停的排最前。
+    var allRecordingSessions: [RecordingSession] {
+        recordingSessions.values
+            .sorted {
+                if $0.isActive != $1.isActive { return $0.isActive }
+                return $0.startedAt > $1.startedAt
+            }
+    }
+
+    /// 正在进行（录制中或暂停）的会话——同一时刻至多一个，由协调器保证。
+    var activeRecordingSession: RecordingSession? {
+        recordingSessions.values
+            .filter(\.isActive)
+            .sorted { $0.startedAt > $1.startedAt }
+            .first
     }
 
     /// 某目标最新的现场快照（按捕获时间）。

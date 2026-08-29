@@ -326,6 +326,9 @@ struct IntelligencePreferences: Codable, Equatable, Sendable {
     /// ADHD 友好输出：所有 AI 生成的文字按 i-have-adhd 技能塑形
     /// （行动放最前、多步编号、具体数字、无铺垫客套）。默认开。
     var adhdFriendlyOutput: Bool
+    /// 跟随工作自动录制过程：开始一件事就起一份过程记录，放下暂停、
+    /// 结束收尾。默认关——录制是扩展能力，不改变既有流程。
+    var autoRecordEpisodes: Bool
     /// 云端配置方案。列表顺序即界面顺序，初始化时保证至少有一套。
     var cloudProfiles: [CloudProviderProfile]
     /// 使用中的方案。设置页里「选中」和「使用中」是同一件事，
@@ -356,6 +359,7 @@ struct IntelligencePreferences: Codable, Equatable, Sendable {
         checkSceneStaleness: Bool,
         inboxAutoOrganize: Bool,
         adhdFriendlyOutput: Bool = true,
+        autoRecordEpisodes: Bool = false,
         cloudProfiles: [CloudProviderProfile] = [],
         activeCloudProfileID: UUID? = nil
     ) {
@@ -368,6 +372,7 @@ struct IntelligencePreferences: Codable, Equatable, Sendable {
         self.checkSceneStaleness = checkSceneStaleness
         self.inboxAutoOrganize = inboxAutoOrganize
         self.adhdFriendlyOutput = adhdFriendlyOutput
+        self.autoRecordEpisodes = autoRecordEpisodes
         // 不变量在这里立起来：至少一套方案，且使用中的那套一定在列表里。
         // 否则「云端」引擎会指向一套不存在的配置，界面也没有可选中的行。
         let normalized = cloudProfiles.isEmpty
@@ -382,7 +387,7 @@ struct IntelligencePreferences: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case engine, sceneFilterDefault, saveTerminalCommands, saveClipboardContent
         case saveWindowScreenshot, generateReturnCue, checkSceneStaleness, inboxAutoOrganize
-        case adhdFriendlyOutput
+        case adhdFriendlyOutput, autoRecordEpisodes
         case cloudProfiles, activeCloudProfileID
     }
 
@@ -421,6 +426,8 @@ struct IntelligencePreferences: Codable, Equatable, Sendable {
                 ?? fallback.inboxAutoOrganize,
             adhdFriendlyOutput: try container.decodeIfPresent(Bool.self, forKey: .adhdFriendlyOutput)
                 ?? fallback.adhdFriendlyOutput,
+            autoRecordEpisodes: try container.decodeIfPresent(Bool.self, forKey: .autoRecordEpisodes)
+                ?? fallback.autoRecordEpisodes,
             cloudProfiles: profiles,
             activeCloudProfileID: try container.decodeIfPresent(UUID.self, forKey: .activeCloudProfileID)
         )
@@ -583,6 +590,12 @@ protocol IntelligenceEngineProtocol: Sendable {
     /// 检索前的追问改写（RAG 标准步骤）：把「那件事呢」按对话历史补全成
     /// 独立可检索的问题。锦上添花语义：不可用/失败一律返回 nil，检索用原句。
     func rewriteMemoryQuery(question: String, history: [MemoryChatTurn]) async -> String?
+
+    /// 整理记录：把用户的原始草稿整理成 Markdown 成稿（分享文档或 SKILL.md）。
+    /// 错误语义与 answerMemoryQuestion 相同：这是用户主动点的动作，
+    /// 失败必须抛错亮给用户，不做冒名降级——启发式引擎的确定性拼装除外
+    /// （它本身就署名「启发式（离线）」，输出是透明的规则结果）。
+    func composeRecordMarkdown(_ input: RecordComposeInput) async throws -> String
 }
 
 extension IntelligenceEngineProtocol {
@@ -732,6 +745,16 @@ struct MemoryQuestionInput: Sendable, Equatable {
         self.factLines = factLines
         self.history = history
     }
+}
+
+// MARK: - 整理过程记录
+
+/// 整理过程记录的输入：标题 + 风格 + 软件记录的过程事实行（时间顺序）。
+/// 事实行来自录制 trace，全部是本机观察到的事实；模型只许依据它们。
+struct RecordComposeInput: Sendable, Equatable {
+    var title: String
+    var style: RecordingStyle
+    var factLines: [String]
 }
 
 // MARK: - 提示词构造（引擎间共享）
@@ -966,6 +989,47 @@ enum IntelligencePrompts {
         return String(cleaned.prefix(80))
     }
 
+    static let recordGuideInstructions = """
+        你是过程复盘助手。输入是软件对一段工作过程的自动记录：按时间排列的事实行
+        （切到哪个应用、打开了哪个文件或网页、终端跑了什么命令、期间的想法捕获与等待结果）。
+        把它整理成一篇给朋友看的 Markdown 复盘文档。
+        结构：# 一级标题（用给出的标题）；一段背景（从事实推得出才写）；
+        ## 步骤（有序列表，按时间归并同一动作的重复观察，命令放代码块，保留文件名和参数原文）；
+        有失败重试就写进 ## 坑与注意；有明确结果就加 ## 结果。
+        只能使用事实行里出现的内容：不得虚构步骤、补全命令或猜测原因；
+        事实行看不出的环节直接跳过，不要脑补衔接。
+        简体中文，输出纯 Markdown 正文，不要解释、不要代码围栏包裹全文。
+        """
+
+    static let recordSkillInstructions = """
+        你是 skill 编写助手。输入是软件对一段工作过程的自动记录：按时间排列的事实行
+        （应用/文件/网页切换、终端命令、捕获与等待结果）。
+        从这个过程中提炼一份给 AI agent 阅读并执行的 SKILL.md。
+        文件开头必须是 YAML frontmatter（用 --- 包裹）：
+        name 是 kebab-case 的英文短名；description 用一句话说清这个 skill 做什么、什么时候该用
+        （agent 靠它决定是否加载这个 skill）。
+        正文结构：# 技能名；一段简述；## 适用场景（什么触发条件下用）；
+        ## 执行步骤（有序列表，每步是给 agent 的明确指令，动词开头，命令放代码块，
+        写明在哪个目录、对哪个文件）；## 验证（执行完如何确认成功）。
+        步骤只能来自事实行：命令与路径必须原样照抄，不得虚构；重复的试错归并成一步，
+        从事实看不准的步骤明确标注「需确认」。
+        输出纯 SKILL.md 内容（从 --- 开始），不要解释、不要代码围栏包裹全文。
+        """
+
+    static func recordComposeInstructions(for style: RecordingStyle) -> String {
+        switch style {
+        case .guide: recordGuideInstructions
+        case .skill: recordSkillInstructions
+        }
+    }
+
+    static func recordComposeUser(_ input: RecordComposeInput) -> String {
+        var lines = ["标题：\(input.title.isEmpty ? "（未起标题，请从过程提炼）" : input.title)"]
+        lines.append("过程事实（按时间顺序）：")
+        lines.append(contentsOf: input.factLines.map { "- \($0)" })
+        return lines.joined(separator: "\n")
+    }
+
     /// ADHD 友好输出塑形（来自 github.com/ayghri/i-have-adhd 技能的核心规则）。
     /// 附加在文字生成类指令之后；与任务本身的格式约定冲突时任务优先，
     /// 但「具体、短句、无铺垫」始终保持。
@@ -1088,11 +1152,35 @@ struct HeuristicIntelligenceEngine: IntelligenceEngineProtocol {
         return lines.joined(separator: "\n")
     }
 
+    func composeRecordMarkdown(_ input: RecordComposeInput) async -> String {
+        // 确定性拼装：不提炼、不归并，把过程事实按序摆进对应格式的壳。
+        // 输出署名「启发式（离线）」，用户看得出这是没过模型的结果。永不失败。
+        let title = input.title.isEmpty ? "未命名记录" : input.title
+        let facts = input.factLines.map { "- \($0)" }.joined(separator: "\n")
+        switch input.style {
+        case .guide:
+            return "# \(title)\n\n## 过程\n\n\(facts)"
+        case .skill:
+            let slug = RecordingSession.slug(from: input.title)
+            return """
+                ---
+                name: \(slug.isEmpty ? "untitled-skill" : slug)
+                description: \(title)
+                ---
+
+                # \(title)
+
+                ## 过程事实（按时间顺序）
+
+                \(facts)
+                """
+        }
+    }
 }
 
 // MARK: - FoundationModels 端侧引擎（macOS 26+）
 
-#if canImport(FoundationModels)
+#if canImport(FoundationModels) && !LIGHTANCHOR_DISABLE_FOUNDATIONMODELS
 
 @available(macOS 26.0, *)
 @Generable
@@ -1342,6 +1430,22 @@ struct FoundationModelsIntelligenceEngine: IntelligenceEngineProtocol {
             to: IntelligencePrompts.memoryQueryRewriteUser(question: question, history: history)
         ) else { return nil }
         return IntelligencePrompts.normalizedRewrittenQuery(response.content)
+    }
+
+    func composeRecordMarkdown(_ input: RecordComposeInput) async throws -> String {
+        // 用户主动点的整理：不可用或失败直接抛错，不冒名降级。
+        guard isAvailable else {
+            throw MemoryAnswerError.engineUnavailable(tr("the_on_device_model_is_unavailable"))
+        }
+        let session = LanguageModelSession(
+            instructions: IntelligencePrompts.recordComposeInstructions(for: input.style)
+        )
+        let response = try await session.respond(
+            to: IntelligencePrompts.recordComposeUser(input)
+        )
+        let text = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { throw MemoryAnswerError.emptyAnswer }
+        return text
     }
 }
 
@@ -1844,6 +1948,22 @@ struct CloudIntelligenceEngine: IntelligenceEngineProtocol {
         return IntelligencePrompts.normalizedRewrittenQuery(content)
     }
 
+    func composeRecordMarkdown(_ input: RecordComposeInput) async throws -> String {
+        // 用户主动点的整理：配置不全或请求失败直接抛错（带服务端原文）。
+        guard isAvailable else {
+            throw MemoryAnswerError.engineUnavailable(tr("the_cloud_engine_is_not_configured"))
+        }
+        let content = try await chat(
+            system: IntelligencePrompts.recordComposeInstructions(for: input.style),
+            user: IntelligencePrompts.recordComposeUser(input),
+            jsonSchemaName: nil,
+            jsonSchema: nil
+        )
+        let text = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { throw MemoryAnswerError.emptyAnswer }
+        return text
+    }
+
     // MARK: - HTTP
 
     enum CloudEngineError: LocalizedError {
@@ -2262,7 +2382,7 @@ enum IntelligenceEngineFactory {
     static func make(preferences: IntelligencePreferences) -> IntelligenceEngineProtocol {
         switch preferences.engine {
         case .onDevice:
-            #if canImport(FoundationModels)
+            #if canImport(FoundationModels) && !LIGHTANCHOR_DISABLE_FOUNDATIONMODELS
             if #available(macOS 26.0, *) {
                 return FoundationModelsIntelligenceEngine(
                     adhdFriendlyOutput: preferences.adhdFriendlyOutput
@@ -2284,7 +2404,7 @@ enum IntelligenceEngineFactory {
 
     /// 端侧引擎是否可用（供偏好页显示状态）。
     static var onDeviceAvailable: Bool {
-        #if canImport(FoundationModels)
+        #if canImport(FoundationModels) && !LIGHTANCHOR_DISABLE_FOUNDATIONMODELS
         if #available(macOS 26.0, *) {
             return FoundationModelsIntelligenceEngine().isAvailable
         }

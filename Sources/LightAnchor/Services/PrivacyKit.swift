@@ -5,6 +5,7 @@ import AVFoundation
 import AppKit
 import ApplicationServices
 import CoreGraphics
+import EventKit
 import Security
 import Speech
 import UserNotifications
@@ -129,6 +130,7 @@ enum PrivacyCapability: String, CaseIterable, Identifiable, Codable, Sendable {
     case screenRecording
     case accessibility
     case notifications
+    case calendar
 
     var id: String { rawValue }
 
@@ -139,6 +141,7 @@ enum PrivacyCapability: String, CaseIterable, Identifiable, Codable, Sendable {
         case .screenRecording: tr("screen_recording")
         case .accessibility: tr("accessibility")
         case .notifications: tr("notifications")
+        case .calendar: tr("calendar_access")
         }
     }
 
@@ -149,6 +152,7 @@ enum PrivacyCapability: String, CaseIterable, Identifiable, Codable, Sendable {
         case .screenRecording: tr("used_for_screenshot_regions_you_select")
         case .accessibility: tr("reads_app_and_window_facts_you")
         case .notifications: tr("optional_notifications_when_results_arrive")
+        case .calendar: tr("reads_event_times_you_pick_for")
         }
     }
 
@@ -158,7 +162,7 @@ enum PrivacyCapability: String, CaseIterable, Identifiable, Codable, Sendable {
     var isGrantedInSystemSettings: Bool {
         switch self {
         case .screenRecording, .accessibility: true
-        case .microphone, .speechRecognition, .notifications: false
+        case .microphone, .speechRecognition, .notifications, .calendar: false
         }
     }
 
@@ -182,6 +186,7 @@ enum PrivacyCapability: String, CaseIterable, Identifiable, Codable, Sendable {
         case .screenRecording: anchor = "Privacy_ScreenCapture"
         case .accessibility: anchor = "Privacy_Accessibility"
         case .notifications: anchor = "Notifications"
+        case .calendar: anchor = "Privacy_Calendars"
         }
         return URL(
             string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?\(anchor)"
@@ -410,6 +415,8 @@ struct PrivacyPermissionService: Sendable {
         case .notifications:
             // 缓存只是同步读的兜底，真值靠 statusAsync 问 UNUserNotificationCenter。
             return PrivacyPermissionCache.status(for: capability) ?? .notDetermined
+        case .calendar:
+            return mapCalendarAuthorization(EKEventStore.authorizationStatus(for: .event))
         }
         #else
         return .unavailable
@@ -479,6 +486,13 @@ struct PrivacyPermissionService: Sendable {
             let result: PrivacyPermissionStatus = granted == true ? .granted : .denied
             PrivacyPermissionCache.store(result, for: capability)
             return result
+        case .calendar:
+            // 读日历事件需要 fullAccess（macOS 14+ 的读写二分里，读属于 full）。
+            let store = EKEventStore()
+            let granted = (try? await store.requestFullAccessToEvents()) ?? false
+            let result: PrivacyPermissionStatus = granted ? .granted : .denied
+            PrivacyPermissionCache.store(result, for: capability)
+            return result
         }
         #else
         return .unavailable
@@ -538,6 +552,17 @@ struct PrivacyPermissionService: Sendable {
         switch status {
         case .authorized: .granted
         case .denied: .denied
+        case .restricted: .restricted
+        case .notDetermined: .notDetermined
+        @unknown default: .unavailable
+        }
+    }
+
+    private func mapCalendarAuthorization(_ status: EKAuthorizationStatus) -> PrivacyPermissionStatus {
+        switch status {
+        case .fullAccess: .granted
+        // 只写权限读不到事件时间，对「从日历选时间」来说等同被拒。
+        case .denied, .writeOnly: .denied
         case .restricted: .restricted
         case .notDetermined: .notDetermined
         @unknown default: .unavailable

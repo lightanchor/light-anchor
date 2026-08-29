@@ -51,4 +51,10 @@ enum LightAnchorStorage {
     static func memoryIndexURL(fileManager: FileManager = .default) -> URL {
         rootURL(fileManager: fileManager).appendingPathComponent("memory-index.sqlite")
     }
+
+    /// 过程记录的 trace 目录（每份录制一个 <uuid>.json）。会话元数据在事件日志里；
+    /// trace 单独落盘是因为事件日志是整文件原子重写，长 trace 会放大每次提交。
+    static func recordingsURL(fileManager: FileManager = .default) -> URL {
+        rootURL(fileManager: fileManager).appendingPathComponent("recordings", isDirectory: true)
+    }
 }

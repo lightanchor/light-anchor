@@ -8,10 +8,12 @@ import SwiftUI
 
 /// 侧栏导航用的描边字形（Lucide）。
 enum LightAnchorNavGlyph: String, CaseIterable {
+    case alarmClock
     case blocks
     case circleDashed
     case focus
     case messageCircle
+    case notebookPen
     case rotateCcwClock
     case toolCase
 
@@ -19,6 +21,20 @@ enum LightAnchorNavGlyph: String, CaseIterable {
     var path: Path {
         var p = Path()
         switch self {
+        case .alarmClock:
+            p.addEllipse(in: CGRect(x: 4.000, y: 5.000, width: 16.000, height: 16.000))
+            p.move(to: CGPoint(x: 12.000, y: 9.000))
+            p.addLine(to: CGPoint(x: 12.000, y: 13.000))
+            p.addLine(to: CGPoint(x: 14.000, y: 15.000))
+            p.move(to: CGPoint(x: 5.000, y: 3.000))
+            p.addLine(to: CGPoint(x: 2.000, y: 6.000))
+            p.move(to: CGPoint(x: 22.000, y: 6.000))
+            p.addLine(to: CGPoint(x: 19.000, y: 3.000))
+            p.move(to: CGPoint(x: 6.380, y: 18.700))
+            p.addLine(to: CGPoint(x: 4.000, y: 21.000))
+            p.move(to: CGPoint(x: 17.640, y: 18.670))
+            p.addLine(to: CGPoint(x: 20.000, y: 21.000))
+            return p
         case .blocks:
             p.move(to: CGPoint(x: 10.000, y: 22.000))
             p.addLine(to: CGPoint(x: 10.000, y: 7.000))
@@ -83,6 +99,36 @@ enum LightAnchorNavGlyph: String, CaseIterable {
             p.addCurve(to: CGPoint(x: 19.028, y: 4.886), control1: CGPoint(x: 22.987, y: 13.720), control2: CGPoint(x: 22.489, y: 8.306))
             p.addCurve(to: CGPoint(x: 6.187, y: 3.863), control1: CGPoint(x: 15.567, y: 1.467), control2: CGPoint(x: 10.147, y: 1.035))
             p.addCurve(to: CGPoint(x: 2.992, y: 16.342), control1: CGPoint(x: 2.228, y: 6.692), control2: CGPoint(x: 0.880, y: 11.959))
+            return p
+        case .notebookPen:
+            p.move(to: CGPoint(x: 13.400, y: 2.000))
+            p.addLine(to: CGPoint(x: 6.000, y: 2.000))
+            p.addCurve(to: CGPoint(x: 4.000, y: 4.000), control1: CGPoint(x: 4.895, y: 2.000), control2: CGPoint(x: 4.000, y: 2.895))
+            p.addLine(to: CGPoint(x: 4.000, y: 20.000))
+            p.addCurve(to: CGPoint(x: 6.000, y: 22.000), control1: CGPoint(x: 4.000, y: 21.105), control2: CGPoint(x: 4.895, y: 22.000))
+            p.addLine(to: CGPoint(x: 18.000, y: 22.000))
+            p.addCurve(to: CGPoint(x: 20.000, y: 20.000), control1: CGPoint(x: 19.105, y: 22.000), control2: CGPoint(x: 20.000, y: 21.105))
+            p.addLine(to: CGPoint(x: 20.000, y: 12.600))
+            p.move(to: CGPoint(x: 2.000, y: 6.000))
+            p.addLine(to: CGPoint(x: 6.000, y: 6.000))
+            p.move(to: CGPoint(x: 2.000, y: 10.000))
+            p.addLine(to: CGPoint(x: 6.000, y: 10.000))
+            p.move(to: CGPoint(x: 2.000, y: 14.000))
+            p.addLine(to: CGPoint(x: 6.000, y: 14.000))
+            p.move(to: CGPoint(x: 2.000, y: 18.000))
+            p.addLine(to: CGPoint(x: 6.000, y: 18.000))
+            p.move(to: CGPoint(x: 21.378, y: 5.626))
+            p.addCurve(to: CGPoint(x: 21.928, y: 3.574), control1: CGPoint(x: 21.915, y: 5.089), control2: CGPoint(x: 22.124, y: 4.307))
+            p.addCurve(to: CGPoint(x: 20.426, y: 2.072), control1: CGPoint(x: 21.731, y: 2.841), control2: CGPoint(x: 21.159, y: 2.269))
+            p.addCurve(to: CGPoint(x: 18.374, y: 2.622), control1: CGPoint(x: 19.693, y: 1.876), control2: CGPoint(x: 18.911, y: 2.085))
+            p.addLine(to: CGPoint(x: 13.364, y: 7.634))
+            p.addCurve(to: CGPoint(x: 12.858, y: 8.488), control1: CGPoint(x: 13.126, y: 7.872), control2: CGPoint(x: 12.952, y: 8.165))
+            p.addLine(to: CGPoint(x: 12.021, y: 11.358))
+            p.addCurve(to: CGPoint(x: 12.147, y: 11.852), control1: CGPoint(x: 11.970, y: 11.533), control2: CGPoint(x: 12.018, y: 11.722))
+            p.addCurve(to: CGPoint(x: 12.641, y: 11.978), control1: CGPoint(x: 12.277, y: 11.981), control2: CGPoint(x: 12.466, y: 12.029))
+            p.addLine(to: CGPoint(x: 15.511, y: 11.141))
+            p.addCurve(to: CGPoint(x: 16.365, y: 10.635), control1: CGPoint(x: 15.834, y: 11.047), control2: CGPoint(x: 16.127, y: 10.873))
+            p.closeSubpath()
             return p
         case .rotateCcwClock:
             p.move(to: CGPoint(x: 3.000, y: 12.000))

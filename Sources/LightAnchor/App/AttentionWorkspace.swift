@@ -31,6 +31,16 @@ final class AttentionWorkspace: ObservableObject {
     /// committing would replace the unreadable file and discard everything.
     private var isEventLogReadable = true
     private lazy var waitingCoordinator = WaitingCoordinator(workspace: self)
+    private lazy var scheduledTaskCoordinator = ScheduledTaskCoordinator(workspace: self)
+    private let recordingTraceStore: RecordingTraceStore
+    private lazy var recordingCoordinator = RecordingCoordinator(
+        workspace: self,
+        traceStore: recordingTraceStore,
+        capture: { [weak self] in
+            guard let self else { return ContextCapsule() }
+            return self.contextCapture(self.intelligencePreferences, self.sceneCapturePreferences)
+        }
+    )
     private let autoWaitRouter: AutoWaitRouter
     private let contextCapture: (IntelligencePreferences, SceneCapturePreferences) -> ContextCapsule
 
@@ -41,10 +51,12 @@ final class AttentionWorkspace: ObservableObject {
         assetStore: LocalAssetStore? = nil,
         externalEventInboxURL: URL? = nil,
         sceneCapturePreferences: SceneCapturePreferences? = nil,
+        recordingTraceStore: RecordingTraceStore? = nil,
         contextCapture: ((IntelligencePreferences, SceneCapturePreferences) -> ContextCapsule)? = nil
     ) {
         self.store = store
         self.assetStore = assetStore ?? LocalAssetStore()
+        self.recordingTraceStore = recordingTraceStore ?? RecordingTraceStore()
         self.autoWaitRouter = AutoWaitRouter(inboxURL: externalEventInboxURL)
         self.sceneCapturePreferences = sceneCapturePreferences ?? .load()
         #if os(macOS)
@@ -170,6 +182,8 @@ final class AttentionWorkspace: ObservableObject {
         #endif
         backfillInboxOrganization()
         startActiveWaitingMonitors()
+        scheduledTaskCoordinator.startMonitoringScheduledTasks()
+        recordingCoordinator.finalizeOrphanedSessions(now: now)
     }
 
     // MARK: - 时间账本
@@ -486,11 +500,15 @@ final class AttentionWorkspace: ObservableObject {
 
     func stopBackgroundMaintenance() {
         waitingCoordinator.cancelAllMonitoring()
+        scheduledTaskCoordinator.cancelAllMonitoring()
+        // 应用要退出了：在录的过程记录就地收尾，别留一份「还在录」的孤儿。
+        _ = recordingCoordinator.stop()
     }
 
     @discardableResult
     func reloadFromDisk() -> Bool {
         waitingCoordinator.cancelAllMonitoring()
+        scheduledTaskCoordinator.cancelAllMonitoring()
         do {
             let loadedEvents = try store.load()
             events = loadedEvents
@@ -540,6 +558,11 @@ final class AttentionWorkspace: ObservableObject {
     func deleteAllData(defaults: UserDefaults = .standard) -> Bool {
         do {
             waitingCoordinator.cancelAllMonitoring()
+            scheduledTaskCoordinator.cancelAllMonitoring()
+            // 在录的直接丢弃（不 stop：stop 会往马上要删掉的日志里再写一笔）。
+            if let activeRecordingID = recordingCoordinator.activeSessionID {
+                recordingCoordinator.discard(activeRecordingID)
+            }
             if FileManager.default.fileExists(atPath: store.fileURL.path) {
                 try FileManager.default.removeItem(at: store.fileURL)
             }
@@ -730,6 +753,7 @@ final class AttentionWorkspace: ObservableObject {
         }
         events.append(.episodeChanged(episode, at: now))
         guard commit(events) else { return nil }
+        handleRecordingOnEpisodeStart(episode, now: now)
         // 回到某件事时，它旧的「已放下」确认卡就过时了。
         if recentSetAside?.targetID == targetID {
             recentSetAside = nil
@@ -785,6 +809,7 @@ final class AttentionWorkspace: ObservableObject {
         }
         let changed = commit([.episodeChanged(episode, at: now)])
         if changed {
+            handleRecordingOnEpisodePause(episodeID, now: now)
             scheduleSceneAutoCapture(for: episodeID, announcingSetAside: true)
         }
         return changed
@@ -799,7 +824,11 @@ final class AttentionWorkspace: ObservableObject {
         if recentSetAside?.targetID == episode.targetID {
             recentSetAside = nil
         }
-        return changeEpisodeState(episodeID, state: .active, now: now)
+        let changed = changeEpisodeState(episodeID, state: .active, now: now)
+        if changed {
+            handleRecordingOnEpisodeResume(episodeID, now: now)
+        }
+        return changed
     }
 
     /// An ended target must not leave outstanding waits behind: they would keep
@@ -843,7 +872,10 @@ final class AttentionWorkspace: ObservableObject {
             detail: "目标已结束，不再等待这个结果。",
             now: now
         ))
-        if committed { scheduleSceneAutoCapture(for: episodeID) }
+        if committed {
+            handleRecordingOnEpisodeEnd(episodeID, now: now)
+            scheduleSceneAutoCapture(for: episodeID)
+        }
         return committed
     }
 
@@ -866,7 +898,10 @@ final class AttentionWorkspace: ObservableObject {
             detail: "目标已放弃，不再等待这个结果。",
             now: now
         ))
-        if committed { scheduleSceneAutoCapture(for: episodeID) }
+        if committed {
+            handleRecordingOnEpisodeEnd(episodeID, now: now)
+            scheduleSceneAutoCapture(for: episodeID)
+        }
         return committed
     }
 
@@ -1046,6 +1081,13 @@ final class AttentionWorkspace: ObservableObject {
             assetStore.removeIfPresent(at: storedAssetURL)
             return nil
         }
+        recordingNote(
+            kind: .capture,
+            title: capture.kind.title,
+            detail: String((capture.title ?? capture.body).prefix(60)),
+            episodeID: currentEpisode?.id,
+            now: capturedAt
+        )
         scheduleCaptureTextExtraction(for: capture)
         scheduleInboxAutoOrganize(for: capture)
         return capture
@@ -1433,6 +1475,14 @@ final class AttentionWorkspace: ObservableObject {
         if let persistedWaiting = snapshot.waitingItems[waiting.id] {
             waitingCoordinator.startMonitoring(persistedWaiting)
         }
+        recordingNote(
+            kind: .waiting,
+            title: waiting.description,
+            detail: tr("recording_wait_started"),
+            episodeID: episodeID,
+            now: now
+        )
+        handleRecordingOnEpisodePause(episodeID, now: now)
         // 开始等待时自动捕获现场，作为可返回时的「一键重返」内容
         scheduleSceneAutoCapture(for: episodeID)
         return waiting
@@ -1460,6 +1510,15 @@ final class AttentionWorkspace: ObservableObject {
         #if os(macOS)
         if committed { WaitingNotificationService().notifyIfAllowed(waiting) }
         #endif
+        if committed {
+            recordingNote(
+                kind: .waiting,
+                title: waiting.description,
+                detail: waiting.evidence,
+                episodeID: waiting.episodeID,
+                now: now
+            )
+        }
         return committed
     }
 
@@ -1508,6 +1567,7 @@ final class AttentionWorkspace: ObservableObject {
             .waitingChanged(resolvedWaiting, at: now),
             .episodeChanged(episode, at: now)
         ]) else { return false }
+        handleRecordingOnEpisodeResume(episode.id, now: now)
         return true
     }
 
@@ -1716,6 +1776,333 @@ final class AttentionWorkspace: ObservableObject {
         guard captured.hasSceneContent else { return episode.context }
         captured.note = episode.context.note
         return captured
+    }
+
+    // MARK: - 定时任务
+
+    /// 新建定时任务。`collectSceneOnFire` 打开时，每次到点收集触发那一刻的
+    /// 现场检查点（与当时在做什么无关）。
+    @discardableResult
+    func createScheduledTask(
+        title: String,
+        note: String = "",
+        fireAt: Date,
+        repeatRule: ScheduledTaskRepeatRule = .once,
+        collectSceneOnFire: Bool = false,
+        calendarEventID: String? = nil,
+        calendarEventTitle: String? = nil,
+        now: Date = Date()
+    ) -> ScheduledTask? {
+        let task = ScheduledTask(
+            title: title,
+            note: note,
+            fireAt: fireAt,
+            repeatRule: repeatRule,
+            collectSceneOnFire: collectSceneOnFire,
+            calendarEventID: calendarEventID,
+            calendarEventTitle: calendarEventTitle,
+            createdAt: now,
+            updatedAt: now
+        )
+        guard task.isValid, commit([.scheduledTaskChanged(task, at: now)]) else { return nil }
+        if let persisted = snapshot.scheduledTasks[task.id] {
+            scheduledTaskCoordinator.startMonitoring(persisted)
+        }
+        return snapshot.scheduledTasks[task.id]
+    }
+
+    /// 编辑定时任务（时间、重复、标题等）。时间变了协调器会换检测器。
+    @discardableResult
+    func updateScheduledTask(_ task: ScheduledTask, now: Date = Date()) -> Bool {
+        guard snapshot.scheduledTasks[task.id] != nil, task.isValid else { return false }
+        var updated = task
+        updated.updatedAt = now
+        guard commit([.scheduledTaskChanged(updated, at: now)]) else { return false }
+        scheduledTaskCoordinator.startMonitoring(updated)
+        return true
+    }
+
+    @discardableResult
+    func deleteScheduledTask(_ taskID: UUID, now: Date = Date()) -> Bool {
+        guard snapshot.scheduledTasks[taskID] != nil else { return false }
+        scheduledTaskCoordinator.cancelMonitoring(taskID)
+        return commit([.scheduledTaskDeleted(id: taskID, at: now)])
+    }
+
+    /// 提前完成：不等到点，直接把任务收进历史（重复任务也整个结束）。
+    @discardableResult
+    func completeScheduledTask(_ taskID: UUID, now: Date = Date()) -> Bool {
+        guard var task = snapshot.scheduledTasks[taskID], task.status == .scheduled else {
+            return false
+        }
+        task.status = .done
+        task.updatedAt = now
+        scheduledTaskCoordinator.cancelMonitoring(taskID)
+        return commit([.scheduledTaskChanged(task, at: now)])
+    }
+
+    /// 到点：落一条触发记录、发系统通知；重复任务滚到下一场并继续盯，
+    /// 单次任务就此完成。要收检查点的，异步收好后补挂到触发记录上。
+    /// 由 ScheduledTaskCoordinator 调用。
+    func fireScheduledTask(_ taskID: UUID, now: Date = Date()) {
+        guard let task = snapshot.scheduledTasks[taskID],
+              task.status == .scheduled,
+              task.fireAt.timeIntervalSince(now) < 1
+        else { return }
+        let rolled = task.firing(at: now)
+        let fire = ScheduledTaskFire(taskID: task.id, taskTitle: task.title, firedAt: task.fireAt)
+        guard commit([
+            .scheduledTaskChanged(rolled, at: now),
+            .scheduledFireChanged(fire, at: now)
+        ]) else { return }
+        #if os(macOS)
+        ScheduledTaskNotificationService().notifyFired(rolled, firedAt: now)
+        #endif
+        if let persisted = snapshot.scheduledTasks[taskID], persisted.status == .scheduled {
+            scheduledTaskCoordinator.startMonitoring(persisted)
+        }
+        if task.collectSceneOnFire {
+            attachCheckpointScene(to: fire.id)
+        }
+    }
+
+    /// 收一份现场检查点：触发那一刻屏幕上的一切，与目标无关。
+    /// 不做 AI 相关性筛选（没有目标可参照）、不生成回场线索，全部保留；
+    /// 隐私排除规则照常在读取时生效。
+    @discardableResult
+    func captureCheckpointScene(now: Date = Date()) async -> SceneSnapshot? {
+        let capsule = contextCapture(intelligencePreferences, sceneCapturePreferences)
+        guard capsule.hasSceneContent else { return nil }
+        let scene = await SceneSnapshotBuilder.buildSnapshot(
+            from: capsule,
+            targetID: nil,
+            targetName: "",
+            targetNote: "",
+            filterMode: .saveAll,
+            engine: intelligenceEngine,
+            generateReturnCue: false
+        )
+        guard commit([.sceneSnapshotChanged(scene, at: now)]) else { return nil }
+        return snapshot.sceneSnapshots[scene.id]
+    }
+
+    /// 异步收检查点并挂到触发记录上。fire 在采集期间被清掉就当没收到。
+    private func attachCheckpointScene(to fireID: UUID) {
+        Task { [weak self] in
+            guard let self else { return }
+            guard let scene = await self.captureCheckpointScene() else { return }
+            let now = Date()
+            guard var fire = self.snapshot.scheduledFires[fireID] else { return }
+            fire.sceneSnapshotID = scene.id
+            _ = self.commit([.scheduledFireChanged(fire, at: now)])
+        }
+    }
+
+    // MARK: - 过程记录
+
+    /// 主动录制一个过程（不依赖当前工作）。标题留空时用时刻起名。
+    @discardableResult
+    func startManualRecording(title: String = "", now: Date = Date()) -> RecordingSession? {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallback = String(
+            format: tr("recording_started_at_time"),
+            now.formatted(date: .omitted, time: .shortened)
+        )
+        return recordingCoordinator.start(
+            title: trimmed.isEmpty ? fallback : trimmed,
+            now: now
+        )
+    }
+
+    /// 给当前这件事录一份过程（单次开启；生命周期跟随 episode）。
+    @discardableResult
+    func startRecordingCurrentEpisode(now: Date = Date()) -> RecordingSession? {
+        guard let episode = currentEpisode,
+              let target = snapshot.targets[episode.targetID]
+        else { return nil }
+        let session = recordingCoordinator.start(
+            title: target.name,
+            targetID: target.id,
+            episodeID: episode.id,
+            autoFollowed: true,
+            now: now
+        )
+        recordingCoordinator.note(
+            kind: .episode,
+            title: String(format: tr("recording_episode_started"), target.name),
+            at: now
+        )
+        return session
+    }
+
+    @discardableResult
+    func stopRecording(now: Date = Date()) -> RecordingSession? {
+        recordingCoordinator.stop(now: now)
+    }
+
+    var activeRecordingSession: RecordingSession? {
+        snapshot.activeRecordingSession
+    }
+
+    /// 会话的 trace 条目（详情页与成稿生成用）。
+    func recordingEntries(for sessionID: UUID) -> [RecordingEntry] {
+        recordingTraceStore.load(for: sessionID)
+    }
+
+    /// 改标题/手改成稿（状态流转归协调器管，这里不碰 status）。
+    @discardableResult
+    func updateRecordingSession(
+        _ sessionID: UUID,
+        title: String? = nil,
+        markdown: String? = nil,
+        now: Date = Date()
+    ) -> Bool {
+        guard var session = snapshot.recordingSessions[sessionID] else { return false }
+        if let title {
+            let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { session.title = trimmed }
+        }
+        if let markdown {
+            session.markdown = markdown.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        session.updatedAt = now
+        return commit([.recordingSessionChanged(session, at: now)])
+    }
+
+    @discardableResult
+    func deleteRecordingSession(_ sessionID: UUID, now: Date = Date()) -> Bool {
+        guard snapshot.recordingSessions[sessionID] != nil else { return false }
+        recordingCoordinator.discard(sessionID)
+        return commit([.recordingSessionDeleted(id: sessionID, at: now)])
+    }
+
+    /// AI 整理：把 trace 事实行交给当前引擎生成成稿并存回。
+    /// 失败把错误原样亮出来（lastError），不做冒名降级。
+    @discardableResult
+    func composeRecordingMarkdown(
+        _ sessionID: UUID,
+        style: RecordingStyle
+    ) async -> RecordingSession? {
+        guard let session = snapshot.recordingSessions[sessionID] else { return nil }
+        let entries = recordingEntries(for: sessionID)
+        guard !entries.isEmpty else {
+            lastError = tr("this_recording_has_no_entries")
+            return nil
+        }
+        let engine = intelligenceEngine
+        do {
+            let markdown = try await engine.composeRecordMarkdown(RecordComposeInput(
+                title: session.title,
+                style: style,
+                factLines: entries.map { $0.factLine() }
+            ))
+            let now = Date()
+            guard var updated = snapshot.recordingSessions[sessionID] else { return nil }
+            updated.style = style
+            updated.markdown = markdown
+            updated.composedBy = engine.name
+            updated.updatedAt = now
+            guard commit([.recordingSessionChanged(updated, at: now)]) else { return nil }
+            return snapshot.recordingSessions[sessionID]
+        } catch {
+            lastError = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// 协调器的元数据落盘入口（事件日志的唯一写入口在 commit）。
+    @discardableResult
+    func persistRecordingSession(_ session: RecordingSession, at now: Date) -> Bool {
+        commit([.recordingSessionChanged(session, at: now)])
+    }
+
+    #if DEBUG
+    /// 测试后门：往在录会话里塞一条事实（相邻去重逻辑的单测入口）。
+    func noteRecordingFactForTesting(
+        kind: RecordingEntryKind,
+        title: String,
+        detail: String = ""
+    ) {
+        recordingCoordinator.note(kind: kind, title: title, detail: detail)
+    }
+    #endif
+
+    /// 给在录的会话记一条生命周期事实。跟随工作的会话只记自己那段 episode 的事；
+    /// 主动录制的会话什么都记（它录的就是「这台机器上正在发生的过程」）。
+    private func recordingNote(
+        kind: RecordingEntryKind,
+        title: String,
+        detail: String = "",
+        episodeID: UUID?,
+        now: Date
+    ) {
+        guard let active = snapshot.activeRecordingSession else { return }
+        if active.autoFollowed, let episodeID, active.episodeID != episodeID { return }
+        recordingCoordinator.note(kind: kind, title: title, detail: detail, at: now)
+    }
+
+    /// episode 生命周期对录制的驱动：跟随中的会话随它暂停/继续/收尾；
+    /// 全局自动录制打开时，新开始的事自动起一份。
+    private func handleRecordingOnEpisodeStart(
+        _ episode: AttentionEpisode,
+        now: Date
+    ) {
+        if let active = snapshot.activeRecordingSession, active.autoFollowed {
+            if active.episodeID == episode.id {
+                recordingCoordinator.note(
+                    kind: .episode,
+                    title: tr("recording_episode_resumed"),
+                    at: now
+                )
+                recordingCoordinator.resume(now: now)
+                return
+            }
+            // 切到别件事：上一份就地收尾。
+            _ = recordingCoordinator.stop(now: now)
+        }
+        guard intelligencePreferences.autoRecordEpisodes,
+              snapshot.activeRecordingSession == nil,
+              let target = snapshot.targets[episode.targetID]
+        else { return }
+        _ = recordingCoordinator.start(
+            title: target.name,
+            targetID: target.id,
+            episodeID: episode.id,
+            autoFollowed: true,
+            now: now
+        )
+        recordingCoordinator.note(
+            kind: .episode,
+            title: String(format: tr("recording_episode_started"), target.name),
+            at: now
+        )
+    }
+
+    private func handleRecordingOnEpisodePause(_ episodeID: UUID, now: Date) {
+        guard let active = snapshot.activeRecordingSession,
+              active.autoFollowed,
+              active.episodeID == episodeID
+        else { return }
+        recordingCoordinator.note(kind: .episode, title: tr("recording_episode_paused"), at: now)
+        recordingCoordinator.pause(now: now)
+    }
+
+    private func handleRecordingOnEpisodeResume(_ episodeID: UUID, now: Date) {
+        guard let active = snapshot.activeRecordingSession,
+              active.autoFollowed,
+              active.episodeID == episodeID
+        else { return }
+        recordingCoordinator.note(kind: .episode, title: tr("recording_episode_resumed"), at: now)
+        recordingCoordinator.resume(now: now)
+    }
+
+    private func handleRecordingOnEpisodeEnd(_ episodeID: UUID, now: Date) {
+        guard let active = snapshot.activeRecordingSession,
+              active.autoFollowed,
+              active.episodeID == episodeID
+        else { return }
+        recordingCoordinator.note(kind: .episode, title: tr("recording_episode_ended"), at: now)
+        _ = recordingCoordinator.stop(now: now)
     }
 
     // MARK: - 现场快照

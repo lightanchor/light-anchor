@@ -1065,3 +1065,95 @@
 "couldn_t_save_the_scene" = "存不下当前现场";
 "brought_in_from_the_current_scene" = "已带入当前现场";
 "actions_from_scene_summary" = "共 %1$d 个动作：%2$d 个应用、%3$d 个文件、%4$d 个网页；修剪后保存。";
+
+/* 定时任务 */
+"schedule" = "定时";
+"tomorrow" = "明天";
+"repeat_once" = "单次";
+"repeat_daily" = "每天";
+"repeat_weekdays" = "工作日";
+"repeat_weekly" = "每周";
+"repeat_monthly" = "每月";
+"add_a_schedule" = "新建定时";
+"edit_schedule" = "编辑定时";
+"nothing_scheduled_yet" = "还没有定时任务";
+"set_a_one_off_alarm_or" = "设一个单次闹钟或重复提醒，到点它来找你，不弹窗不抢前台。";
+"already_reminded" = "已提醒";
+"time_from_calendar_event" = "时间取自日历「%@」";
+"scene_attached" = "已收好现场";
+"it_comes_to_find_you" = "到点它来找你；重复任务每次触发后自动排下一场。";
+"what_to_do_then" = "到点要做什么";
+"phrase_it_so_future_you" = "写成那时的你一眼能接上的话。";
+"e_g_get_back_to_the" = "例如：回来继续改发布脚本";
+"when_it_fires" = "什么时候来";
+"one_off_alarms_finish_after_firing" = "单次闹钟触发一次即完成；重复任务触发后滚到下一场。";
+"fire_time" = "触发时间";
+"repeat" = "重复";
+"pick_from_calendar" = "从日历选时间";
+"pick_a_calendar_event" = "选择日历事件";
+"no_upcoming_events" = "近两周没有日历事件";
+"allow_calendar_access" = "授权读取日历";
+"calendar_access_denied" = "日历读取被拒，可在系统设置中打开";
+"collect_the_scene" = "收集现场";
+"scheduled_task_time_arrived" = "定时任务到点了";
+"scene_saved_open_to_restore" = "已收好当时的现场，打开轻锚一键恢复。";
+"untitled_event" = "（无标题事件）";
+"calendar_access" = "日历";
+"reads_event_times_you_pick_for" = "只在你为定时任务挑选时间时读取事件的标题和时间，不写入。";
+
+/* 记录 */
+"records" = "记录";
+"no_records_yet" = "还没有记录";
+"untitled_record" = "未命名记录";
+"record_style_guide" = "给人看的";
+"record_style_skill" = "给 AI 的 skill";
+"record_style_guide_detail" = "整理成一篇分享文档：背景、步骤、坑点，直接发给朋友。";
+"record_style_skill_detail" = "整理成 SKILL.md：frontmatter + 面向 agent 的执行指令，AI 读了照做。";
+"composed_by_engine" = "由%@整理";
+"what_this_record_is" = "这条记录";
+"record_title_placeholder" = "例如：修好签名校验失败的过程";
+"record_audience" = "给谁看";
+"composed_markdown" = "整理成稿";
+"compose_with_ai" = "AI 整理";
+"composing" = "整理中…";
+"copy_markdown" = "复制 Markdown";
+"export_file" = "导出文件";
+"compose_failed_please_retry" = "整理失败，请重试。";
+
+/* 定时（回顾页区块） */
+"all_scheduled_tasks" = "全部定时任务";
+"only_fires_with_scenes" = "只看收到现场的";
+"will_collect_a_scene" = "到点收现场";
+"deleted_scheduled_task" = "（已删除的定时任务）";
+"view_the_scene" = "看当时的现场";
+"each_fire_collects_a_checkpoint" = "每次到点收一份现场检查点——触发那一刻屏幕上的文件、网页和终端，与你当时在做什么无关。";
+"collect_a_scene_when_it_fires" = "到点收集现场检查点";
+
+/* 过程记录 */
+"work_session" = "工作段";
+"recording_note" = "备注";
+"recording_now" = "录制中";
+"recording_paused" = "已暂停";
+"recording_detail" = "详情";
+"recording_detail_subtitle" = "软件对这段过程的自动留痕；可生成给人看的复盘或给 AI 的 skill。";
+"recording_section_intro" = "开始录制后，切了哪个应用、开了哪个文件、跑了什么命令都会自动记下来；停止后可生成成稿。";
+"recording_started_at_time" = "%@ 开始的录制";
+"recording_episode_started" = "开始做「%@」";
+"recording_episode_paused" = "暂时放下";
+"recording_episode_resumed" = "回来继续";
+"recording_episode_ended" = "这件事结束了";
+"recording_wait_started" = "开始等待";
+"recording_hit_the_entry_limit" = "条目已达上限，之后的过程不再记录";
+"this_recording_has_no_entries" = "这份录制没有记到条目。";
+"n_trace_entries" = "%lld 条过程条目";
+"n_more_entries_omitted" = "其余 %lld 条略";
+"trace_timeline" = "过程时间线";
+"not_composed_yet_open_to_compose" = "（还没生成成稿，打开详情用「AI 整理」生成。）";
+"compose_turns_the_trace_into" = "「AI 整理」把过程事实按所选风格整理成 Markdown，可继续手改。";
+"record_this_one" = "记录本次";
+"auto_record_episodes" = "跟随工作自动录制过程";
+"auto_record_episodes_detail" = "开始一件事就自动录过程：放下暂停、恢复继续、结束收尾。录出来的 trace 只在本机。";
+"tools" = "工具";
+"record_a_process" = "录制过程";
+"stop_process_recording" = "停止录制";
+"recording_for_duration" = "录制中 · %@";

@@ -352,6 +352,18 @@ struct ReviewView: View {
                     groupGap
                 }
 
+                // 定时：即将到来的管理 + 触发历史时间线（点开看当时的现场）。
+                ScheduleReviewSection { scene in
+                    selectedHistoryScene = scene
+                }
+                .environmentObject(workspace)
+                groupGap
+
+                // 过程记录：软件对每段工作/过程的自动留痕与成稿。
+                RecordingReviewSection()
+                    .environmentObject(workspace)
+                groupGap
+
                 narrativeSection
             }
             .padding(.horizontal, LightAnchorDesign.workspaceHorizontalPadding)

@@ -194,6 +194,12 @@ struct IntelligenceView: View {
                     detail: tr("fills_in_missing_link_titles_and"),
                     isOn: $preferences.inboxAutoOrganize
                 )
+                settingsRowDivider
+                toggleRow(
+                    title: tr("auto_record_episodes"),
+                    detail: tr("auto_record_episodes_detail"),
+                    isOn: $preferences.autoRecordEpisodes
+                )
             }
         }
     }
