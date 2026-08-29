@@ -13,9 +13,15 @@ APP="$DIST_DIR/$PRODUCT.app"
 ARCHIVE_NAME="$PRODUCT-$VERSION-$BUILD_NUMBER-macos.zip"
 ARCHIVE="$DIST_DIR/$ARCHIVE_NAME"
 
-swift build -c release --product "$PRODUCT"
-swift build -c release --product LightAnchorEvent
-BIN_DIR=$(swift build -c release --show-bin-path)
+# 额外的 swift build 参数，按空白拆分。只装 Command Line Tools 的机器缺
+# FoundationModels 宏插件，需要：
+#   LIGHTANCHOR_SWIFT_BUILD_FLAGS="-Xswiftc -DLIGHTANCHOR_DISABLE_FOUNDATIONMODELS"
+# （通常还要 SDKROOT 钉到带宏插件的 SDK；Xcode / CI 上留空即可。）
+SWIFT_BUILD_FLAGS=(${=LIGHTANCHOR_SWIFT_BUILD_FLAGS:-})
+
+swift build -c release --product "$PRODUCT" $SWIFT_BUILD_FLAGS
+swift build -c release --product LightAnchorEvent $SWIFT_BUILD_FLAGS
+BIN_DIR=$(swift build -c release --show-bin-path $SWIFT_BUILD_FLAGS)
 BIN="$BIN_DIR/$PRODUCT"
 EVENT_BIN="$BIN_DIR/LightAnchorEvent"
 test -x "$BIN"

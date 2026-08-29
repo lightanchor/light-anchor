@@ -8,7 +8,11 @@
 import AppKit
 import Foundation
 
-#if canImport(FoundationModels)
+// LIGHTANCHOR_DISABLE_FOUNDATIONMODELS：只装 Command Line Tools 的机器缺
+// FoundationModels 的宏插件（@Generable 展不开），加
+// `-Xswiftc -DLIGHTANCHOR_DISABLE_FOUNDATIONMODELS` 可关掉端侧引擎照常构建；
+// Xcode / CI 不受影响。
+#if canImport(FoundationModels) && !LIGHTANCHOR_DISABLE_FOUNDATIONMODELS
 import FoundationModels
 #endif
 
