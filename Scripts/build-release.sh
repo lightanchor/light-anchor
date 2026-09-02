@@ -25,15 +25,57 @@ if ! command -v jq >/dev/null 2>&1; then
     exit 1
 fi
 
+# 快捷指令元数据。App Intents 不是运行期注册的：「快捷指令」只读
+# Contents/Resources/Metadata.appintents，Xcode 在 ExtractAppIntentsMetadata 阶段用
+# appintentsmetadataprocessor 生成它，swift build 不会。这里照 Xcode 的做法自己跑：
+#   1. 编译时让 swiftc 把 AppIntent / AppShortcutsProvider 等协议的实现抽成
+#      .swiftconstvalues（-emit-const-values + -const-gather-protocols-file）；
+#   2. 拷完二进制、签名之前，把这些文件喂给处理器写出元数据（见下文）。
+# 处理器只随 Xcode 分发（Command Line Tools 没有）。缺 Xcode 的机器要么装上并
+# xcode-select 过去，要么 LIGHTANCHOR_SKIP_APPINTENTS_METADATA=1 明确接受一个
+# 快捷指令看不见的本地包；verify-release.sh 会按同一变量跳过对应检查。
+SKIP_APPINTENTS_METADATA=${LIGHTANCHOR_SKIP_APPINTENTS_METADATA:-0}
+APPINTENTS_PROCESSOR=""
+if [[ "$SKIP_APPINTENTS_METADATA" != "1" ]]; then
+    APPINTENTS_PROCESSOR=$(xcrun --find appintentsmetadataprocessor 2>/dev/null) || {
+        printf '%s\n' \
+            "appintentsmetadataprocessor not found (xcrun --find). It ships with Xcode only, not the Command Line Tools;" \
+            "without it the app has no Metadata.appintents and the Shortcuts app cannot see its intents." \
+            "Install Xcode and select it (sudo xcode-select -s /Applications/Xcode.app), or set" \
+            "LIGHTANCHOR_SKIP_APPINTENTS_METADATA=1 to knowingly build a package without Shortcuts support." >&2
+        exit 1
+    }
+    # 协议名单与 Xcode 的 SwiftBuild（AppIntentsMetadata 规格）一致；文件放在固定路径，
+    # 否则路径进了编译参数，每次都会触发全量重编。
+    APPINTENTS_PROTOCOLS="$ROOT_DIR/.build/appintents/const-extract-protocols.json"
+    mkdir -p "${APPINTENTS_PROTOCOLS:h}"
+    jq -n '[
+        "AppIntent", "EntityQuery", "AppEntity", "TransientEntity", "AppEnum",
+        "AppShortcutProviding", "AppShortcutsProvider", "AnyResolverProviding",
+        "AppIntentsPackage", "DynamicOptionsProvider", "_IntentValueRepresentable",
+        "_AssistantIntentsProvider", "_GenerativeFunctionExtractable",
+        "IntentValueQuery", "Resolver"
+    ]' > "$APPINTENTS_PROTOCOLS"
+    SWIFT_BUILD_FLAGS+=(
+        -Xswiftc -emit-const-values
+        -Xswiftc -Xfrontend -Xswiftc -const-gather-protocols-file
+        -Xswiftc -Xfrontend -Xswiftc "$APPINTENTS_PROTOCOLS"
+    )
+fi
+
 # 更新信任锚随构建内置：有更新私钥时先派生公钥放进 Resources，swift build 会把它
 # 打进资源 bundle，应用内 ReleaseTrust 只认这把内置公钥。派生出来的 pem 是构建产物，
 # 结束时清掉，免得烟测的一次性密钥留在源码树里被下一次开发构建带走。
 EMBEDDED_PUBLIC_KEY="$ROOT_DIR/Sources/LightAnchor/Resources/update-public.pem"
 EMBEDDED_PUBLIC_KEY_CREATED=0
 NOTARY_DIR=""
+APPINTENTS_TMP=""
 cleanup() {
     if [[ -n "$NOTARY_DIR" && -d "$NOTARY_DIR" ]]; then
         rm -rf "$NOTARY_DIR"
+    fi
+    if [[ -n "$APPINTENTS_TMP" && -d "$APPINTENTS_TMP" ]]; then
+        rm -rf "$APPINTENTS_TMP"
     fi
     if (( EMBEDDED_PUBLIC_KEY_CREATED )); then
         rm -f "$EMBEDDED_PUBLIC_KEY"
@@ -103,6 +145,71 @@ cp "$ICON" "$APP/Contents/Resources/AppIcon.icns"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$APP/Contents/Info.plist"
 
+# 快捷指令元数据必须在签名之前落进 Resources，否则封条对不上。参数照抄 Xcode 的
+# ExtractAppIntentsMetadata 命令行；--compile-time-extraction 让处理器只信
+# .swiftconstvalues，二进制只作校验，不再依赖运行期反射元数据。
+APPINTENTS_METADATA="$APP/Contents/Resources/Metadata.appintents"
+if [[ -n "$APPINTENTS_PROCESSOR" ]]; then
+    APPINTENTS_TMP=$(mktemp -d "${TMPDIR:-/tmp}/lightanchor-appintents.XXXXXX")
+    SOURCE_LIST="$APPINTENTS_TMP/sources.txt"
+    CONST_VALUES_LIST="$APPINTENTS_TMP/const-values.txt"
+    find "$ROOT_DIR/Sources/$PRODUCT" -type f -name '*.swift' | sort > "$SOURCE_LIST"
+    # .swiftconstvalues 的位置随 SwiftPM 后端不同：原生后端在 <bin>/<模块>.build/ 下，
+    # Swift Build 后端在 .build/out/Intermediates.noindex/<模块>.build/Release/ 下。
+    # 都按模块目录过滤，免得把 LightAnchorEvent 的抽取结果混进来。
+    typeset -a CONST_VALUE_ROOTS=("$BIN_DIR")
+    if [[ -d "$BIN_DIR/../../Intermediates.noindex/$PRODUCT.build/Release" ]]; then
+        CONST_VALUE_ROOTS+=("$BIN_DIR/../../Intermediates.noindex/$PRODUCT.build/Release")
+    fi
+    find "${CONST_VALUE_ROOTS[@]}" -type f -name '*.swiftconstvalues' -path "*/$PRODUCT.build/*" \
+        | sort > "$CONST_VALUES_LIST"
+    if [[ ! -s "$CONST_VALUES_LIST" ]]; then
+        printf '%s\n' \
+            "swift build emitted no .swiftconstvalues for $PRODUCT under $BIN_DIR;" \
+            "cannot extract App Intents metadata (is -emit-const-values being dropped?)." >&2
+        exit 1
+    fi
+    DEPLOYMENT_TARGET=$(/usr/libexec/PlistBuddy -c "Print :LSMinimumSystemVersion" "$APP/Contents/Info.plist")
+    BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Contents/Info.plist")
+    SWIFTC_PATH=$(xcrun --find swiftc)
+    TOOLCHAIN_DIR=${SWIFTC_PATH:h:h:h}
+    APPINTENTS_SDKROOT=${SDKROOT:-$(xcrun --show-sdk-path --sdk macosx)}
+    XCODE_BUILD_VERSION=$(xcodebuild -version | sed -n 's/^Build version //p')
+    if [[ -z "$XCODE_BUILD_VERSION" ]]; then
+        printf '%s\n' "Could not read the Xcode build version (xcodebuild -version)." >&2
+        exit 1
+    fi
+    # 每个架构一条 --target-triple，和 Xcode 对 ARCHS 的展开一致。
+    typeset -a TARGET_TRIPLES=()
+    for arch in $(lipo -archs "$APP/Contents/MacOS/$PRODUCT"); do
+        TARGET_TRIPLES+=(--target-triple "$arch-apple-macos$DEPLOYMENT_TARGET")
+    done
+    "$APPINTENTS_PROCESSOR" \
+        --toolchain-dir "$TOOLCHAIN_DIR" \
+        --module-name "$PRODUCT" \
+        --sdk-root "$APPINTENTS_SDKROOT" \
+        --xcode-version "$XCODE_BUILD_VERSION" \
+        --platform-family macOS \
+        --deployment-target "$DEPLOYMENT_TARGET" \
+        "${TARGET_TRIPLES[@]}" \
+        --bundle-identifier "$BUNDLE_ID" \
+        --output "$APP/Contents/Resources" \
+        --binary-file "$APP/Contents/MacOS/$PRODUCT" \
+        --source-file-list "$SOURCE_LIST" \
+        --swift-const-vals-list "$CONST_VALUES_LIST" \
+        --stringsdata-file "$APPINTENTS_TMP/ExtractedAppShortcutsMetadata.stringsdata" \
+        --compile-time-extraction \
+        --deployment-aware-processing \
+        --no-app-shortcuts-localization
+    if [[ ! -f "$APPINTENTS_METADATA/extract.actionsdata" ]]; then
+        printf '%s\n' "appintentsmetadataprocessor exited 0 but wrote no $APPINTENTS_METADATA/extract.actionsdata." >&2
+        exit 1
+    fi
+    printf '%s\n' "Wrote App Intents metadata: $APPINTENTS_METADATA"
+else
+    printf '%s\n' "Skipped App Intents metadata (LIGHTANCHOR_SKIP_APPINTENTS_METADATA=1): the Shortcuts app will not see this build's intents."
+fi
+
 if [[ -n ${LIGHTANCHOR_SIGNING_IDENTITY:-} ]]; then
     # 嵌套可执行文件必须先单独签名，否则外层签名和公证都会拒绝它。
     codesign --force --options runtime --timestamp \
@@ -153,14 +260,11 @@ ARCHIVE_SHA256=$(shasum -a 256 "$ARCHIVE" | awk '{print $1}')
 ARCHIVE_SIZE=$(stat -f%z "$ARCHIVE")
 EVENT_SCHEMA=$(sed -n 's/.*eventDocumentVersion = \([0-9][0-9]*\).*/\1/p' \
     "$ROOT_DIR/Sources/LightAnchor/Domain/Schema.swift")
-SYNC_SCHEMA=$(sed -n 's/.*syncEnvelopeVersion = \([0-9][0-9]*\).*/\1/p' \
-    "$ROOT_DIR/Sources/LightAnchor/Domain/Schema.swift")
 MANIFEST_SCHEMA=$(sed -n 's/.*releaseManifestVersion = \([0-9][0-9]*\).*/\1/p' \
     "$ROOT_DIR/Sources/LightAnchor/Domain/Schema.swift")
 # An empty scrape leaves `sed` exiting 0, which would emit a manifest with a
 # blank value and then sign the broken JSON.
 if [[ ! "$EVENT_SCHEMA" =~ ^[0-9]+$ ]] ||
-   [[ ! "$SYNC_SCHEMA" =~ ^[0-9]+$ ]] ||
    [[ ! "$MANIFEST_SCHEMA" =~ ^[0-9]+$ ]]; then
     printf '%s\n' "Could not read schema versions from Schema.swift." >&2
     exit 1
@@ -188,7 +292,6 @@ jq -n \
     --arg version "$VERSION" \
     --arg build "$BUILD_NUMBER" \
     --argjson eventSchemaVersion "$EVENT_SCHEMA" \
-    --argjson syncEnvelopeVersion "$SYNC_SCHEMA" \
     --arg binarySHA256 "$SHA256" \
     --arg artifactFilename "$ARCHIVE_NAME" \
     --arg artifactURL "$ARTIFACT_URL" \
@@ -204,7 +307,6 @@ jq -n \
         version: $version,
         build: $build,
         eventSchemaVersion: $eventSchemaVersion,
-        syncEnvelopeVersion: $syncEnvelopeVersion,
         binarySHA256: $binarySHA256,
         artifact: {
             filename: $artifactFilename,

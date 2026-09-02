@@ -46,3 +46,49 @@ jobs:
       - name: Local data backup and restore smoke
         run: Scripts/smoke-data-backup.sh
 
+  # Shortcuts support only exists if the bundle carries Metadata.appintents, and
+  # only an Xcode-equipped machine can produce it (appintentsmetadataprocessor is
+  # not in the Command Line Tools). This is the gate for that feature.
+  release-bundle:
+    name: Release bundle and Shortcuts metadata
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      # The image's default Xcode 16.4 (Swift 6.1) rejects sources that newer
+      # compilers accept; pick the newest Xcode 26 when the image ships one.
+      - name: Select Xcode
+        run: |
+          xcode=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -n 1 || true)
+          if [ -n "$xcode" ]; then
+            sudo xcode-select -s "$xcode"
+          fi
+          xcodebuild -version
+          xcrun --find appintentsmetadataprocessor
+
+      - name: Install script dependencies
+        run: brew install jq
+
+      # No signing identity: build-release.sh falls back to ad-hoc signing.
+      - name: Build release bundle
+        run: Scripts/build-release.sh
+
+      - name: Verify release bundle
+        run: Scripts/verify-release.sh
+
+      - name: Assert Shortcuts can see every intent
+        run: |
+          set -euo pipefail
+          metadata=dist/LightAnchor.app/Contents/Resources/Metadata.appintents
+          test -d "$metadata"
+          ls -la "$metadata"
+          plutil -p "$metadata/version.json"
+          for intent in LightAnchorCaptureTextIntent LightAnchorBeginWaitingIntent LightAnchorEndCurrentWorkIntent; do
+            jq -e --arg id "$intent" '.actions[$id]' "$metadata/extract.actionsdata" >/dev/null \
+              || { echo "::error::$intent missing from extract.actionsdata"; exit 1; }
+          done
+          jq -e '.autoShortcuts | length > 0' "$metadata/extract.actionsdata" >/dev/null \
+            || { echo "::error::no App Shortcuts in extract.actionsdata"; exit 1; }
+          jq '{actions: (.actions | keys), shortcuts: [.autoShortcuts[].phraseTemplates[].key]}' \
+            "$metadata/extract.actionsdata"
+
