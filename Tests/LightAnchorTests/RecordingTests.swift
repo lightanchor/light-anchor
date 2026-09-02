@@ -79,7 +79,7 @@ final class RecordingTests: XCTestCase {
 
     func testHeuristicComposeGuideListsFacts() async throws {
         let engine = HeuristicIntelligenceEngine()
-        let markdown = try await engine.composeRecordMarkdown(RecordComposeInput(
+        let markdown = await engine.composeRecordMarkdown(RecordComposeInput(
             title: "修构建",
             style: .guide,
             factLines: ["09:00 [命令] swift build", "09:02 [文件] build.sh"]
@@ -90,7 +90,7 @@ final class RecordingTests: XCTestCase {
 
     func testHeuristicComposeSkillEmitsFrontmatter() async throws {
         let engine = HeuristicIntelligenceEngine()
-        let markdown = try await engine.composeRecordMarkdown(RecordComposeInput(
+        let markdown = await engine.composeRecordMarkdown(RecordComposeInput(
             title: "Fix the build",
             style: .skill,
             factLines: ["09:00 [命令] swift build"]

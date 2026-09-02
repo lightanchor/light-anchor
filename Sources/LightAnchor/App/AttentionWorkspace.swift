@@ -182,7 +182,7 @@ final class AttentionWorkspace: ObservableObject {
         #endif
         backfillInboxOrganization()
         startActiveWaitingMonitors()
-        scheduledTaskCoordinator.startMonitoringScheduledTasks()
+        scheduledTaskCoordinator.startMonitoringScheduledTasks(now: now)
         recordingCoordinator.finalizeOrphanedSessions(now: now)
     }
 
@@ -1806,7 +1806,7 @@ final class AttentionWorkspace: ObservableObject {
         )
         guard task.isValid, commit([.scheduledTaskChanged(task, at: now)]) else { return nil }
         if let persisted = snapshot.scheduledTasks[task.id] {
-            scheduledTaskCoordinator.startMonitoring(persisted)
+            scheduledTaskCoordinator.startMonitoring(persisted, now: now)
         }
         return snapshot.scheduledTasks[task.id]
     }
@@ -1818,7 +1818,7 @@ final class AttentionWorkspace: ObservableObject {
         var updated = task
         updated.updatedAt = now
         guard commit([.scheduledTaskChanged(updated, at: now)]) else { return false }
-        scheduledTaskCoordinator.startMonitoring(updated)
+        scheduledTaskCoordinator.startMonitoring(updated, now: now)
         return true
     }
 
@@ -1841,13 +1841,35 @@ final class AttentionWorkspace: ObservableObject {
         return commit([.scheduledTaskChanged(task, at: now)])
     }
 
+    /// 应用重新打开时跳过已经错过的场次：不补通知、不收现场、不写触发历史。
+    /// 单次任务直接结束，重复任务滚到严格晚于启动时刻的下一场。
+    @discardableResult
+    func skipMissedScheduledTask(_ taskID: UUID, now: Date = Date()) -> ScheduledTask? {
+        guard var task = snapshot.scheduledTasks[taskID],
+              task.status == .scheduled,
+              task.fireAt <= now
+        else { return snapshot.scheduledTasks[taskID] }
+
+        if let next = task.repeatRule.nextFireDate(
+            after: now,
+            previous: task.fireAt
+        ) {
+            task.fireAt = next
+        } else {
+            task.status = .done
+        }
+        task.updatedAt = now
+        guard commit([.scheduledTaskChanged(task, at: now)]) else { return nil }
+        return snapshot.scheduledTasks[taskID]
+    }
+
     /// 到点：落一条触发记录、发系统通知；重复任务滚到下一场并继续盯，
     /// 单次任务就此完成。要收检查点的，异步收好后补挂到触发记录上。
     /// 由 ScheduledTaskCoordinator 调用。
     func fireScheduledTask(_ taskID: UUID, now: Date = Date()) {
         guard let task = snapshot.scheduledTasks[taskID],
               task.status == .scheduled,
-              task.fireAt.timeIntervalSince(now) < 1
+              now >= task.fireAt
         else { return }
         let rolled = task.firing(at: now)
         let fire = ScheduledTaskFire(taskID: task.id, taskTitle: task.title, firedAt: task.fireAt)

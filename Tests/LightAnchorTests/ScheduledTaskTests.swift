@@ -177,6 +177,56 @@ final class ScheduledTaskTests: XCTestCase {
         XCTAssertEqual(fires.map(\.firedAt), [fireAt, fireAt])
     }
 
+    func testFireScheduledTaskDoesNotFireBeforeDue() throws {
+        let workspace = makeWorkspace()
+        let fireAt = Date().addingTimeInterval(600)
+        let task = try XCTUnwrap(workspace.createScheduledTask(title: "还没到", fireAt: fireAt))
+
+        workspace.fireScheduledTask(task.id, now: fireAt.addingTimeInterval(-0.5))
+
+        XCTAssertTrue(workspace.snapshot.scheduledFires.isEmpty)
+        XCTAssertEqual(workspace.snapshot.scheduledTasks[task.id]?.status, .scheduled)
+    }
+
+    func testMaintenanceSkipsMissedOneOffWithoutCreatingAFire() throws {
+        let workspace = makeWorkspace()
+        let origin = Date()
+        let fireAt = origin.addingTimeInterval(3600)
+        let task = try XCTUnwrap(workspace.createScheduledTask(
+            title: "错过的单次",
+            fireAt: fireAt,
+            now: origin
+        ))
+
+        workspace.runBackgroundMaintenance(now: origin.addingTimeInterval(7200))
+
+        XCTAssertEqual(workspace.snapshot.scheduledTasks[task.id]?.status, .done)
+        XCTAssertTrue(workspace.snapshot.scheduledFires.isEmpty)
+    }
+
+    func testMaintenanceRollsMissedRepeatingTaskWithoutCreatingFires() throws {
+        let workspace = makeWorkspace()
+        let origin = Date()
+        let fireAt = origin.addingTimeInterval(3600)
+        let task = try XCTUnwrap(workspace.createScheduledTask(
+            title: "错过的重复任务",
+            fireAt: fireAt,
+            repeatRule: .daily,
+            now: origin
+        ))
+        let launch = origin.addingTimeInterval(3 * 24 * 3600)
+
+        workspace.runBackgroundMaintenance(now: launch)
+
+        let persisted = try XCTUnwrap(workspace.snapshot.scheduledTasks[task.id])
+        XCTAssertEqual(persisted.status, .scheduled)
+        XCTAssertEqual(
+            persisted.fireAt,
+            ScheduledTaskRepeatRule.daily.nextFireDate(after: launch, previous: fireAt)
+        )
+        XCTAssertTrue(workspace.snapshot.scheduledFires.isEmpty)
+    }
+
     func testFireHistorySurvivesTaskDeletion() throws {
         let workspace = makeWorkspace()
         let fireAt = Date().addingTimeInterval(600)
@@ -196,7 +246,8 @@ final class ScheduledTaskTests: XCTestCase {
             )
         })
         // 没有任何目标/工作段也能收：检查点与目标无关。
-        let scene = try XCTUnwrap(await workspace.captureCheckpointScene())
+        let capturedScene = await workspace.captureCheckpointScene()
+        let scene = try XCTUnwrap(capturedScene)
         XCTAssertNil(scene.targetID)
         XCTAssertEqual(scene.filterMode, .saveAll)
         XCTAssertFalse(scene.items.isEmpty)
@@ -274,7 +325,7 @@ final class ScheduledTaskTests: XCTestCase {
     func testTimelinePutsOverdueUnfiredTasksUnderToday() {
         let now = date(2026, 8, 28, 8)
         var snapshot = AttentionSnapshot()
-        // 昨天就该响、应用一直没开：显示在今天组，协调器随后会补火。
+        // 在启动重整尚未运行的纯投影里，过期任务先归到今天组。
         snapshot.apply(.scheduledTaskChanged(
             ScheduledTask(title: "迟到的", fireAt: date(2026, 8, 27, 20))
         ))

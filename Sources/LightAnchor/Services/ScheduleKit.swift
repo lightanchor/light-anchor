@@ -25,9 +25,17 @@ final class ScheduledTaskCoordinator {
         tasks.values.forEach { $0.task.cancel() }
     }
 
-    func startMonitoring(_ scheduled: ScheduledTask) {
+    func startMonitoring(_ scheduled: ScheduledTask, now: Date = Date()) {
         guard scheduled.status == .scheduled else {
             cancelMonitoring(scheduled.id)
+            return
+        }
+        if scheduled.fireAt <= now {
+            guard let reconciled = workspace?.skipMissedScheduledTask(scheduled.id, now: now) else {
+                cancelMonitoring(scheduled.id)
+                return
+            }
+            startMonitoring(reconciled, now: now)
             return
         }
         if let existing = tasks[scheduled.id] {
@@ -49,8 +57,10 @@ final class ScheduledTaskCoordinator {
         })
     }
 
-    func startMonitoringScheduledTasks() {
-        workspace?.snapshot.upcomingScheduledTasks.forEach(startMonitoring)
+    func startMonitoringScheduledTasks(now: Date = Date()) {
+        workspace?.snapshot.upcomingScheduledTasks.forEach { task in
+            startMonitoring(task, now: now)
+        }
     }
 
     func cancelMonitoring(_ taskID: UUID) {
