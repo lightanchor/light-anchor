@@ -43,23 +43,6 @@ final class RecordingTests: XCTestCase {
         XCTAssertEqual(RecordingStyle.skill.exportFileName(for: "任意标题"), "SKILL.md")
     }
 
-    func testSessionDecodesLegacyPayloadWithoutNewFields() throws {
-        let json = """
-        {
-            "id": "\(UUID().uuidString)",
-            "title": "旧会话",
-            "startedAt": 778208400
-        }
-        """
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .secondsSince1970
-        let session = try decoder.decode(RecordingSession.self, from: Data(json.utf8))
-        XCTAssertEqual(session.status, .finished)
-        XCTAssertEqual(session.style, .guide)
-        XCTAssertFalse(session.autoFollowed)
-        XCTAssertEqual(session.entryCount, 0)
-    }
-
     // MARK: - trace 仓库
 
     func testTraceStoreRoundTripsEntries() throws {

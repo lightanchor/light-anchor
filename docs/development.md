@@ -56,6 +56,8 @@ chore(release): 更新 manifest 校验和与签名脚本
 
 `Scripts/build-release.sh` 生成 `dist/LightAnchor.app`、可分发 zip、带 checksum 的 update manifest 和可选 RSA 签名。没有 Developer ID 或更新私钥时仍可出未签名本地包；正式分发需要 `LIGHTANCHOR_SIGNING_IDENTITY`、`LIGHTANCHOR_UPDATE_PRIVATE_KEY` 与对应公钥。
 
+快捷指令（App Intents）靠包里的 `Contents/Resources/Metadata.appintents` 被系统发现，`swift build` 不会生成它。`build-release.sh` 照 Xcode 的 ExtractAppIntentsMetadata 阶段自己做：编译时加 `-emit-const-values` 与 `-const-gather-protocols-file`（协议名单写在 `.build/appintents/`），让 swiftc 把 `AppIntent` / `AppShortcutsProvider` 实现抽成 `.swiftconstvalues`，再在签名之前用 `xcrun appintentsmetadataprocessor --compile-time-extraction` 把它们写成元数据。处理器只随 Xcode 分发，只装 Command Line Tools 的机器会直接报错停下；确实不需要快捷指令的本地包可用 `LIGHTANCHOR_SKIP_APPINTENTS_METADATA=1` 跳过，`verify-release.sh` 按同一变量跳过检查，否则它会核对源码里每个 `AppIntent` 都出现在 `extract.actionsdata` 里。CI 的 `release-bundle` 任务在带 Xcode 的 runner 上跑完整个流程并断言三条 intent 都在。Info.plist 无需为此加任何键。
+
 公证必须在打包之前完成——`stapler` 会改写 App，之后再打包就和 manifest 里的校验和对不上。设置 `LIGHTANCHOR_NOTARY_PROFILE` 后直接跑 `build-release.sh`，它会在签名与打包之间提交公证并盖章；`Scripts/notarize-release.sh` 只用于单独公证已有 App 包。`LIGHTANCHOR_DIST_DIR` 可把产物输出到隔离目录。
 
 本机自用的安装路径：直接 `open dist/LightAnchor.app` 或整包拷到「应用程序」。没有 Developer ID 时脚本会做 ad-hoc 签名（带完整 bundle 封条）；**不要用 Finder/Keka 解压 dist 里的 zip 再运行**——解压工具会给产物打 `com.apple.quarantine`，隔离 + ad-hoc 会被 Gatekeeper 报「已损坏」。误触发后一行解除：`xattr -dr com.apple.quarantine /path/to/LightAnchor.app`。每次 ad-hoc 换包 CDHash 都变，TCC 权限（辅助功能/屏幕录制等）需要重授：旧那条授权会留在系统设置列表里、开关看着是开的却对不上新包，表现为「辅助功能明明开着却没用」。退出轻锚后跑 `Scripts/reset-permissions.sh` 清掉记录，再重新添加即可；权限页在这种构建下也会把这句提示直接写在辅助功能那一行。
@@ -66,9 +68,9 @@ chore(release): 更新 manifest 校验和与签名脚本
 
 ## 数据与隐私
 
-- 所有记录都在本机：事件溯源日志 `events.json` 是唯一真相，附件在同目录 `assets/`。旧日志里已被移除的事件类型经 `unsupported` 哨兵兼容跳过。
+- 所有记录都在本机：事件溯源日志 `events.json` 是唯一真相，附件在同目录 `assets/`。日志带 `schemaVersion`，版本不符整份拒绝读取，不做兼容解码。
 - `Scripts/backup-data.sh` 生成带 schema、文件大小和 SHA-256 manifest 的 `.tar.gz`；`Scripts/restore-data.sh --backup PATH --verify` 只校验，真正恢复必须显式 `--replace`，旧目录保留为 `.pre-restore-*`。
-- 设置 → 数据 提供 JSON 导出、诊断导出（脱敏）、完整备份/恢复和收件箱自动归档配置。备份里除了数据目录还含一份偏好快照（`preferences.plist`）：回顾正文、云端配置、快捷键、采集偏好都在 UserDefaults 里，不一起打包，换机恢复会静静丢掉它们。恢复只写清单内的键——备份文件是外部输入，不让它往 UserDefaults 里塞任意键；老备份没有这个文件时跳过。备份文件被当作**不可信输入**：恢复前先在临时目录里解一遍 `events.json`、拒绝符号链接（含隐藏项）并限制解压总量；恢复后 `.command` 类等待监视器退成手动、环境里的「运行命令 / 快捷指令」动作被停用、云端引擎与整屏截图 / 剪贴板采集回到关闭，更新地址与公钥路径永不写回；附件路径只认 `assets/` 目录内的平铺文件。云端 API Key 存在 Keychain 里，不在偏好 blob 中，因此也不在备份里。每次恢复留下的 `.pre-restore-*` 副本只保留最近一份，「删除全部本地数据」会一并清掉。
+- 设置 → 数据 提供 JSON 导出、诊断导出（脱敏）、完整备份/恢复和收件箱自动归档配置。备份里除了数据目录还含一份偏好快照（`preferences.plist`）：回顾正文、云端配置、快捷键、采集偏好都在 UserDefaults 里，不一起打包，换机恢复会静静丢掉它们。恢复只写清单内的键——备份文件是外部输入，不让它往 UserDefaults 里塞任意键；包里没有这个文件视为结构不完整，整体拒绝恢复。备份文件被当作**不可信输入**：恢复前先在临时目录里解一遍 `events.json`、拒绝符号链接（含隐藏项）并限制解压总量；恢复后 `.command` 类等待监视器退成手动、环境里的「运行命令 / 快捷指令」动作被停用、云端引擎与整屏截图 / 剪贴板采集回到关闭，更新地址与公钥路径永不写回；附件路径只认 `assets/` 目录内的平铺文件。云端 API Key 存在 Keychain 里，不在偏好 blob 中，因此也不在备份里。每次恢复留下的 `.pre-restore-*` 副本只保留最近一份，「删除全部本地数据」会一并清掉。
 - 「删除全部本地数据」的删/留清单在 `LocalDataErasure` 一处定义：内容、凭据（云端 API Key）与缓存必删，界面与隐私偏好刻意保留——删数据不该把用户收紧过的采集开关退回更宽松的默认。守门测试核对源码里每个偏好键都被显式分类。
 - 权限五项（麦克风、语音识别、屏幕录制、辅助功能、通知）全部按用途显示状态并跳系统设置，应用不代替用户授权。麦克风/语音识别/通知会弹窗要答案；辅助功能和屏幕录制的开关在系统设置里，系统不会回一个明确的「拒绝」，所以这两项只报「待系统设置里开启」，并在权限页开着时按秒复查——拨完开关切回来就是「已授权」。屏幕录制的授权在进程内被缓存，拨完要重开轻锚。
 - 设置 → 权限 可暂停自动现场记录，并按应用 Bundle ID 或网站域名选择「排除列表」/「只记录列表」；规则在读取窗口与终端事实之前生效。这里也可清除最近一小时或全部现场事实与截图，同时保留目标状态、用户备注和专注账本。

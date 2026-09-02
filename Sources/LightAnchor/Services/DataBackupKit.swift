@@ -220,12 +220,13 @@ struct LocalDataArchiveService: @unchecked Sendable {
                 throw LocalDataArchiveError.restoreFailed(error.localizedDescription)
             }
         }
-        // 偏好从包里取出来后就把文件拿掉：它不属于数据目录，装进去只会留个残留。
+        // 偏好快照是备份的一部分，缺了就不是我们打的包。取出来后就把文件拿掉：
+        // 它不属于数据目录，装进去只会留个残留。
         let preferencesURL = restoredRoot.appendingPathComponent(LocalPreferencesArchive.fileName)
-        let archivedPreferences = try? Data(contentsOf: preferencesURL)
-        if archivedPreferences != nil {
-            try? fileManager.removeItem(at: preferencesURL)
+        guard let archivedPreferences = try? Data(contentsOf: preferencesURL) else {
+            throw LocalDataArchiveError.archiveStructureInvalid
         }
+        try? fileManager.removeItem(at: preferencesURL)
 
         onProgress(.installing)
         let parent = rootURL.deletingLastPathComponent()
@@ -249,10 +250,7 @@ struct LocalDataArchiveService: @unchecked Sendable {
             throw LocalDataArchiveError.restoreFailed(error.localizedDescription)
         }
         // 文件就位后再写偏好：文件恢复失败会整体回滚，那时偏好也不该动。
-        // 老备份没有这个文件，跳过就是（那种包里本来也没有偏好）。
-        if let archivedPreferences {
-            try LocalPreferencesArchive.restore(from: archivedPreferences, into: defaults)
-        }
+        try LocalPreferencesArchive.restore(from: archivedPreferences, into: defaults)
         // 只留这一次的回退副本，更早的整目录旧数据不该无限期堆在旁边。
         Self.removePreRestoreCopies(of: rootURL, keepingLatest: 1)
     }

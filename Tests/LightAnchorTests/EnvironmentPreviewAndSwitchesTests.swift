@@ -88,28 +88,6 @@ final class EnvironmentPreviewAndSwitchesTests: XCTestCase {
         XCTAssertTrue(execution.isCloseOutMeaningful)
     }
 
-    // MARK: - 模型宽容解码（旧数据没有新字段）
-
-    func testContextCapsuleDecodesLegacyPayloadWithoutNewFields() throws {
-        let legacy = """
-        {"applications":["Xcode"],"applicationBundleIdentifiers":["com.apple.dt.Xcode"],
-         "windows":[],"windowFacts":[],"files":[],"links":[],
-         "terminalWorkingDirectories":["file:///tmp/"],"note":"","capturedAt":0}
-        """
-        let capsule = try JSONDecoder().decode(ContextCapsule.self, from: Data(legacy.utf8))
-        XCTAssertEqual(capsule.terminalCommands, [])
-        XCTAssertEqual(capsule.clipboardText, "")
-    }
-
-    func testSceneSnapshotDecodesLegacyPayloadWithoutNewFields() throws {
-        let legacy = """
-        {"id":"\(UUID().uuidString)","items":[],"filterMode":"saveAll","returnCue":"x","capturedAt":0}
-        """
-        let snapshot = try JSONDecoder().decode(SceneSnapshot.self, from: Data(legacy.utf8))
-        XCTAssertEqual(snapshot.clipboardText, "")
-        XCTAssertNil(snapshot.screenshotAssetURL)
-    }
-
     // MARK: - 现场快照带上终端命令与剪贴板
 
     func testBuilderCarriesTerminalCommandAndClipboardIntoSnapshot() async {

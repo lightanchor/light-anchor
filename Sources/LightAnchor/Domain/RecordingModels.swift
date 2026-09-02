@@ -150,22 +150,6 @@ struct RecordingSession: Codable, Equatable, Identifiable, Sendable {
     var composedBy: String
     var updatedAt: Date
 
-    private enum CodingKeys: String, CodingKey {
-        case id
-        case title
-        case targetID
-        case episodeID
-        case autoFollowed
-        case startedAt
-        case endedAt
-        case status
-        case entryCount
-        case style
-        case markdown
-        case composedBy
-        case updatedAt
-    }
-
     init(
         id: UUID = UUID(),
         title: String,
@@ -194,28 +178,6 @@ struct RecordingSession: Codable, Equatable, Identifiable, Sendable {
         self.markdown = markdown.trimmingCharacters(in: .whitespacesAndNewlines)
         self.composedBy = composedBy.trimmingCharacters(in: .whitespacesAndNewlines)
         self.updatedAt = updatedAt
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.init(
-            id: try container.decode(UUID.self, forKey: .id),
-            title: try container.decodeIfPresent(String.self, forKey: .title) ?? "",
-            targetID: try container.decodeIfPresent(UUID.self, forKey: .targetID),
-            episodeID: try container.decodeIfPresent(UUID.self, forKey: .episodeID),
-            autoFollowed: try container.decodeIfPresent(Bool.self, forKey: .autoFollowed) ?? false,
-            startedAt: try container.decode(Date.self, forKey: .startedAt),
-            endedAt: try container.decodeIfPresent(Date.self, forKey: .endedAt),
-            status: try container.decodeIfPresent(
-                RecordingSessionStatus.self,
-                forKey: .status
-            ) ?? .finished,
-            entryCount: try container.decodeIfPresent(Int.self, forKey: .entryCount) ?? 0,
-            style: try container.decodeIfPresent(RecordingStyle.self, forKey: .style) ?? .guide,
-            markdown: try container.decodeIfPresent(String.self, forKey: .markdown) ?? "",
-            composedBy: try container.decodeIfPresent(String.self, forKey: .composedBy) ?? "",
-            updatedAt: try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
-        )
     }
 
     var isActive: Bool {

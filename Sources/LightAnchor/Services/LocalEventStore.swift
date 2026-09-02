@@ -32,7 +32,6 @@ final class LocalEventStore {
     let fileURL: URL
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
-    private let legacyDecoder: JSONDecoder
 
     init(fileURL: URL? = nil) {
         self.fileURL = fileURL ?? LocalEventStore.defaultFileURL()
@@ -51,13 +50,6 @@ final class LocalEventStore {
             return Date(timeIntervalSinceReferenceDate: try container.decode(TimeInterval.self))
         }
         self.decoder = decoder
-
-        let legacyDecoder = JSONDecoder()
-        legacyDecoder.dateDecodingStrategy = .custom { decoder in
-            let container = try decoder.singleValueContainer()
-            return Date(timeIntervalSince1970: try container.decode(TimeInterval.self))
-        }
-        self.legacyDecoder = legacyDecoder
     }
 
     func load() throws -> [AttentionEvent] {
@@ -66,19 +58,12 @@ final class LocalEventStore {
         }
 
         let data = try Data(contentsOf: fileURL)
-        let version = try JSONDecoder().decode(SchemaVersionDocument.self, from: data).schemaVersion
-        switch version {
-        case 1:
-            return try legacyDecoder.decode(AttentionEventDocument.self, from: data)
-                .events
-                .filter { $0.kind != .unsupported }
-        case LightAnchorSchema.eventDocumentVersion:
-            return try decoder.decode(AttentionEventDocument.self, from: data)
-                .events
-                .filter { $0.kind != .unsupported }
-        default:
+        // 先只看版本号：更新版本的文件要报「版本不支持」，而不是一串解码错误。
+        let version = try decoder.decode(SchemaVersionDocument.self, from: data).schemaVersion
+        guard version == LightAnchorSchema.eventDocumentVersion else {
             throw LocalEventStoreError.unsupportedSchema(version)
         }
+        return try decoder.decode(AttentionEventDocument.self, from: data).events
     }
 
     func save(events: [AttentionEvent]) throws {

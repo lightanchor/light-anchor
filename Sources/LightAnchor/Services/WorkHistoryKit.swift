@@ -61,12 +61,9 @@ enum WorkHistoryBuilder {
             guard !episode.isBackground else { return nil }
             let waits = (waitsByEpisode[episode.id] ?? [])
                 .sorted { ($0.completedAt ?? $0.startedAt) > ($1.completedAt ?? $1.startedAt) }
-            let scene = latestScene(
-                for: episode,
-                explicit: scenesByEpisode[episode.id]?.map(\.1) ?? [],
-                allScenes: Array(snapshot.sceneSnapshots.values),
-                now: now
-            )
+            let scene = scenesByEpisode[episode.id]?
+                .map(\.1)
+                .max(by: { $0.capturedAt < $1.capturedAt })
             let focusDuration = focusByEpisode[episode.id] ?? 0
             guard isRelevant(
                 episode: episode,
@@ -139,32 +136,6 @@ enum WorkHistoryBuilder {
             interval.contains($0.startedAt)
                 || $0.completedAt.map(interval.contains) == true
         }
-    }
-
-    private static func latestScene(
-        for episode: AttentionEpisode,
-        explicit: [SceneSnapshot],
-        allScenes: [SceneSnapshot],
-        now: Date
-    ) -> SceneSnapshot? {
-        if let explicit = explicit.max(by: { $0.capturedAt < $1.capturedAt }) {
-            return explicit
-        }
-
-        // 兼容升级前没有 episodeID 的现场：只在该 episode 的时间窗附近匹配。
-        let end = episode.endedAt ?? (episode.state == .ended ? episode.updatedAt : now)
-        let graceEnd = end.addingTimeInterval(5 * 60)
-        return allScenes
-            .filter {
-                $0.episodeID == nil
-                    && $0.targetID == episode.targetID
-                    && $0.capturedAt >= episode.startedAt
-                    && $0.capturedAt <= graceEnd
-            }
-            .min {
-                abs($0.capturedAt.timeIntervalSince(end))
-                    < abs($1.capturedAt.timeIntervalSince(end))
-            }
     }
 
     private static func summary(

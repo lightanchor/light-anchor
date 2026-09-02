@@ -779,7 +779,6 @@ final class AttentionWorkspaceTests: XCTestCase {
             version: "1.2.0",
             build: "12",
             eventSchemaVersion: LightAnchorSchema.eventDocumentVersion,
-            syncEnvelopeVersion: LightAnchorSchema.syncEnvelopeVersion,
             binarySHA256: String(repeating: "a", count: 64),
             artifact: ReleaseArtifact(
                 filename: "LightAnchor-1.2.0-12-macos.zip",
@@ -980,47 +979,6 @@ final class AttentionWorkspaceTests: XCTestCase {
         XCTAssertTrue(bundle.events[0].message.contains("https://example.com/path"))
     }
 
-    /// 已移除的事件类型（factChanged / experimentChanged）在老用户的日志里
-    /// 真实存在。它们必须能被读进来再丢掉，绝不能让整份日志解码失败。
-    func testRemovedLegacyEventKindsAreSkippedInsteadOfBreakingTheWholeLog() throws {
-        let fileURL = temporaryFileURL()
-        let store = LocalEventStore(fileURL: fileURL)
-        let workspace = AttentionWorkspace(store: store)
-        let target = try XCTUnwrap(workspace.createTarget(name: "旧日志"))
-
-        var document = try XCTUnwrap(
-            JSONSerialization.jsonObject(with: try Data(contentsOf: fileURL)) as? [String: Any]
-        )
-        var events = try XCTUnwrap(document["events"] as? [[String: Any]])
-        let liveCount = events.count
-        let now = Date().timeIntervalSinceReferenceDate
-        events.append([
-            "id": UUID().uuidString,
-            "occurredAt": now,
-            "kind": "factChanged",
-            "entityID": UUID().uuidString,
-            "fact": [
-                "id": UUID().uuidString,
-                "kind": "targetStarted",
-                "occurredAt": now,
-                "detail": "开始目标。"
-            ]
-        ])
-        events.append([
-            "id": UUID().uuidString,
-            "occurredAt": now,
-            "kind": "experimentChanged",
-            "entityID": UUID().uuidString
-        ])
-        document["events"] = events
-        try JSONSerialization.data(withJSONObject: document).write(to: fileURL)
-
-        XCTAssertEqual(try LocalEventStore(fileURL: fileURL).load().count, liveCount)
-
-        let reloaded = AttentionWorkspace(store: store)
-        XCTAssertEqual(reloaded.snapshot.targets[target.id]?.name, "旧日志")
-    }
-
     private func temporaryFileURL() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("LightAnchorTests", isDirectory: true)
@@ -1148,19 +1106,5 @@ final class CaptureTagTests: XCTestCase {
 
         let reloaded = AttentionWorkspace(store: store)
         XCTAssertEqual(reloaded.snapshot.captures[first.id]?.tags, ["开发", "工具"])
-    }
-
-    func testLegacyCaptureWithoutTagsFieldStillDecodes() throws {
-        // 旧数据没有 tags 字段——编码一条无标签捕获再剔除该键，模拟旧文件。
-        let legacy = CaptureItem(body: "旧版本保存的内容")
-        var json = try XCTUnwrap(
-            try JSONSerialization.jsonObject(with: JSONEncoder().encode(legacy)) as? [String: Any]
-        )
-        json.removeValue(forKey: "tags")
-        let data = try JSONSerialization.data(withJSONObject: json)
-
-        let decoded = try JSONDecoder().decode(CaptureItem.self, from: data)
-        XCTAssertEqual(decoded.tags, [])
-        XCTAssertEqual(decoded.body, "旧版本保存的内容")
     }
 }

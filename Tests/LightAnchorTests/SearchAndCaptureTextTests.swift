@@ -129,19 +129,6 @@ final class SearchAndCaptureTextTests: XCTestCase {
         XCTAssertNotNil(reloaded.snapshot.captures[capture.id]?.textExtractedAt)
     }
 
-    func testLegacyCaptureJSONStillDecodes() throws {
-        let legacy = """
-        {"id":"\(UUID().uuidString)","kind":"text","body":"旧数据",
-        "capturedAt":700000000,"status":"inbox"}
-        """
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .secondsSince1970
-        let capture = try decoder.decode(CaptureItem.self, from: Data(legacy.utf8))
-        XCTAssertEqual(capture.extractedText, "")
-        XCTAssertNil(capture.textExtractedAt)
-        XCTAssertTrue(capture.tags.isEmpty)
-    }
-
     // MARK: - 资料活化
 
     func testReferenceAndArchivedCanReturnToInbox() throws {

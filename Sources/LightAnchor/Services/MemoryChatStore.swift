@@ -52,33 +52,6 @@ struct MemoryChatMessage: Codable, Equatable, Identifiable, Sendable {
         self.wasInterrupted = wasInterrupted
     }
 
-    private enum CodingKeys: String, CodingKey {
-        case id
-        case role
-        case text
-        case createdAt
-        case engineName
-        case thinkingSeconds
-        case factLines
-        case periodTitle
-        case isError
-        case wasInterrupted
-    }
-
-    init(from decoder: Decoder) throws {
-        // 新字段宽容解码：老存档缺键不致命。
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(UUID.self, forKey: .id)
-        role = try container.decode(Role.self, forKey: .role)
-        text = try container.decode(String.self, forKey: .text)
-        createdAt = try container.decode(Date.self, forKey: .createdAt)
-        engineName = try container.decodeIfPresent(String.self, forKey: .engineName)
-        thinkingSeconds = try container.decodeIfPresent(Double.self, forKey: .thinkingSeconds)
-        factLines = try container.decodeIfPresent([String].self, forKey: .factLines) ?? []
-        periodTitle = try container.decodeIfPresent(String.self, forKey: .periodTitle)
-        isError = try container.decodeIfPresent(Bool.self, forKey: .isError) ?? false
-        wasInterrupted = try container.decodeIfPresent(Bool.self, forKey: .wasInterrupted) ?? false
-    }
 }
 
 struct MemoryChatStore {
@@ -121,21 +94,5 @@ struct MemoryChatStore {
     private struct Document: Codable {
         var schemaVersion: Int
         var messages: [MemoryChatMessage]
-
-        init(schemaVersion: Int, messages: [MemoryChatMessage]) {
-            self.schemaVersion = schemaVersion
-            self.messages = messages
-        }
-
-        private enum CodingKeys: String, CodingKey {
-            case schemaVersion
-            case messages
-        }
-
-        init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
-            messages = try container.decodeIfPresent([MemoryChatMessage].self, forKey: .messages) ?? []
-        }
     }
 }

@@ -51,32 +51,13 @@ struct CaptureItem: Codable, Equatable, Identifiable {
     let capturedAt: Date
     var status: CaptureStatus
     var attachedEpisodeID: UUID?
-    /// 用户标签（不带 #，去重保序）；旧数据没有这个字段，解码时默认为空。
+    /// 用户标签（不带 #，去重保序）。
     var tags: [String]
     /// 截图 OCR 出的文字（本机 Vision），用于全文检索；其他类型恒为空。
     var extractedText: String
     /// 上次尝试提取的时间；非 nil 且文字为空表示试过但没识别出内容，
     /// 维护循环不再重试。
     var textExtractedAt: Date?
-
-    private enum CodingKeys: String, CodingKey {
-        case id
-        case kind
-        case body
-        case title
-        case sourceURL
-        case assetURL
-        case mimeType
-        case duration
-        case sourceApplication
-        case sourceWindowTitle
-        case capturedAt
-        case status
-        case attachedEpisodeID
-        case tags
-        case extractedText
-        case textExtractedAt
-    }
 
     /// 规范化标签：去掉首部 #、修剪空白、丢空值、去重保序。
     static func normalizedTags(_ tags: [String]) -> [String] {
@@ -124,28 +105,6 @@ struct CaptureItem: Codable, Equatable, Identifiable {
         self.tags = Self.normalizedTags(tags)
         self.extractedText = extractedText.trimmingCharacters(in: .whitespacesAndNewlines)
         self.textExtractedAt = textExtractedAt
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.init(
-            id: try container.decode(UUID.self, forKey: .id),
-            kind: try container.decode(CaptureKind.self, forKey: .kind),
-            body: try container.decode(String.self, forKey: .body),
-            title: try container.decodeIfPresent(String.self, forKey: .title),
-            sourceURL: try container.decodeIfPresent(URL.self, forKey: .sourceURL),
-            assetURL: try container.decodeIfPresent(URL.self, forKey: .assetURL),
-            mimeType: try container.decodeIfPresent(String.self, forKey: .mimeType),
-            duration: try container.decodeIfPresent(TimeInterval.self, forKey: .duration),
-            sourceApplication: try container.decodeIfPresent(String.self, forKey: .sourceApplication),
-            sourceWindowTitle: try container.decodeIfPresent(String.self, forKey: .sourceWindowTitle),
-            capturedAt: try container.decode(Date.self, forKey: .capturedAt),
-            status: try container.decode(CaptureStatus.self, forKey: .status),
-            attachedEpisodeID: try container.decodeIfPresent(UUID.self, forKey: .attachedEpisodeID),
-            tags: try container.decodeIfPresent([String].self, forKey: .tags) ?? [],
-            extractedText: try container.decodeIfPresent(String.self, forKey: .extractedText) ?? "",
-            textExtractedAt: try container.decodeIfPresent(Date.self, forKey: .textExtractedAt)
-        )
     }
 
     var isValid: Bool {
@@ -221,16 +180,6 @@ struct AttentionTarget: Codable, Equatable, Identifiable {
     /// 该目标的现场筛选偏好（按目标记忆）。nil 表示跟随全局默认。
     var sceneFilterMode: SceneFilterMode?
 
-    private enum CodingKeys: String, CodingKey {
-        case id
-        case name
-        case note
-        case createdAt
-        case updatedAt
-        case environmentProfileID
-        case sceneFilterMode
-    }
-
     init(
         id: UUID = UUID(),
         name: String,
@@ -247,19 +196,6 @@ struct AttentionTarget: Codable, Equatable, Identifiable {
         self.updatedAt = updatedAt
         self.environmentProfileID = environmentProfileID
         self.sceneFilterMode = sceneFilterMode
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.init(
-            id: try container.decode(UUID.self, forKey: .id),
-            name: try container.decode(String.self, forKey: .name),
-            note: try container.decodeIfPresent(String.self, forKey: .note) ?? "",
-            createdAt: try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date(),
-            updatedAt: try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date(),
-            environmentProfileID: try container.decodeIfPresent(UUID.self, forKey: .environmentProfileID),
-            sceneFilterMode: try container.decodeIfPresent(SceneFilterMode.self, forKey: .sceneFilterMode)
-        )
     }
 
     var isValid: Bool {
@@ -369,26 +305,12 @@ struct ContextCapsule: Codable, Equatable {
     var links: [URL]
     var terminalWorkingDirectories: [URL]
     /// 与 terminalWorkingDirectories 一一对应的「当时正在运行的命令」；
-    /// 读不到命令的位置为空字符串。旧数据没有这个字段。
+    /// 读不到命令的位置为空字符串。
     var terminalCommands: [String]
     /// 采集瞬间的剪贴板文字（截断保存）。开关关闭或内容标记为机密时为空。
     var clipboardText: String
     var note: String
     var capturedAt: Date
-
-    private enum CodingKeys: String, CodingKey {
-        case applications
-        case applicationBundleIdentifiers
-        case windows
-        case windowFacts
-        case files
-        case links
-        case terminalWorkingDirectories
-        case terminalCommands
-        case clipboardText
-        case note
-        case capturedAt
-    }
 
     init(
         applications: [String] = [],
@@ -414,35 +336,6 @@ struct ContextCapsule: Codable, Equatable {
         self.clipboardText = clipboardText
         self.note = note.trimmingCharacters(in: .whitespacesAndNewlines)
         self.capturedAt = capturedAt
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.init(
-            applications: try container.decodeIfPresent([String].self, forKey: .applications) ?? [],
-            applicationBundleIdentifiers: try container.decodeIfPresent(
-                [String].self,
-                forKey: .applicationBundleIdentifiers
-            ) ?? [],
-            windows: try container.decodeIfPresent([String].self, forKey: .windows) ?? [],
-            windowFacts: try container.decodeIfPresent(
-                [ContextWindowFact].self,
-                forKey: .windowFacts
-            ) ?? [],
-            files: try container.decodeIfPresent([URL].self, forKey: .files) ?? [],
-            links: try container.decodeIfPresent([URL].self, forKey: .links) ?? [],
-            terminalWorkingDirectories: try container.decodeIfPresent(
-                [URL].self,
-                forKey: .terminalWorkingDirectories
-            ) ?? [],
-            terminalCommands: try container.decodeIfPresent(
-                [String].self,
-                forKey: .terminalCommands
-            ) ?? [],
-            clipboardText: try container.decodeIfPresent(String.self, forKey: .clipboardText) ?? "",
-            note: try container.decodeIfPresent(String.self, forKey: .note) ?? "",
-            capturedAt: try container.decodeIfPresent(Date.self, forKey: .capturedAt) ?? Date()
-        )
     }
 
     var hasSceneContent: Bool {
@@ -491,20 +384,6 @@ struct AttentionEpisode: Codable, Equatable, Identifiable {
     var returnCue: String
     var waitingIDs: [UUID]
 
-    private enum CodingKeys: String, CodingKey {
-        case id
-        case targetID
-        case startedAt
-        case updatedAt
-        case state
-        case endedAt
-        case endedReason
-        case isBackground
-        case context
-        case returnCue
-        case waitingIDs
-    }
-
     init(
         id: UUID = UUID(),
         targetID: UUID,
@@ -529,27 +408,6 @@ struct AttentionEpisode: Codable, Equatable, Identifiable {
         self.context = context
         self.returnCue = returnCue.trimmingCharacters(in: .whitespacesAndNewlines)
         self.waitingIDs = waitingIDs
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.init(
-            id: try container.decode(UUID.self, forKey: .id),
-            targetID: try container.decode(UUID.self, forKey: .targetID),
-            startedAt: try container.decode(Date.self, forKey: .startedAt),
-            updatedAt: try container.decode(Date.self, forKey: .updatedAt),
-            state: try container.decode(AttentionEpisodeState.self, forKey: .state),
-            endedAt: try container.decodeIfPresent(Date.self, forKey: .endedAt),
-            endedReason: try container.decodeIfPresent(
-                AttentionEpisodeEndReason.self,
-                forKey: .endedReason
-            ),
-            isBackground: try container.decodeIfPresent(Bool.self, forKey: .isBackground) ?? false,
-            context: try container.decodeIfPresent(ContextCapsule.self, forKey: .context)
-                ?? ContextCapsule(),
-            returnCue: try container.decodeIfPresent(String.self, forKey: .returnCue) ?? "",
-            waitingIDs: try container.decodeIfPresent([UUID].self, forKey: .waitingIDs) ?? []
-        )
     }
 }
 
@@ -614,23 +472,6 @@ struct WaitingItem: Codable, Equatable, Identifiable {
     var timeoutAt: Date?
     var originalContext: ContextCapsule
 
-    private enum CodingKeys: String, CodingKey {
-        case id
-        case episodeID
-        case kind
-        case description
-        case completionCondition
-        case startedAt
-        case completedAt
-        case status
-        case evidence
-        case notificationSent
-        case restorePolicy
-        case monitor
-        case timeoutAt
-        case originalContext
-    }
-
     init(
         id: UUID = UUID(),
         episodeID: UUID,
@@ -661,38 +502,6 @@ struct WaitingItem: Codable, Equatable, Identifiable {
         self.monitor = monitor
         self.timeoutAt = timeoutAt
         self.originalContext = originalContext
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.init(
-            id: try container.decode(UUID.self, forKey: .id),
-            episodeID: try container.decode(UUID.self, forKey: .episodeID),
-            kind: try container.decode(WaitingKind.self, forKey: .kind),
-            description: try container.decode(String.self, forKey: .description),
-            completionCondition: try container.decodeIfPresent(
-                String.self,
-                forKey: .completionCondition
-            ) ?? "",
-            startedAt: try container.decode(Date.self, forKey: .startedAt),
-            completedAt: try container.decodeIfPresent(Date.self, forKey: .completedAt),
-            status: try container.decode(WaitingStatus.self, forKey: .status),
-            evidence: try container.decodeIfPresent(String.self, forKey: .evidence) ?? "",
-            notificationSent: try container.decodeIfPresent(Bool.self, forKey: .notificationSent) ?? false,
-            restorePolicy: try container.decodeIfPresent(
-                WaitingRestorePolicy.self,
-                forKey: .restorePolicy
-            ) ?? .manual,
-            monitor: try container.decodeIfPresent(
-                WaitingMonitorConfiguration.self,
-                forKey: .monitor
-            ),
-            timeoutAt: try container.decodeIfPresent(Date.self, forKey: .timeoutAt),
-            originalContext: try container.decodeIfPresent(
-                ContextCapsule.self,
-                forKey: .originalContext
-            ) ?? ContextCapsule()
-        )
     }
 
     var isValid: Bool {
@@ -743,26 +552,6 @@ struct WaitingMonitorConfiguration: Codable, Equatable, Sendable {
     var fileRequiresChange: Bool
     var fileStableDuration: TimeInterval
 
-    private enum CodingKeys: String, CodingKey {
-        case kind
-        case command
-        case arguments
-        case workingDirectory
-        case processIdentifier
-        case fileURL
-        case date
-        case eventInboxURL
-        case eventCorrelationID
-        case eventSources
-        case eventKinds
-        case eventAfter
-        case eventAutoManaged
-        case fileBaselineModificationDate
-        case fileBaselineSize
-        case fileRequiresChange
-        case fileStableDuration
-    }
-
     init(
         kind: WaitingMonitorKind,
         command: String? = nil,
@@ -799,41 +588,5 @@ struct WaitingMonitorConfiguration: Codable, Equatable, Sendable {
         self.fileBaselineSize = fileBaselineSize
         self.fileRequiresChange = fileRequiresChange
         self.fileStableDuration = max(fileStableDuration, 0)
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.init(
-            kind: try container.decode(WaitingMonitorKind.self, forKey: .kind),
-            command: try container.decodeIfPresent(String.self, forKey: .command),
-            arguments: try container.decodeIfPresent([String].self, forKey: .arguments) ?? [],
-            workingDirectory: try container.decodeIfPresent(URL.self, forKey: .workingDirectory),
-            processIdentifier: try container.decodeIfPresent(Int32.self, forKey: .processIdentifier),
-            fileURL: try container.decodeIfPresent(URL.self, forKey: .fileURL),
-            date: try container.decodeIfPresent(Date.self, forKey: .date),
-            eventInboxURL: try container.decodeIfPresent(URL.self, forKey: .eventInboxURL),
-            eventCorrelationID: try container.decodeIfPresent(String.self, forKey: .eventCorrelationID),
-            eventSources: try container.decodeIfPresent([ExternalEventSource].self, forKey: .eventSources) ?? [],
-            eventKinds: try container.decodeIfPresent([ExternalEventKind].self, forKey: .eventKinds)
-                ?? [.completed, .failed, .cancelled],
-            eventAfter: try container.decodeIfPresent(Date.self, forKey: .eventAfter),
-            eventAutoManaged: try container.decodeIfPresent(
-                Bool.self,
-                forKey: .eventAutoManaged
-            ) ?? false,
-            fileBaselineModificationDate: try container.decodeIfPresent(
-                Date.self,
-                forKey: .fileBaselineModificationDate
-            ),
-            fileBaselineSize: try container.decodeIfPresent(Int64.self, forKey: .fileBaselineSize),
-            fileRequiresChange: try container.decodeIfPresent(
-                Bool.self,
-                forKey: .fileRequiresChange
-            ) ?? false,
-            fileStableDuration: try container.decodeIfPresent(
-                TimeInterval.self,
-                forKey: .fileStableDuration
-            ) ?? 0
-        )
     }
 }

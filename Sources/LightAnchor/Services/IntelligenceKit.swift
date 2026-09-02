@@ -216,43 +216,15 @@ struct CloudProviderProfile: Codable, Equatable, Identifiable, Sendable {
     /// API Key 允许为空。本地服务、公司网关、免鉴权反代都可能不需要 Key：
     /// 空 Key 只是不发认证头，不算配置不完整，也不拦「测试连接」。
     ///
-    /// 只住在内存里：编码时默认不写出（见 `encode(to:)`），持久化由
-    /// `IntelligencePreferences.save` 单独交给 `CloudAPIKeyStore`（钥匙串）。
-    var apiKey: String
+    /// 只住在内存里：不在 `CodingKeys` 里，所以既不编进偏好 blob（blob 会进
+    /// 备份 zip），解码时也只落回空串。持久化由 `IntelligencePreferences.save`
+    /// 单独交给 `CloudAPIKeyStore`（钥匙串），`load` 再逐套补回。
+    var apiKey = ""
     var chatEndpoint: String
     var model: String
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, provider, apiProtocol, apiKey, chatEndpoint, model
-    }
-
-    /// 编码器 userInfo 里放 true 才把 Key 一起写出。默认不写：偏好 blob 会进
-    /// 备份 zip、也曾明文躺在 UserDefaults 里，Key 不该跟着走。
-    static let encodeAPIKeyUserInfoKey = CodingUserInfoKey(rawValue: "com.lightanchor.encodeAPIKey")!
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(UUID.self, forKey: .id)
-        name = try container.decode(String.self, forKey: .name)
-        provider = try container.decode(CloudServicePreset.self, forKey: .provider)
-        apiProtocol = try container.decode(CloudAPIProtocol.self, forKey: .apiProtocol)
-        // 老 blob 里还带着 Key（迁移前的数据）：照读，由 load 搬进钥匙串。
-        apiKey = try container.decodeIfPresent(String.self, forKey: .apiKey) ?? ""
-        chatEndpoint = try container.decode(String.self, forKey: .chatEndpoint)
-        model = try container.decode(String.self, forKey: .model)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(id, forKey: .id)
-        try container.encode(name, forKey: .name)
-        try container.encode(provider, forKey: .provider)
-        try container.encode(apiProtocol, forKey: .apiProtocol)
-        if encoder.userInfo[Self.encodeAPIKeyUserInfoKey] as? Bool == true {
-            try container.encode(apiKey, forKey: .apiKey)
-        }
-        try container.encode(chatEndpoint, forKey: .chatEndpoint)
-        try container.encode(model, forKey: .model)
+        case id, name, provider, apiProtocol, chatEndpoint, model
     }
 
     init(
@@ -430,22 +402,10 @@ struct IntelligencePreferences: Codable, Equatable, Sendable {
         case cloudProfiles, activeCloudProfileID
     }
 
-    /// 0.1.0 的扁平云端字段：只有一套配置，没有方案列表。只读、不再写回。
-    private enum LegacyCloudKeys: String, CodingKey {
-        case cloudProvider, cloudProtocol, cloudAPIKey, cloudChatEndpoint, cloudModel
-    }
-
-    /// 宽容解码：老数据缺新字段时逐项落回默认值，不整包作废用户配置。
+    /// 宽容解码：缺字段时逐项落回默认值，不整包作废用户配置。
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let fallback = Self.default
-        var profiles = try container.decodeIfPresent([CloudProviderProfile].self, forKey: .cloudProfiles)
-            ?? []
-        if profiles.isEmpty,
-           let legacy = try? decoder.container(keyedBy: LegacyCloudKeys.self),
-           let migrated = Self.migratedCloudProfile(from: legacy) {
-            profiles = [migrated]
-        }
         self.init(
             engine: try container.decodeIfPresent(IntelligenceEngine.self, forKey: .engine)
                 ?? fallback.engine,
@@ -467,38 +427,9 @@ struct IntelligencePreferences: Codable, Equatable, Sendable {
                 ?? fallback.adhdFriendlyOutput,
             autoRecordEpisodes: try container.decodeIfPresent(Bool.self, forKey: .autoRecordEpisodes)
                 ?? fallback.autoRecordEpisodes,
-            cloudProfiles: profiles,
+            cloudProfiles: try container.decodeIfPresent([CloudProviderProfile].self, forKey: .cloudProfiles)
+                ?? [],
             activeCloudProfileID: try container.decodeIfPresent(UUID.self, forKey: .activeCloudProfileID)
-        )
-    }
-
-    /// 把 0.1.0 那套扁平配置搬成一套命名方案。升级不能把用户填过的 Key
-    /// 和端点吞掉——只要老数据里出现过任一个云端字段就搬。
-    private static func migratedCloudProfile(
-        from container: KeyedDecodingContainer<LegacyCloudKeys>
-    ) -> CloudProviderProfile? {
-        let touched = [LegacyCloudKeys.cloudProvider, .cloudProtocol, .cloudAPIKey,
-                       .cloudChatEndpoint, .cloudModel]
-        guard touched.contains(where: container.contains) else { return nil }
-
-        let provider = (try? container.decodeIfPresent(CloudServicePreset.self, forKey: .cloudProvider))
-            .flatMap { $0 } ?? .openAI
-        let apiProtocol = (try? container.decodeIfPresent(CloudAPIProtocol.self, forKey: .cloudProtocol))
-            .flatMap { $0 } ?? provider.defaultAPIProtocol
-        let apiKey = (try? container.decodeIfPresent(String.self, forKey: .cloudAPIKey))
-            .flatMap { $0 } ?? ""
-        let chatEndpoint = (try? container.decodeIfPresent(String.self, forKey: .cloudChatEndpoint))
-            .flatMap { $0 } ?? provider.endpoint(for: apiProtocol) ?? ""
-        let model = (try? container.decodeIfPresent(String.self, forKey: .cloudModel))
-            .flatMap { $0 } ?? provider.defaultModel ?? ""
-
-        return CloudProviderProfile(
-            name: CloudProviderProfile.defaultName(provider: provider),
-            provider: provider,
-            apiProtocol: apiProtocol,
-            apiKey: apiKey,
-            chatEndpoint: chatEndpoint,
-            model: model
         )
     }
 
@@ -570,29 +501,15 @@ struct IntelligencePreferences: Codable, Equatable, Sendable {
     }
 
     /// 读偏好，并把每套方案的 Key 从钥匙串补回内存。
-    ///
-    /// 迁移：blob 里若还带着 Key（钥匙串之前的版本存的），先搬进钥匙串，再
-    /// 立刻把不含 Key 的 blob 写回——用户升级后第一次启动，明文就从磁盘上消失。
-    /// 0.1.0 的扁平字段（`cloudAPIKey`）也走同一条路：`init(from:)` 把它拼成
-    /// 一套带 Key 的方案，这里一并搬走。
     static func load(from defaults: UserDefaults = .standard) -> IntelligencePreferences {
         guard let data = defaults.data(forKey: storageKey),
               var preferences = try? JSONDecoder().decode(IntelligencePreferences.self, from: data) else {
             return .default
         }
         let store = CloudAPIKeyStore.shared
-        var blobCarriedKeys = false
         for index in preferences.cloudProfiles.indices {
-            let profile = preferences.cloudProfiles[index]
-            if !profile.apiKey.isEmpty {
-                store.setKey(profile.apiKey, for: profile.id)
-                blobCarriedKeys = true
-            } else if let stored = store.key(for: profile.id) {
-                preferences.cloudProfiles[index].apiKey = stored
-            }
-        }
-        if blobCarriedKeys {
-            preferences.save(to: defaults)
+            preferences.cloudProfiles[index].apiKey =
+                store.key(for: preferences.cloudProfiles[index].id) ?? ""
         }
         return preferences
     }

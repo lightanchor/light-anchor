@@ -23,7 +23,6 @@ struct ReleaseManifest: Codable, Equatable, Sendable {
     let version: String
     let build: String
     let eventSchemaVersion: Int
-    let syncEnvelopeVersion: Int
     let binarySHA256: String
     let artifact: ReleaseArtifact
     let minimumOS: String
@@ -175,8 +174,7 @@ struct ReleaseManifestVerifier {
             }
             let allowedKeys: Set<String> = [
                 "manifestVersion", "product", "version", "build", "eventSchemaVersion",
-                "syncEnvelopeVersion", "binarySHA256", "artifact", "minimumOS", "channel",
-                "signed", "signature"
+                "binarySHA256", "artifact", "minimumOS", "channel", "signed", "signature"
             ]
             let requiredKeys = allowedKeys.subtracting(["signature"])
             guard Set(object.keys) == requiredKeys || Set(object.keys) == allowedKeys,
@@ -200,7 +198,6 @@ struct ReleaseManifestVerifier {
                   isSafeVersion(manifest.version),
                   isSafeToken(manifest.build),
                   manifest.eventSchemaVersion > 0,
-                  manifest.syncEnvelopeVersion > 0,
                   isSHA256(manifest.binarySHA256),
                   isSHA256(manifest.artifact.sha256),
                   isSafeFilename(manifest.artifact.filename),

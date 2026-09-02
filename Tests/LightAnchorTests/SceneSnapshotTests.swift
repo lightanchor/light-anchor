@@ -63,27 +63,6 @@ final class SceneSnapshotTests: XCTestCase {
         XCTAssertEqual(aiSnapshot.tuckedAwayCount, 0)
     }
 
-    func testSceneSnapshotDecodesLegacyPayloadWithoutNewFields() throws {
-        // 旧事件里没有 filterMode / returnCue，应按默认值解码
-        let json = """
-        {
-            "id": "\(UUID().uuidString)",
-            "items": [],
-            "capturedAt": 0.0
-        }
-        """
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .custom { container in
-            let c = try container.singleValueContainer()
-            return Date(timeIntervalSinceReferenceDate: try c.decode(TimeInterval.self))
-        }
-        let snapshot = try decoder.decode(SceneSnapshot.self, from: Data(json.utf8))
-        XCTAssertEqual(snapshot.filterMode, .aiFiltered)
-        XCTAssertEqual(snapshot.returnCue, "")
-        XCTAssertNil(snapshot.targetID)
-        XCTAssertNil(snapshot.episodeID)
-    }
-
     func testSceneItemTrimsWhitespace() {
         let item = SceneItem(kind: .file, title: "  plan.md  ", address: " file:///tmp/plan.md ")
         XCTAssertEqual(item.title, "plan.md")
@@ -487,26 +466,7 @@ final class SceneSnapshotTests: XCTestCase {
         XCTAssertFalse(loaded.saveWindowScreenshot)
     }
 
-    func testIntelligencePreferencesDecodeTolerantly() throws {
-        // 老版本存的数据缺新字段：逐项落回默认值，已有的值不能丢。
-        let json = """
-        {"engine": "cloud", "cloudAPIKey": "sk-test"}
-        """
-
-        let prefs = try JSONDecoder().decode(IntelligencePreferences.self, from: Data(json.utf8))
-        XCTAssertEqual(prefs.engine, .cloud)
-        // 0.1.0 的扁平云端字段搬成一套命名方案：升级不能把 Key 吞掉。
-        XCTAssertEqual(prefs.cloudProfiles.count, 1)
-        XCTAssertEqual(prefs.activeCloudProfile.apiKey, "sk-test")
-        XCTAssertEqual(prefs.activeCloudProfile.provider, .openAI)
-        XCTAssertEqual(
-            prefs.activeCloudProfile.chatEndpoint,
-            "https://api.openai.com/v1/chat/completions"
-        )
-        XCTAssertEqual(prefs.activeCloudProfileID, prefs.cloudProfiles[0].id)
-    }
-
-    /// 没有云端字段的老数据（或全新安装）也要有一套方案可指。
+    /// 没有云端字段的偏好（全新安装）也要有一套方案可指。
     func testDecodeWithoutAnyCloudFieldsStillHasOneProfile() throws {
         let json = """
         {"engine": "onDevice"}

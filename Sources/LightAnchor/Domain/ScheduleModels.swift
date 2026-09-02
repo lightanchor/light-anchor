@@ -90,20 +90,6 @@ struct ScheduledTask: Codable, Equatable, Identifiable, Sendable {
     let createdAt: Date
     var updatedAt: Date
 
-    private enum CodingKeys: String, CodingKey {
-        case id
-        case title
-        case note
-        case fireAt
-        case repeatRule
-        case status
-        case collectSceneOnFire
-        case calendarEventID
-        case calendarEventTitle
-        case createdAt
-        case updatedAt
-    }
-
     init(
         id: UUID = UUID(),
         title: String,
@@ -128,35 +114,6 @@ struct ScheduledTask: Codable, Equatable, Identifiable, Sendable {
         self.calendarEventTitle = calendarEventTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.createdAt = createdAt
         self.updatedAt = updatedAt
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.init(
-            id: try container.decode(UUID.self, forKey: .id),
-            title: try container.decode(String.self, forKey: .title),
-            note: try container.decodeIfPresent(String.self, forKey: .note) ?? "",
-            fireAt: try container.decode(Date.self, forKey: .fireAt),
-            repeatRule: try container.decodeIfPresent(
-                ScheduledTaskRepeatRule.self,
-                forKey: .repeatRule
-            ) ?? .once,
-            status: try container.decodeIfPresent(
-                ScheduledTaskStatus.self,
-                forKey: .status
-            ) ?? .scheduled,
-            collectSceneOnFire: try container.decodeIfPresent(
-                Bool.self,
-                forKey: .collectSceneOnFire
-            ) ?? false,
-            calendarEventID: try container.decodeIfPresent(String.self, forKey: .calendarEventID),
-            calendarEventTitle: try container.decodeIfPresent(
-                String.self,
-                forKey: .calendarEventTitle
-            ),
-            createdAt: try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date(),
-            updatedAt: try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
-        )
     }
 
     var isValid: Bool {
@@ -189,14 +146,6 @@ struct ScheduledTaskFire: Codable, Equatable, Identifiable, Sendable {
     /// 触发时收集的现场检查点；采集是异步的，先落触发再补现场。
     var sceneSnapshotID: UUID?
 
-    private enum CodingKeys: String, CodingKey {
-        case id
-        case taskID
-        case taskTitle
-        case firedAt
-        case sceneSnapshotID
-    }
-
     init(
         id: UUID = UUID(),
         taskID: UUID,
@@ -209,16 +158,5 @@ struct ScheduledTaskFire: Codable, Equatable, Identifiable, Sendable {
         self.taskTitle = taskTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         self.firedAt = firedAt
         self.sceneSnapshotID = sceneSnapshotID
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.init(
-            id: try container.decode(UUID.self, forKey: .id),
-            taskID: try container.decode(UUID.self, forKey: .taskID),
-            taskTitle: try container.decodeIfPresent(String.self, forKey: .taskTitle) ?? "",
-            firedAt: try container.decode(Date.self, forKey: .firedAt),
-            sceneSnapshotID: try container.decodeIfPresent(UUID.self, forKey: .sceneSnapshotID)
-        )
     }
 }

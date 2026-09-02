@@ -12,7 +12,6 @@ struct DiagnosticBundle: Codable, Equatable {
     let appVersion: String
     let operatingSystem: String
     let eventSchemaVersion: Int
-    let syncEnvelopeVersion: Int
     let releaseManifestVersion: Int
     let events: [DiagnosticEvent]
 }
@@ -104,7 +103,6 @@ final class LocalDiagnostics: @unchecked Sendable {
             ) as? String ?? "0.1.0",
             operatingSystem: ProcessInfo.processInfo.operatingSystemVersionString,
             eventSchemaVersion: LightAnchorSchema.eventDocumentVersion,
-            syncEnvelopeVersion: LightAnchorSchema.syncEnvelopeVersion,
             releaseManifestVersion: LightAnchorSchema.releaseManifestVersion,
             events: Array(events)
         )

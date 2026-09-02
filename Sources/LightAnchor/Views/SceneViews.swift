@@ -565,7 +565,7 @@ struct RecentSetAsideSheet: View {
         workspace.snapshot.sceneSnapshots[info.snapshotID]
     }
 
-    /// 这段的专注时长：快照记着产生它的工作段；旧数据没有段号就不硬凑。
+    /// 这段的专注时长：快照记着产生它的工作段；检查点现场本来就没有工作段，不硬凑。
     private var focusLabel: String? {
         guard let episodeID = sceneSnapshot?.episodeID else { return nil }
         let minutes = workspace.snapshot.focusMinutes(of: episodeID)

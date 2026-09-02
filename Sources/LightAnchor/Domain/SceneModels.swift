@@ -41,7 +41,6 @@ struct SceneItem: Codable, Equatable, Identifiable, Sendable {
     /// 是否被判定为与当前目标相关。AI 筛选关闭时默认全部为 true。
     var isRelevant: Bool
     /// 相关性来源：ai（模型判断）/ manual（用户手动）/ all（全部保存）。
-    /// heuristic 已停用（启发式不再猜相关性），仅为解码旧数据保留。
     var relevanceSource: SceneRelevanceSource
 
     init(
@@ -67,8 +66,6 @@ struct SceneItem: Codable, Equatable, Identifiable, Sendable {
 
 enum SceneRelevanceSource: String, Codable, Equatable, Sendable {
     case ai
-    /// 已停用：新快照不再产生此值，仅为解码旧数据保留。
-    case heuristic
     case manual
     case all
 }
@@ -93,7 +90,7 @@ struct SceneSnapshot: Codable, Equatable, Identifiable, Sendable {
     let id: UUID
     /// 关联的注意力目标（可选，等待场景可能跨目标）。
     var targetID: UUID?
-    /// 产生这份现场的工作段。旧数据没有时由目标和时间做兼容匹配。
+    /// 产生这份现场的工作段。检查点现场可能没有工作段和目标。
     var episodeID: UUID?
     var items: [SceneItem]
     var filterMode: SceneFilterMode
@@ -104,18 +101,6 @@ struct SceneSnapshot: Codable, Equatable, Identifiable, Sendable {
     /// 采集瞬间的桌面截图（「保存窗口截图」开启时），存在本机资产目录。
     var screenshotAssetURL: URL?
     var capturedAt: Date
-
-    private enum CodingKeys: String, CodingKey {
-        case id
-        case targetID
-        case episodeID
-        case items
-        case filterMode
-        case returnCue
-        case clipboardText
-        case screenshotAssetURL
-        case capturedAt
-    }
 
     init(
         id: UUID = UUID(),
@@ -137,25 +122,6 @@ struct SceneSnapshot: Codable, Equatable, Identifiable, Sendable {
         self.clipboardText = clipboardText
         self.screenshotAssetURL = screenshotAssetURL
         self.capturedAt = capturedAt
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.init(
-            id: try container.decode(UUID.self, forKey: .id),
-            targetID: try container.decodeIfPresent(UUID.self, forKey: .targetID),
-            episodeID: try container.decodeIfPresent(UUID.self, forKey: .episodeID),
-            items: try container.decodeIfPresent([SceneItem].self, forKey: .items) ?? [],
-            filterMode: try container.decodeIfPresent(SceneFilterMode.self, forKey: .filterMode)
-                ?? .aiFiltered,
-            returnCue: try container.decodeIfPresent(String.self, forKey: .returnCue) ?? "",
-            clipboardText: try container.decodeIfPresent(String.self, forKey: .clipboardText) ?? "",
-            screenshotAssetURL: try container.decodeIfPresent(
-                URL.self,
-                forKey: .screenshotAssetURL
-            ),
-            capturedAt: try container.decodeIfPresent(Date.self, forKey: .capturedAt) ?? Date()
-        )
     }
 
     /// 参与恢复的条目（AI 筛选开启时只取相关项，全部保存时取全部）。

@@ -14,14 +14,6 @@ enum AttentionEventKind: String, Codable, Equatable {
     case scheduledFireChanged
     case recordingSessionChanged
     case recordingSessionDeleted
-    /// 已经移除的历史事件类型（例如 factChanged / experimentChanged / dayNoteChanged）。
-    /// 旧事件日志仍能整体解码，加载时这些事件会被丢掉。
-    case unsupported
-
-    init(from decoder: Decoder) throws {
-        let raw = try decoder.singleValueContainer().decode(String.self)
-        self = Self(rawValue: raw) ?? .unsupported
-    }
 }
 
 struct AttentionEvent: Codable, Equatable, Identifiable {
@@ -332,10 +324,6 @@ struct AttentionSnapshot: Codable, Equatable {
 
         case .recordingSessionDeleted:
             recordingSessions.removeValue(forKey: event.entityID)
-
-        case .unsupported:
-            // 已移除的历史事件类型：读得进来，但不参与任何状态。
-            return
         }
     }
 

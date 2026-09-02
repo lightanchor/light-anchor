@@ -82,40 +82,6 @@ final class ScheduledTaskTests: XCTestCase {
         XCTAssertEqual(fired.fireAt, date(2026, 8, 29, 9))
     }
 
-    // MARK: - 数据模型兼容
-
-    func testScheduledTaskDecodesLegacyPayloadWithoutNewFields() throws {
-        let json = """
-        {
-            "id": "\(UUID().uuidString)",
-            "title": "旧数据",
-            "fireAt": 778208400
-        }
-        """
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .secondsSince1970
-        let task = try decoder.decode(ScheduledTask.self, from: Data(json.utf8))
-        XCTAssertEqual(task.title, "旧数据")
-        XCTAssertEqual(task.repeatRule, .once)
-        XCTAssertEqual(task.status, .scheduled)
-        XCTAssertFalse(task.collectSceneOnFire)
-    }
-
-    func testScheduledFireDecodesWithoutOptionalFields() throws {
-        let json = """
-        {
-            "id": "\(UUID().uuidString)",
-            "taskID": "\(UUID().uuidString)",
-            "firedAt": 778208400
-        }
-        """
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .secondsSince1970
-        let fire = try decoder.decode(ScheduledTaskFire.self, from: Data(json.utf8))
-        XCTAssertEqual(fire.taskTitle, "")
-        XCTAssertNil(fire.sceneSnapshotID)
-    }
-
     // MARK: - 事件回放与持久化
 
     func testCreateEditAndDeletePersistAcrossReload() throws {

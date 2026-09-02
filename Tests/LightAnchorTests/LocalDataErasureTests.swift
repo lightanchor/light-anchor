@@ -184,7 +184,7 @@ final class LocalDataErasureTests: XCTestCase {
     }
 
     /// 扫源码里的偏好键字面量。约定：应用自己的键都带 `lightanchor.` 前缀，
-    /// 另有几个历史键（系统键与迁移前留下的）单列。
+    /// 另有几个不带前缀的键（系统键与自有命名的）单列。
     private func preferenceKeyLiteralsInSource() throws -> Set<String> {
         let sources = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

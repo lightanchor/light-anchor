@@ -288,24 +288,6 @@ final class MemoryChatStoreTests: XCTestCase {
         XCTAssertEqual(try store.load().first?.wasInterrupted, true)
     }
 
-    func testLoadToleratesMissingOptionalFields() throws {
-        let fileURL = temporaryFileURL()
-        try FileManager.default.createDirectory(
-            at: fileURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        // 老档缺 factLines/periodTitle 等新字段：仍应可读。
-        let legacy = """
-        {"messages":[{"id":"\(UUID().uuidString)","role":"user","text":"旧消息","createdAt":1755850000000}]}
-        """
-        try legacy.data(using: .utf8)!.write(to: fileURL)
-        let store = MemoryChatStore(fileURL: fileURL)
-        let loaded = try store.load()
-        XCTAssertEqual(loaded.count, 1)
-        XCTAssertEqual(loaded.first?.text, "旧消息")
-        XCTAssertEqual(loaded.first?.factLines, [])
-    }
-
     /// 存档坏了要抛出来给「对话」页显示。曾经是静默从空开始——用户看到的是
     /// 历史凭空消失，而盘上那份还在。
     func testLoadThrowsOnCorruptFileInsteadOfSilentlyStartingEmpty() throws {

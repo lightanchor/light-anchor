@@ -77,23 +77,28 @@ final class LocalBackupPreferencesTests: XCTestCase {
         XCTAssertNil(defaults.object(forKey: "lightanchor.notAKeyWeKnow"))
     }
 
-    /// 加这个文件之前做的备份里没有偏好：照样能恢复，只是不带偏好。
-    func testRestoreAcceptsOlderArchivesWithoutAPreferencesFile() throws {
+    /// 偏好快照是备份的一部分：包里没有它就不是我们打的包，整体拒绝，
+    /// 现有数据目录一个字都不动。
+    func testRestoreRejectsArchivesWithoutAPreferencesFile() throws {
         let workspace = try makeWorkspaceDirectory()
         let defaults = try makeScratchDefaults()
         let staging = workspace.directory.appendingPathComponent("staging", isDirectory: true)
         let payload = staging.appendingPathComponent("LightAnchorData", isDirectory: true)
         try FileManager.default.createDirectory(at: payload, withIntermediateDirectories: true)
         try writeEmptyEventLog(in: payload)
-        let archivedLog = try Data(contentsOf: payload.appendingPathComponent("events.json"))
         try runDitto(["-c", "-k", "--sequesterRsrc", "--keepParent", payload.path, workspace.archive.path])
+        let existingMarker = workspace.root.appendingPathComponent("keep.txt")
+        try Data("keep".utf8).write(to: existingMarker)
 
         let service = LocalDataArchiveService(rootURL: workspace.root, defaults: defaults)
-        try service.restoreArchive(from: workspace.archive)
-
-        XCTAssertEqual(
-            try Data(contentsOf: workspace.root.appendingPathComponent("events.json")),
-            archivedLog
+        XCTAssertThrowsError(try service.restoreArchive(from: workspace.archive)) { error in
+            guard case LocalDataArchiveError.archiveStructureInvalid = error else {
+                return XCTFail("应报备份结构不完整，实际：\(error)")
+            }
+        }
+        XCTAssertEqual(try Data(contentsOf: existingMarker), Data("keep".utf8))
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: workspace.root.appendingPathComponent("events.json").path)
         )
     }
 
