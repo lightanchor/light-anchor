@@ -299,7 +299,7 @@ final class BlueDotAuditTests: XCTestCase {
             "Sources/LightAnchor/Views/DataManagementView.swift",
             "Sources/LightAnchor/Views/EnvironmentViews.swift",
             "Sources/LightAnchor/Views/IntelligenceView.swift",
-            "Sources/LightAnchor/Views/IntegrationView.swift",
+            "Sources/LightAnchor/Views/UpdateSettingsView.swift",
             "Sources/LightAnchor/Views/PrivacyView.swift",
             "Sources/LightAnchor/Views/SceneViews.swift",
             "Sources/LightAnchor/Views/PersonalViews.swift"

@@ -25,7 +25,6 @@ final class ZZDemoSeedTests: XCTestCase {
 
         let ready = try XCTUnwrap(workspace.beginWaiting(
             episodeID: episode.id,
-            kind: .reply,
             description: "客户已确认最终版本",
             completionCondition: "查看邮件回复"
         ))
@@ -34,7 +33,6 @@ final class ZZDemoSeedTests: XCTestCase {
 
         _ = workspace.beginWaiting(
             episodeID: episode.id,
-            kind: .build,
             description: "等构建流水线跑完集成测试",
             completionCondition: "看失败用例列表"
         )

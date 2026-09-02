@@ -49,7 +49,6 @@ final class LocalDataErasureTests: XCTestCase {
         let storageFiles = [
             LightAnchorStorage.eventsURL(),
             LightAnchorStorage.assetsURL(),
-            LightAnchorStorage.externalEventsURL(),
             LightAnchorStorage.diagnosticsURL(),
             LightAnchorStorage.launchMarkerURL(),
             LightAnchorStorage.memoryChatURL()

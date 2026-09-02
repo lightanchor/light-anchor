@@ -169,7 +169,6 @@ final class RecordingTests: XCTestCase {
 
         let waiting = try XCTUnwrap(workspace.beginWaiting(
             episodeID: episode.id,
-            kind: .manual,
             description: "等 CI 跑完"
         ))
         XCTAssertEqual(workspace.activeRecordingSession?.status, .paused)

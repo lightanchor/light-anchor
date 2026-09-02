@@ -58,7 +58,6 @@ enum WorkHistoryBuilder {
         let waitsByEpisode = Dictionary(grouping: snapshot.waitingItems.values, by: \.episodeID)
 
         return snapshot.episodes.values.compactMap { episode in
-            guard !episode.isBackground else { return nil }
             let waits = (waitsByEpisode[episode.id] ?? [])
                 .sorted { ($0.completedAt ?? $0.startedAt) > ($1.completedAt ?? $1.startedAt) }
             let scene = scenesByEpisode[episode.id]?

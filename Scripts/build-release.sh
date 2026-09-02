@@ -109,19 +109,13 @@ elif [[ -e "$EMBEDDED_PUBLIC_KEY" ]]; then
 fi
 
 swift build -c release --product "$PRODUCT" $SWIFT_BUILD_FLAGS
-swift build -c release --product LightAnchorEvent $SWIFT_BUILD_FLAGS
 BIN_DIR=$(swift build -c release --show-bin-path $SWIFT_BUILD_FLAGS)
 BIN="$BIN_DIR/$PRODUCT"
-EVENT_BIN="$BIN_DIR/LightAnchorEvent"
 test -x "$BIN"
-test -x "$EVENT_BIN"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/$PRODUCT"
-# 事件发布器随应用分发：设置 → 连接 的一键接入会把它复制到
-# Application Support，Claude Code hook 和 zsh 插件都调它写事件。
-cp "$EVENT_BIN" "$APP/Contents/MacOS/LightAnchorEvent"
 cp "$ROOT_DIR/Support/LightAnchor-Info.plist" "$APP/Contents/Info.plist"
 
 # 本地化表随 SPM 资源 bundle 进 App（key 为英文标识符，zh-Hans 是开发语言事实源；
@@ -156,12 +150,15 @@ if [[ -n "$APPINTENTS_PROCESSOR" ]]; then
     find "$ROOT_DIR/Sources/$PRODUCT" -type f -name '*.swift' | sort > "$SOURCE_LIST"
     # .swiftconstvalues 的位置随 SwiftPM 后端不同：原生后端在 <bin>/<模块>.build/ 下，
     # Swift Build 后端在 .build/out/Intermediates.noindex/<模块>.build/Release/ 下。
-    # 都按模块目录过滤，免得把 LightAnchorEvent 的抽取结果混进来。
+    # 都按模块目录过滤，只收本模块的抽取结果。
     typeset -a CONST_VALUE_ROOTS=("$BIN_DIR")
     if [[ -d "$BIN_DIR/../../Intermediates.noindex/$PRODUCT.build/Release" ]]; then
         CONST_VALUE_ROOTS+=("$BIN_DIR/../../Intermediates.noindex/$PRODUCT.build/Release")
     fi
+    # 排除 -testable- 中间产物：swift test 留下的旧文件也在同一个模块目录下，
+    # 处理器会把两份都读进去，其中过期的那份足以让整次导出判错。
     find "${CONST_VALUE_ROOTS[@]}" -type f -name '*.swiftconstvalues' -path "*/$PRODUCT.build/*" \
+        ! -path '*testable*' \
         | sort > "$CONST_VALUES_LIST"
     if [[ ! -s "$CONST_VALUES_LIST" ]]; then
         printf '%s\n' \
@@ -211,9 +208,6 @@ else
 fi
 
 if [[ -n ${LIGHTANCHOR_SIGNING_IDENTITY:-} ]]; then
-    # 嵌套可执行文件必须先单独签名，否则外层签名和公证都会拒绝它。
-    codesign --force --options runtime --timestamp \
-        --sign "$LIGHTANCHOR_SIGNING_IDENTITY" "$APP/Contents/MacOS/LightAnchorEvent"
     codesign --force --options runtime --timestamp \
         --entitlements "$ROOT_DIR/Support/LightAnchor.entitlements" \
         --sign "$LIGHTANCHOR_SIGNING_IDENTITY" "$APP"
@@ -222,7 +216,6 @@ else
     # 只靠链接器的 linker-signed 可执行文件没有资源封条，包一旦带上
     # com.apple.quarantine（浏览器/解压工具都会打），Gatekeeper 会直接报
     # "已损坏"。ad-hoc 包每次签名 CDHash 都变，换包后 TCC 权限需要重授。
-    codesign --force --sign - "$APP/Contents/MacOS/LightAnchorEvent"
     # 权利也要签进去，否则本地包和正式包的能力边界不一样，测出来的问题不算数。
     codesign --force --deep \
         --entitlements "$ROOT_DIR/Support/LightAnchor.entitlements" \

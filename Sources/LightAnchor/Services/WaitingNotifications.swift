@@ -16,7 +16,7 @@ struct WaitingNotificationService {
             else { return }
             let content = UNMutableNotificationContent()
             content.title = tr("a_result_you_were_waiting_for_arrived")
-            // 证据文本可能来自外部进程（事件收件箱），通知正文只给一段。
+            // 证据文本可能很长，通知正文只给一段。
             let evidence = String(waiting.evidence.prefix(200))
             content.body = evidence.isEmpty
                 ? waiting.description

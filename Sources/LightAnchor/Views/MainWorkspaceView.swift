@@ -505,12 +505,8 @@ struct MainWorkspaceView: View {
     /// 最近的事：按最后活动时间排序，同一目标只留最新一段。
     /// 默认露出 4 件，「展开更多」后最多 12 件。
     private var recentSidebarEntries: [(target: AttentionTarget, episode: AttentionEpisode)] {
-        // 自动等待的中枢目标（Agent 会话/终端命令）不是「你最近做的事」，
-        // 它们的动静已经在等待页和菜单栏里了。
-        let hubTargetIDs: Set<UUID> = [AutoWaitHub.agentTargetID, AutoWaitHub.terminalTargetID]
         var newestByTarget: [UUID: AttentionEpisode] = [:]
-        for episode in workspace.snapshot.episodes.values
-        where !hubTargetIDs.contains(episode.targetID) {
+        for episode in workspace.snapshot.episodes.values {
             let stamp = episode.endedAt ?? episode.startedAt
             if let existing = newestByTarget[episode.targetID],
                (existing.endedAt ?? existing.startedAt) >= stamp {
@@ -2005,7 +2001,7 @@ private struct TargetReviewView: View {
 
     private var episodes: [AttentionEpisode] {
         workspace.snapshot.episodes.values
-            .filter { $0.targetID == targetID && !$0.isBackground }
+            .filter { $0.targetID == targetID }
             .sorted { $0.startedAt > $1.startedAt }
     }
 
@@ -2892,12 +2888,9 @@ private struct WaitingRow: View {
 
     private var isReady: Bool { waiting.status == .ready }
 
-    /// Agent / 终端事件自动归集的等待：确认不切换当前工作，进行中不提供手动完成。
-    private var isAutoManaged: Bool { waiting.monitor?.eventAutoManaged == true }
-
     /// 「已等 18 分钟」式的相对时间（V7 文案密度）。原来这里写的是
-    /// 「18 分钟前放下」——但一件正在等外部结果的事，用户并没有「放下」它，
-    /// 是它还没回来。手动等待和自动等待在这一点上没有区别，所以不再分动词。
+    /// 「18 分钟前放下」——但一件正在等结果的事，用户并没有「放下」它，
+    /// 是它还没回来。
     private var relativeStartLabel: String {
         UserFacingCopy.waitedAge(of: waiting.startedAt)
     }
@@ -2913,15 +2906,8 @@ private struct WaitingRow: View {
     }
 
     var body: some View {
-        // 样机 .row：标题/元信息在左，.btn.sm 操作组靠右。普通行无行首
-        // 图标；来自外部工具的自动等待带对方的产品图标——一眼认出是谁。
+        // 样机 .row：标题/元信息在左，.btn.sm 操作组靠右。
         HStack(alignment: .center, spacing: 12) {
-            if let brand = IntegrationBrand.forAutoWait(waiting) {
-                // 此处图标是「来自哪个工具」的唯一来源（描述就是事件标题），
-                // 对旁白不能隐藏，否则两条同名等待无从区分。
-                IntegrationBrandIcon(brand: brand, size: 20, isDecorative: false)
-                    .opacity(isFrost ? 0.75 : 1)
-            }
             VStack(alignment: .leading, spacing: 3) {
                 Text(waiting.description)
                     .font(LightAnchorTheme.interfaceFont(size: 13.5, weight: .medium))
@@ -2946,34 +2932,16 @@ private struct WaitingRow: View {
 
             HStack(spacing: 6) {
                 if isReady {
-                    if isAutoManaged {
-                        // Agent 回合 / 终端命令的结果：确认即可，不切换当前工作。
-                        Button(tr("got_it")) {
-                            _ = workspace.acknowledgeWaitingResult(waiting.id)
-                        }
-                        .buttonStyle(LightAnchorSuccessButtonStyle(compact: true))
-                        // 忽略已到结果全程一个名字：「不再需要」（与手动等待那侧一致；
-                        // 原「不再关注」在两处对应两种不同操作，最危险的同词异义）。
-                        Button(tr("no_longer_needed")) {
-                            _ = workspace.dismissWaitingResult(waiting.id)
-                        }
-                        .buttonStyle(LightAnchorQuietButtonStyle(compact: true))
-                    } else {
-                        Button(tr("back_to_work")) {
-                            onRestore(waiting)
-                        }
-                        .buttonStyle(LightAnchorPrimaryButtonStyle(compact: true))
-                        Button(tr("no_longer_needed")) {
-                            _ = workspace.dismissWaitingResult(waiting.id)
-                        }
-                        .buttonStyle(LightAnchorQuietButtonStyle(compact: true))
+                    Button(tr("back_to_work")) {
+                        onRestore(waiting)
                     }
-                } else if isAutoManaged {
-                    // 取消等待全程一个名字：「不再等待」，与手动侧同词同样式。
-                    Button(tr("stop_waiting"), role: .destructive) {
-                        _ = workspace.cancelWaiting(waiting.id, evidence: "用户停止等待。")
+                    .buttonStyle(LightAnchorPrimaryButtonStyle(compact: true))
+                    // 忽略已到结果全程一个名字：「不再需要」
+                    // （原「不再关注」在两处对应两种不同操作，最危险的同词异义）。
+                    Button(tr("no_longer_needed")) {
+                        _ = workspace.dismissWaitingResult(waiting.id)
                     }
-                    .buttonStyle(LightAnchorDestructiveQuietButtonStyle(compact: true))
+                    .buttonStyle(LightAnchorQuietButtonStyle(compact: true))
                 } else {
                     Button(tr("result_is_in")) {
                         _ = workspace.completeWaiting(
@@ -3468,8 +3436,7 @@ private struct CaptureWaitingEditorView: View {
                     guard workspace.beginWaitingFromCapture(
                         capture.id,
                         episodeID: episodeID,
-                        kind: .manual,
-                        completionCondition: returnCue,
+                                completionCondition: returnCue,
                         restorePolicy: returnTiming == .scheduled ? .notify : .manual,
                         monitor: returnTiming == .scheduled
                             ? WaitingMonitorConfiguration(kind: .date, date: reminderDate)
@@ -3557,8 +3524,7 @@ struct WaitingEditorView: View {
                 Button(tr("start_waiting")) {
                     guard workspace.beginWaiting(
                         episodeID: episodeID,
-                        kind: .manual,
-                        description: description,
+                                description: description,
                         completionCondition: returnCue,
                         restorePolicy: returnTiming == .scheduled ? .notify : .manual,
                         monitor: returnTiming == .scheduled

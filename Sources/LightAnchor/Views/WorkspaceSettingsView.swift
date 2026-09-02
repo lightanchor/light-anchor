@@ -53,8 +53,8 @@ struct WorkspaceSettingsView: View {
                 case .intelligence:
                     IntelligenceView()
                         .environmentObject(workspace)
-                case .connections:
-                    IntegrationView()
+                case .updates:
+                    UpdateSettingsView()
                 case .data:
                     DataManagementView()
                         .environmentObject(workspace)
@@ -122,14 +122,13 @@ private struct SettingsTabButtonStyle: ButtonStyle {
     }
 }
 
-/// 设置七页。曾经还有一页「接收」，里面只有 Agent / 终端两个自动等待开关——
-/// 和「连接」页的接入/移除是同一件事的两个闸，删掉了：一个来源一个真相。
+/// 设置七页。
 private enum SettingsPane: String, CaseIterable, Identifiable {
     case appearance
     case shortcuts
     case permissions
     case intelligence
-    case connections
+    case updates
     case data
     case about
 
@@ -141,7 +140,7 @@ private enum SettingsPane: String, CaseIterable, Identifiable {
         case .shortcuts: tr("shortcuts")
         case .permissions: tr("permissions")
         case .intelligence: tr("intelligence")
-        case .connections: tr("connections")
+        case .updates: tr("updates")
         case .data: tr("data")
         case .about: tr("about")
         }

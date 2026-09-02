@@ -111,40 +111,6 @@ final class EpisodeSwitchingTests: XCTestCase {
         )
     }
 
-    /// 完成手上这件事后，后台段（Agent/终端自动等待的中枢）不许冒充「现在」。
-    /// 重启走 replay 是排除后台段的，增量路径漏了就会前后表现不一致。
-    func testFinishingWorkDoesNotPromoteABackgroundEpisode() throws {
-        let inbox = FileManager.default.temporaryDirectory
-            .appendingPathComponent("episode-switching-\(UUID().uuidString)", isDirectory: true)
-            .appendingPathComponent("external-events.jsonl")
-        let workspace = AttentionWorkspace(
-            store: LocalEventStore(fileURL: temporaryFileURL()),
-            externalEventInboxURL: inbox
-        )
-        try ExternalEventStore(fileURL: inbox).publish(ExternalEvent(
-            source: .agent,
-            kind: .started,
-            correlationID: "claude-switch",
-            title: "Claude Code · light-anchor",
-            occurredAt: Date()
-        ))
-        AutoWaitRouter(inboxURL: inbox).route(into: workspace)
-        let background = try XCTUnwrap(
-            workspace.snapshot.episodes.values.first(where: \.isBackground)
-        )
-
-        let mine = try XCTUnwrap(workspace.createTarget(name: "我的事"))
-        let episode = try XCTUnwrap(workspace.startEpisode(targetID: mine.id))
-        XCTAssertTrue(workspace.endEpisode(episode.id))
-
-        XCTAssertNotEqual(
-            workspace.currentEpisode?.id,
-            background.id,
-            "后台段不该在完成后变成当前工作"
-        )
-        XCTAssertNil(workspace.currentEpisode, "手上没别的事了就该是空态")
-    }
-
     private func temporaryFileURL() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("episode-switching-\(UUID().uuidString)", isDirectory: true)

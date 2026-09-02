@@ -1,14 +1,8 @@
 import Foundation
 
-#if os(macOS)
-import Darwin
-#endif
-
 enum WaitingDetectionError: LocalizedError {
     case unsupported
     case invalidConfiguration
-    case commandFailed(String)
-    case externalEventFailed(String)
     case timedOut
 
     var errorDescription: String? {
@@ -17,10 +11,6 @@ enum WaitingDetectionError: LocalizedError {
             tr("no_detector_for_this_wait_type")
         case .invalidConfiguration:
             tr("the_wait_detection_setup_is_incomplete")
-        case .commandFailed(let message):
-            message.isEmpty ? tr("the_wait_command_failed") : message
-        case .externalEventFailed(let message):
-            message.isEmpty ? tr("the_external_event_reported_a_failure") : message
         case .timedOut:
             tr("the_wait_passed_its_deadline")
         }
@@ -30,121 +20,6 @@ enum WaitingDetectionError: LocalizedError {
 protocol WaitingDetector: Sendable {
     var kind: WaitingMonitorKind { get }
     func wait(for configuration: WaitingMonitorConfiguration) async throws -> String
-}
-
-struct CommandWaitingDetector: WaitingDetector {
-    let kind: WaitingMonitorKind = .command
-
-    func wait(for configuration: WaitingMonitorConfiguration) async throws -> String {
-        guard let command = configuration.command, !command.isEmpty else {
-            throw WaitingDetectionError.invalidConfiguration
-        }
-        return try await ProcessWaitingSupport.run(
-            executableURL: URL(fileURLWithPath: "/bin/zsh"),
-            arguments: ["-lc", command],
-            workingDirectory: configuration.workingDirectory
-        )
-    }
-}
-
-struct ProcessWaitingDetector: WaitingDetector {
-    let kind: WaitingMonitorKind = .process
-
-    func wait(for configuration: WaitingMonitorConfiguration) async throws -> String {
-        #if os(macOS)
-        guard let processIdentifier = configuration.processIdentifier,
-              processIdentifier > 0
-        else { throw WaitingDetectionError.invalidConfiguration }
-
-        while processIsRunning(processIdentifier) {
-            try await Task.sleep(for: .milliseconds(400))
-        }
-        return "进程 \(processIdentifier) 已结束。"
-        #else
-        throw WaitingDetectionError.unsupported
-        #endif
-    }
-
-    #if os(macOS)
-    private func processIsRunning(_ processIdentifier: Int32) -> Bool {
-        if kill(processIdentifier, 0) == 0 {
-            return true
-        }
-        return errno == EPERM
-    }
-    #endif
-}
-
-struct FileWaitingDetector: WaitingDetector {
-    let kind: WaitingMonitorKind = .file
-
-    private struct FileObservation: Equatable {
-        let modificationDate: Date?
-        let size: Int64?
-    }
-
-    func wait(for configuration: WaitingMonitorConfiguration) async throws -> String {
-        guard let fileURL = configuration.fileURL else {
-            throw WaitingDetectionError.invalidConfiguration
-        }
-
-        var previousObservation: FileObservation?
-        var stableSince: Date?
-
-        while !Task.isCancelled {
-            guard let attributes = try? FileManager.default.attributesOfItem(atPath: fileURL.path),
-                  attributes[.type] as? FileAttributeType == .typeRegular
-            else {
-                previousObservation = nil
-                stableSince = nil
-                try await Task.sleep(for: .milliseconds(500))
-                continue
-            }
-
-            if !configuration.fileRequiresChange || fileHasChanged(
-                attributes: attributes,
-                configuration: configuration
-            ) {
-                let observation = FileObservation(
-                    modificationDate: attributes[.modificationDate] as? Date,
-                    size: (attributes[.size] as? NSNumber)?.int64Value
-                )
-                if observation != previousObservation {
-                    previousObservation = observation
-                    stableSince = Date()
-                }
-                if configuration.fileStableDuration <= 0 ||
-                    Date().timeIntervalSince(stableSince ?? Date()) >= configuration.fileStableDuration {
-                    return "文件已完成：\(fileURL.path)"
-                }
-            } else {
-                previousObservation = nil
-                stableSince = nil
-            }
-            try await Task.sleep(for: .milliseconds(500))
-        }
-        throw CancellationError()
-    }
-
-    private func fileHasChanged(
-        attributes: [FileAttributeKey: Any],
-        configuration: WaitingMonitorConfiguration
-    ) -> Bool {
-        let currentDate = attributes[.modificationDate] as? Date
-        let currentSize = (attributes[.size] as? NSNumber)?.int64Value
-        if let baselineDate = configuration.fileBaselineModificationDate,
-           let currentDate,
-           currentDate > baselineDate {
-            return true
-        }
-        if let baselineSize = configuration.fileBaselineSize,
-           let currentSize,
-           currentSize != baselineSize {
-            return true
-        }
-        return configuration.fileBaselineModificationDate == nil &&
-            configuration.fileBaselineSize == nil
-    }
 }
 
 struct DateWaitingDetector: WaitingDetector {
@@ -159,62 +34,6 @@ struct DateWaitingDetector: WaitingDetector {
             try await Task.sleep(for: .seconds(interval))
         }
         return "等待时间已到达。"
-    }
-}
-
-struct ExternalEventWaitingDetector: WaitingDetector {
-    let kind: WaitingMonitorKind = .event
-
-    func wait(for configuration: WaitingMonitorConfiguration) async throws -> String {
-        guard let correlationID = configuration.eventCorrelationID,
-              !correlationID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        else { throw WaitingDetectionError.invalidConfiguration }
-
-        let store = ExternalEventStore(fileURL: configuration.eventInboxURL)
-        let sources = Set(configuration.eventSources)
-        let kinds = Set(configuration.eventKinds)
-
-        while !Task.isCancelled {
-            let matches = try store.matching(
-                correlationID: correlationID,
-                sources: sources,
-                kinds: kinds,
-                after: configuration.eventAfter
-            )
-            if let event = matches.last {
-                switch event.kind {
-                case .completed:
-                    return event.evidence
-                case .failed:
-                    throw WaitingDetectionError.externalEventFailed(event.evidence)
-                case .cancelled:
-                    throw WaitingDetectionError.externalEventFailed("\(event.evidence)，外部任务已取消。")
-                case .started, .progress:
-                    break
-                }
-            }
-            try await Task.sleep(for: .milliseconds(500))
-        }
-        throw CancellationError()
-    }
-}
-
-private enum ProcessWaitingSupport {
-    static func run(
-        executableURL: URL,
-        arguments: [String],
-        workingDirectory: URL?
-    ) async throws -> String {
-        do {
-            let output = try await ProcessExecutionSupport.run(
-                executableURL: executableURL,
-                arguments: arguments,
-                workingDirectory: workingDirectory
-            )
-            return output.isEmpty ? "命令已完成。" : output
-        } catch let error as ProcessExecutionError {
-            throw WaitingDetectionError.commandFailed(error.localizedDescription)
-        }
     }
 }
 
@@ -237,9 +56,6 @@ final class WaitingCoordinator {
     func startMonitoring(_ waiting: WaitingItem) {
         guard let monitor = waiting.monitor,
               monitor.kind != .manual,
-              // 自动等待由 AutoWaitRouter 驱动；这里的事件检测器会把 failed
-              // 映射成取消，而 Agent/命令的失败恰恰是「该回去看」的结果。
-              !monitor.eventAutoManaged,
               waiting.status == .waiting
         else { return }
 
@@ -271,15 +87,10 @@ final class WaitingCoordinator {
         })
     }
 
-    /// 启动与维护循环的补挂入口。命令类监视器只在本次会话里显式创建时才会被
-    /// 挂上（`beginWaiting` → `startMonitoring`）：事件日志是可被替换的文件，
-    /// 从盘上读回来的命令不能在没人看的时候自动跑进 `zsh -lc`。
+    /// 启动与维护循环的补挂入口：把日志里仍在等待、带定时监视器的项重新挂上。
     func startMonitoringActiveWaits() {
         workspace?.snapshot.activeWaitingItems
             .filter { $0.status == .waiting }
-            .filter { waiting in
-                waiting.monitor?.kind != .command || tasks[waiting.id] != nil
-            }
             .forEach(startMonitoring)
     }
 
@@ -319,11 +130,7 @@ final class WaitingCoordinator {
 
     private static func detector(for kind: WaitingMonitorKind) -> any WaitingDetector {
         switch kind {
-        case .command: CommandWaitingDetector()
-        case .process: ProcessWaitingDetector()
-        case .file: FileWaitingDetector()
         case .date: DateWaitingDetector()
-        case .event: ExternalEventWaitingDetector()
         case .manual: ManualWaitingDetector()
         }
     }

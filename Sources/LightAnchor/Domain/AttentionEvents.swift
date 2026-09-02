@@ -332,11 +332,10 @@ struct AttentionSnapshot: Codable, Equatable {
         return episodes[currentEpisodeID]
     }
 
-    /// 「现在」只属于 进行中 / 回场 / 等待中 的前台段；
+    /// 「现在」只属于 进行中 / 回场 / 等待中 的段；
     /// 放下（paused）的事住在边缘（今天条 / 最近的事），不占现在页。
     private static func occupiesNow(_ episode: AttentionEpisode) -> Bool {
-        !episode.isBackground
-            && (episode.state == .active || episode.state == .returning || episode.state == .waiting)
+        episode.state == .active || episode.state == .returning || episode.state == .waiting
     }
 
     /// active 和 returning 都算专注；paused / waiting / ended 让时钟停下。
@@ -375,12 +374,12 @@ struct AttentionSnapshot: Codable, Equatable {
         max(0, Int(focusDuration(of: episodeID, now: now) / 60))
     }
 
-    /// 放下的未完成事：每个目标只取最新一段（paused、非后台），按放下时间倒序。
+    /// 放下的未完成事：每个目标只取最新一段（paused），按放下时间倒序。
     /// 稍后页的「暂时放下」组和侧栏计数共用——完整列表，不做挑选。
     var setAsideEpisodes: [AttentionEpisode] {
         var newestByTarget: [UUID: AttentionEpisode] = [:]
         for episode in episodes.values
-        where episode.state == .paused && !episode.isBackground {
+        where episode.state == .paused {
             if let existing = newestByTarget[episode.targetID],
                existing.updatedAt >= episode.updatedAt {
                 continue

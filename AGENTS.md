@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-Light Anchor is a Swift 6 package targeting macOS 15. The SwiftUI app is in `Sources/LightAnchor/`: `App/` wires runtime state, `Domain/` defines models and events, `Services/` owns persistence and integrations, `Views/` contains UI, and `Design/` holds theme primitives. Localizations are under `Resources/{zh-Hans,en}.lproj/`. The event protocol and CLI are separate targets in `Sources/LightAnchorEventCore/` and `Sources/LightAnchorEvent/`. Tests live in `Tests/LightAnchorTests/`. Use `Scripts/` for operational tooling, `Integrations/` for external-agent adapters, and `Support/` for entitlements, icons, and brand assets.
+Light Anchor is a Swift 6 package targeting macOS 15. The SwiftUI app is in `Sources/LightAnchor/`: `App/` wires runtime state, `Domain/` defines models and events, `Services/` owns persistence and system capabilities, `Views/` contains UI, and `Design/` holds theme primitives. Localizations are under `Resources/{zh-Hans,en}.lproj/`. Tests live in `Tests/LightAnchorTests/`. Use `Scripts/` for operational tooling and `Support/` for entitlements, icons, and brand assets.
 
 ## Build, Test, and Development Commands
 
@@ -11,7 +11,7 @@ Light Anchor is a Swift 6 package targeting macOS 15. The SwiftUI app is in `Sou
 - `swift build -c release` verifies an optimized production build.
 - `Scripts/build-release.sh` creates the app bundle, archive, and update manifest in `dist/`.
 - `Scripts/verify-release.sh` tests and validates the release bundle; `Scripts/audit-release.sh` runs the broader release audit.
-- `Scripts/smoke-macos-app.sh` exercises launch, deep links, event persistence, and clean shutdown with isolated data.
+- `Scripts/smoke-macos-app.sh` exercises launch, the `lightanchor://capture` deep link, and clean shutdown with isolated data.
 
 Release scripts require macOS tooling; some also check for `jq` and `openssl`.
 
@@ -23,7 +23,7 @@ All visible UI text must use `tr("stable_english_key")`. Add identical key sets 
 
 ## Testing Guidelines
 
-Tests use XCTest. Name files `FeatureTests.swift`, classes `FeatureTests`, and methods `testExpectedBehavior`. Add regression tests for behavior changes, especially event replay, persistence, privacy filtering, and localization. No numeric coverage threshold is defined; changed behavior should be directly exercised. Run `swift test` before every pull request and the relevant smoke script for release, backup, integration, or lifecycle changes.
+Tests use XCTest. Name files `FeatureTests.swift`, classes `FeatureTests`, and methods `testExpectedBehavior`. Add regression tests for behavior changes, especially event replay, persistence, privacy filtering, and localization. No numeric coverage threshold is defined; changed behavior should be directly exercised. Run `swift test` before every pull request and the relevant smoke script for release, backup, or lifecycle changes.
 
 ## Commit & Pull Request Guidelines
 

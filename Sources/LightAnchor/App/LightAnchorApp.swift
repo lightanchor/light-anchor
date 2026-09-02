@@ -55,14 +55,6 @@ struct LightAnchorApp: App {
                 .environmentObject(themeController)
                 .lightAnchorTheme(themeController.resolvedTheme)
                 .onOpenURL { url in
-                    if let event = ExternalEventURLParser().event(from: url) {
-                        _ = workspace.publishExternalEvent(event)
-                        return
-                    }
-                    if let request = IncomingURLWaitingRequestParser().request(from: url) {
-                        _ = workspace.beginWaitingFromIncomingURL(request)
-                        return
-                    }
                     guard let request = IncomingURLCapture().request(from: url) else { return }
                     _ = workspace.routeIncomingLink(request.url, title: request.title)
                 }

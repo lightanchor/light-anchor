@@ -1,6 +1,7 @@
 import SwiftUI
 
-struct IntegrationView: View {
+/// 设置 → 更新：签名更新清单的检查开关与手动检查。
+struct UpdateSettingsView: View {
     @AppStorage("lightanchor.updateChecksEnabled") private var updateChecksEnabled = false
     @AppStorage("lightanchor.updateManifestURL") private var updateManifestURL = ""
     @AppStorage("lightanchor.updatePublicKeyPath") private var updatePublicKeyPath = ""

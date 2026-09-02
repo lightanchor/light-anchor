@@ -16,7 +16,6 @@ final class WorkHistoryTests: XCTestCase {
         let waiting = WaitingItem(
             id: waitingID,
             episodeID: episode.id,
-            kind: .build,
             description: "等待测试",
             startedAt: start.addingTimeInterval(240),
             completedAt: start.addingTimeInterval(420),

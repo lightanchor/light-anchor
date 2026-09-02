@@ -232,7 +232,6 @@
 "save_to" = "存到";
 "stop_waiting" = "不再等待";
 "no_longer_needed" = "不再需要";
-"manual_wait" = "手动等待";
 "confirm_manually" = "手动确认";
 "return_manually" = "手动返回";
 "i_ll_confirm" = "由我确认";
@@ -250,30 +249,9 @@
 "looks_like_this_is_waiting_on" = "看起来是在等一件事完成。";
 "phrase_it_so_you_ll_recognise" = "写成回来时一眼就能认出的结果。";
 "confirm_it_yourself_or_have_it" = "可以等你自己确认，也可以在指定时间把它放回眼前。";
-"external_wait_needs_a_description" = "外部等待缺少描述，无法开始。";
-"external_wait_has_an_invalid_correlation" = "外部等待的关联 ID 无效，无法开始。";
-"can_t_create_the_external_wait" = "无法创建外部等待，请检查当前目标状态。";
-"no_work_in_progress_to_attach" = "没有正在进行的工作，无法等待外部结果。先开始一件事。";
-"agent_session" = "Agent 会话";
-"background_task_finished" = "后台任务结束";
-"command_finished" = "命令完成";
-"file_ready" = "文件完成";
-"another_tool_reported_done" = "其他工具报告完成";
-"build" = "构建";
-"download" = "下载";
 "export" = "导出";
-"reply" = "回复";
 "terminal" = "终端";
-"calendar" = "日历";
-"build_tools" = "构建工具";
-"download_tools" = "下载工具";
-"export_tools" = "导出工具";
-"reply_connector" = "回复连接器";
-"other_connectors" = "其他连接器";
-"started" = "已开始";
 "completed" = "已完成";
-"failed_2" = "失败";
-"cancelled" = "已取消";
 "rejected" = "已拒绝";
 
 /* == 现场与回场 == */
@@ -374,7 +352,6 @@
 "shortcuts" = "快捷键";
 "permissions" = "权限";
 "intelligence" = "智能";
-"connections" = "连接";
 "data" = "数据";
 "language" = "语言";
 "interface_language" = "界面语言";
@@ -450,8 +427,7 @@
 "scene_snapshots_intelligence" = "现场快照与智能";
 "auto" = "自动";
 
-/* == 设置：接收 / 连接 / 权限 / 数据 == */
-"terminal_zsh" = "终端（zsh）";
+/* == 设置：更新 / 权限 / 数据 == */
 "updates" = "更新";
 "check_for_signed_updates_periodically" = "定期检查签名更新";
 "only_signed_manifests_are_accepted_you" = "只接受签名的更新清单，检查地址和公钥路径由你提供";
@@ -864,13 +840,8 @@
 "update_service_returned_http" = "更新服务返回 HTTP %lld。";
 "a_result_you_were_waiting_for_arrived" = "等待结果已到达";
 "waiting_for" = "等待：%@";
-"the_external_event_has_no_valid_correlation" = "外部事件缺少有效的关联 ID 或内容。";
-"the_external_event_log_has_an_unreadable_record" = "外部事件日志中存在无法读取的记录。";
-"the_external_event_log_is_too_large" = "外部事件日志过大，已压缩保留最近的记录。";
 "no_detector_for_this_wait_type" = "当前等待类型没有可用的检测器。";
 "the_wait_detection_setup_is_incomplete" = "等待检测配置不完整。";
-"the_wait_command_failed" = "等待命令执行失败。";
-"the_external_event_reported_a_failure" = "外部事件报告失败。";
 "the_wait_passed_its_deadline" = "等待超过截止时间。";
 "key_n" = "键%lld";
 "space_key_cap" = "空格";

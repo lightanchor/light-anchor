@@ -229,7 +229,6 @@
 "save_to" = "Save to";
 "stop_waiting" = "Stop waiting";
 "no_longer_needed" = "No longer needed";
-"manual_wait" = "Manual wait";
 "confirm_manually" = "Confirm manually";
 "return_manually" = "Return manually";
 "i_ll_confirm" = "I'll confirm";
@@ -247,30 +246,9 @@
 "looks_like_this_is_waiting_on" = "Looks like this is waiting on something to finish.";
 "phrase_it_so_you_ll_recognise" = "Phrase it so you'll recognize the result at a glance.";
 "confirm_it_yourself_or_have_it" = "Confirm it yourself, or have it resurface at a set time.";
-"external_wait_needs_a_description" = "External wait needs a description.";
-"external_wait_has_an_invalid_correlation" = "External wait has an invalid correlation ID.";
-"can_t_create_the_external_wait" = "Can't create the external wait — check the current work's state.";
-"no_work_in_progress_to_attach" = "No work in progress to attach this wait to. Start something first.";
-"agent_session" = "Agent session";
-"background_task_finished" = "Background task finished";
-"command_finished" = "Command finished";
-"file_ready" = "File ready";
-"another_tool_reported_done" = "Another tool reported done";
-"build" = "Build";
-"download" = "Download";
 "export" = "Export";
-"reply" = "Reply";
 "terminal" = "Terminal";
-"calendar" = "Calendar";
-"build_tools" = "Build tools";
-"download_tools" = "Download tools";
-"export_tools" = "Export tools";
-"reply_connector" = "Reply connector";
-"other_connectors" = "Other connectors";
-"started" = "Started";
 "completed" = "Completed";
-"failed_2" = "Failed";
-"cancelled" = "Cancelled";
 "rejected" = "Rejected";
 
 /* == 现场与回场 == */
@@ -371,7 +349,6 @@
 "shortcuts" = "Shortcuts";
 "permissions" = "Permissions";
 "intelligence" = "Intelligence";
-"connections" = "Connections";
 "data" = "Data";
 "language" = "Language";
 "interface_language" = "Interface language";
@@ -447,8 +424,7 @@
 "scene_snapshots_intelligence" = "Scene snapshots & intelligence";
 "auto" = "Auto";
 
-/* == 设置：接收 / 连接 / 权限 / 数据 == */
-"terminal_zsh" = "Terminal (zsh)";
+/* == 设置：更新 / 权限 / 数据 == */
 "updates" = "Updates";
 "check_for_signed_updates_periodically" = "Check for signed updates periodically";
 "only_signed_manifests_are_accepted_you" = "Only signed manifests are accepted; you provide the URL and public key path";
@@ -861,13 +837,8 @@
 "update_service_returned_http" = "The update service returned HTTP %lld.";
 "a_result_you_were_waiting_for_arrived" = "A result you were waiting for arrived";
 "waiting_for" = "Waiting: %@";
-"the_external_event_has_no_valid_correlation" = "The external event has no valid correlation ID or content.";
-"the_external_event_log_has_an_unreadable_record" = "The external event log has an unreadable record.";
-"the_external_event_log_is_too_large" = "The external event log is too large; it was compacted to the most recent records.";
 "no_detector_for_this_wait_type" = "No detector is available for this wait type.";
 "the_wait_detection_setup_is_incomplete" = "The wait detection setup is incomplete.";
-"the_wait_command_failed" = "The wait command failed.";
-"the_external_event_reported_a_failure" = "The external event reported a failure.";
 "the_wait_passed_its_deadline" = "The wait passed its deadline.";
 "key_n" = "Key %lld";
 "space_key_cap" = "Space";

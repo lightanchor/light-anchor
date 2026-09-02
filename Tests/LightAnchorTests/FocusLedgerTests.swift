@@ -55,7 +55,6 @@ final class FocusLedgerTests: XCTestCase {
         _ = workspace.captureText("想法一", now: t0.addingTimeInterval(60))
         let waiting = try XCTUnwrap(workspace.beginWaiting(
             episodeID: episode.id,
-            kind: .manual,
             description: "等 CI",
             now: t0.addingTimeInterval(120)
         ))

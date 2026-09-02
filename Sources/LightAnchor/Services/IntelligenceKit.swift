@@ -2618,25 +2618,21 @@ enum SceneSnapshotBuilder {
         case .saveAll:
             for index in items.indices {
                 items[index].isRelevant = true
-                items[index].relevanceSource = .all
             }
         case .aiFiltered:
             let results = await engine.filterSceneItems(
                 items: items, targetName: targetName, targetNote: targetNote
             )
             // 能给出判断的只有模型：启发式和引擎的失败路径都返回空，落到下面的全部保留。
-            let source: SceneRelevanceSource = .ai
             if results.isEmpty {
                 // 无 AI 或引擎失败：全部保留，宁可多存不漏存
                 for index in items.indices {
                     items[index].isRelevant = true
-                    items[index].relevanceSource = .all
                 }
             } else {
                 for result in results {
                     if let index = items.firstIndex(where: { $0.id == result.itemID }) {
                         items[index].isRelevant = result.isRelevant
-                        items[index].relevanceSource = source
                     }
                 }
             }

@@ -70,7 +70,6 @@ final class IntelligenceCapabilityTests: XCTestCase {
         let episode = try XCTUnwrap(workspace.currentEpisode)
         let waiting = try XCTUnwrap(workspace.beginWaiting(
             episodeID: episode.id,
-            kind: .manual,
             description: "等反馈",
             now: base.addingTimeInterval(600)
         ))

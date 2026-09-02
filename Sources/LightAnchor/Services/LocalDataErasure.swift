@@ -18,12 +18,10 @@ enum LocalDataErasure {
     ///
     /// `.lock` 不在其中：每个存储各自在自己的锁下删数据，把锁文件一起删会让并发
     /// 写入者失去互斥。附件目录由 `LocalAssetStore.removeAll()` 负责，诊断日志由
-    /// `LocalDiagnostics.removeAllData()` 负责，接入脚本属于机器级安装、由「连接」
-    /// 页各自移除，都不在这里重复。
+    /// `LocalDiagnostics.removeAllData()` 负责，都不在这里重复。
     static var fileNames: [String] {
         [
             LightAnchorStorage.eventsURL(),
-            LightAnchorStorage.externalEventsURL(),
             LightAnchorStorage.launchMarkerURL(),
             LightAnchorStorage.memoryChatURL(),
             // 检索索引是缓存，但里面装着捕获与问答的全文，删数据必须一并清。

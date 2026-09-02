@@ -6,8 +6,6 @@ ROOT_DIR=${SCRIPT_DIR:h}
 cd "$ROOT_DIR"
 
 "$SCRIPT_DIR/performance-baseline.sh"
-swift build -c release --product LightAnchorEvent
-"$SCRIPT_DIR/lightanchor-event.sh" publish --help >/dev/null
 "$SCRIPT_DIR/smoke-update-release.sh" --help >/dev/null
 "$SCRIPT_DIR/smoke-data-backup.sh"
 "$SCRIPT_DIR/smoke-release-signature.sh"

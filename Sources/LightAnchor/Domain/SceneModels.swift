@@ -40,8 +40,6 @@ struct SceneItem: Codable, Equatable, Identifiable, Sendable {
     var detail: String
     /// 是否被判定为与当前目标相关。AI 筛选关闭时默认全部为 true。
     var isRelevant: Bool
-    /// 相关性来源：ai（模型判断）/ manual（用户手动）/ all（全部保存）。
-    var relevanceSource: SceneRelevanceSource
 
     init(
         id: UUID = UUID(),
@@ -50,8 +48,7 @@ struct SceneItem: Codable, Equatable, Identifiable, Sendable {
         address: String,
         sourceApplication: String = "",
         detail: String = "",
-        isRelevant: Bool = true,
-        relevanceSource: SceneRelevanceSource = .all
+        isRelevant: Bool = true
     ) {
         self.id = id
         self.kind = kind
@@ -60,14 +57,7 @@ struct SceneItem: Codable, Equatable, Identifiable, Sendable {
         self.sourceApplication = sourceApplication.trimmingCharacters(in: .whitespacesAndNewlines)
         self.detail = detail.trimmingCharacters(in: .whitespacesAndNewlines)
         self.isRelevant = isRelevant
-        self.relevanceSource = relevanceSource
     }
-}
-
-enum SceneRelevanceSource: String, Codable, Equatable, Sendable {
-    case ai
-    case manual
-    case all
 }
 
 /// 现场筛选方式。默认 AI 筛选（只存与目标相关），可切换为全部保存。

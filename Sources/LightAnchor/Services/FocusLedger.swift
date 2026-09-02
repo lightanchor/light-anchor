@@ -179,7 +179,6 @@ enum FocusLedger {
                 guard let episode = event.episode,
                       episode.state == .ended,
                       episode.endedReason == .completed,
-                      !episode.isBackground,
                       interval.contains(event.occurredAt)
                 else { break }
                 completedEpisodeIDs.insert(episode.id)

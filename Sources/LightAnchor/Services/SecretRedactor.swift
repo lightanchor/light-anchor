@@ -1,6 +1,6 @@
 import Foundation
 
-/// 采集入口的共用脱敏器：终端命令、剪贴板、外部事件文本在落盘或进入模型提示词之前
+/// 采集入口的共用脱敏器：终端命令、剪贴板文本在落盘或进入模型提示词之前
 /// 先经过这里。只替换明显的凭据形态，不试图理解语义；宁可多遮一点，也不把 token 存下来。
 enum SecretRedactor {
     static let placeholder = "<REDACTED>"

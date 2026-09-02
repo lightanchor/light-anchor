@@ -56,7 +56,6 @@ final class AttentionActionRouter {
             }
             guard let waiting = workspace.beginWaiting(
                 episodeID: episode.id,
-                kind: .manual,
                 description: description,
                 now: now
             ) else {

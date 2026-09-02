@@ -43,7 +43,6 @@ final class AttentionWorkspace: ObservableObject {
             return self.contextCapture(self.intelligencePreferences, self.sceneCapturePreferences)
         }
     )
-    private let autoWaitRouter: AutoWaitRouter
     private let contextCapture: (IntelligencePreferences, SceneCapturePreferences) -> ContextCapsule
 
     @Published private(set) var sceneCapturePreferences: SceneCapturePreferences = .load()
@@ -51,7 +50,6 @@ final class AttentionWorkspace: ObservableObject {
     init(
         store: LocalEventStore = LocalEventStore(),
         assetStore: LocalAssetStore? = nil,
-        externalEventInboxURL: URL? = nil,
         sceneCapturePreferences: SceneCapturePreferences? = nil,
         recordingTraceStore: RecordingTraceStore? = nil,
         contextCapture: ((IntelligencePreferences, SceneCapturePreferences) -> ContextCapsule)? = nil
@@ -59,7 +57,6 @@ final class AttentionWorkspace: ObservableObject {
         self.store = store
         self.assetStore = assetStore ?? LocalAssetStore()
         self.recordingTraceStore = recordingTraceStore ?? RecordingTraceStore()
-        self.autoWaitRouter = AutoWaitRouter(inboxURL: externalEventInboxURL)
         self.sceneCapturePreferences = sceneCapturePreferences ?? .load()
         #if os(macOS)
         self.contextCapture = contextCapture ?? { intelligence, sourcePreferences in
@@ -113,72 +110,8 @@ final class AttentionWorkspace: ObservableObject {
         lastNotice = nil
     }
 
-    @discardableResult
-    func publishExternalEvent(_ event: ExternalEvent) -> Bool {
-        do {
-            try ExternalEventStore().publish(event)
-            lastError = nil
-            return true
-        } catch {
-            lastError = error.localizedDescription
-            LocalDiagnostics.shared.record(
-                operation: "external-event.publish",
-                message: error.localizedDescription
-            )
-            return false
-        }
-    }
-
-    @discardableResult
-    func beginWaitingFromIncomingURL(
-        _ request: IncomingURLWaitingRequest,
-        now: Date = Date()
-    ) -> WaitingItem? {
-        guard let episode = currentEpisode, episode.state != .ended else {
-            presentNotice(tr("no_work_in_progress_to_attach"))
-            return nil
-        }
-
-        let description = request.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !description.isEmpty else {
-            presentNotice(tr("external_wait_needs_a_description"))
-            return nil
-        }
-
-        guard var monitor = try? GenericExternalEventConnector(
-            kind: request.kind,
-            source: request.source
-        ).makeMonitor(
-            description: description,
-            value: request.correlationID
-        ) else {
-            presentNotice(tr("external_wait_has_an_invalid_correlation"))
-            return nil
-        }
-
-        // A completed download can hand off its wait and event URLs almost together.
-        // The correlation ID is unique to this explicit action, so a short grace
-        // window prevents that event from racing the waiting monitor setup.
-        monitor.eventAfter = now.addingTimeInterval(-60)
-
-        let waiting = beginWaiting(
-            episodeID: episode.id,
-            kind: request.kind,
-            description: description,
-            completionCondition: request.detail,
-            restorePolicy: .notify,
-            monitor: monitor,
-            now: now
-        )
-        if waiting == nil {
-            presentNotice(tr("can_t_create_the_external_wait"))
-        }
-        return waiting
-    }
-
     func runBackgroundMaintenance(now: Date = Date()) {
         _ = archiveConfiguredInbox(now: now)
-        autoWaitRouter.route(into: self)
         #if os(macOS)
         backfillCaptureText()
         #endif
@@ -555,19 +488,11 @@ final class AttentionWorkspace: ObservableObject {
         }
     }
 
-    /// 把日志里所有会执行外部代码的东西解除武装：命令类等待监视器退成手动等待，
-    /// 环境里的「运行命令 / 运行快捷指令」动作关掉。用户在界面里重新打开，才算授权。
-    /// 返回处理过的条目数。
+    /// 把日志里所有会执行外部代码的东西解除武装：环境里的「运行命令 / 运行快捷指令」
+    /// 动作关掉。用户在界面里重新打开，才算授权。返回处理过的条目数。
     @discardableResult
     func quarantineAutomation(now: Date = Date()) -> Int {
         var newEvents: [AttentionEvent] = []
-        for var waiting in snapshot.waitingItems.values
-        where waiting.status == .waiting && waiting.monitor?.kind == .command {
-            waiting.monitor?.kind = .manual
-            waiting.monitor?.command = nil
-            waiting.monitor?.arguments = []
-            newEvents.append(.waitingChanged(waiting, at: now))
-        }
         for var environment in snapshot.environments.values {
             var changed = false
             environment.actions = environment.actions.map { action in
@@ -637,7 +562,6 @@ final class AttentionWorkspace: ObservableObject {
             Task.detached(priority: .utility) { await MemoryIndex.shared.removeAll() }
             // 每次恢复备份留下的整目录旧副本也算「这台 Mac 上的数据」。
             LocalDataArchiveService.removePreRestoreCopies(of: dataRoot)
-            try? ExternalEventStore().removeAll()
             for key in LocalDataErasure.erasableUserDefaultsKeys {
                 defaults.removeObject(forKey: key)
             }
@@ -731,10 +655,9 @@ final class AttentionWorkspace: ObservableObject {
     }
 
     /// 这件事还没结束的那一段（放下 / 等待中）：回到一件事时接着做它。
-    /// 后台段（Agent/终端自动等待的中枢）不算「你在做的事」。
     func unfinishedEpisode(for targetID: UUID) -> AttentionEpisode? {
         snapshot.episodes.values
-            .filter { $0.targetID == targetID && $0.state != .ended && !$0.isBackground }
+            .filter { $0.targetID == targetID && $0.state != .ended }
             .sorted {
                 if $0.updatedAt != $1.updatedAt { return $0.updatedAt > $1.updatedAt }
                 return $0.startedAt > $1.startedAt
@@ -785,7 +708,6 @@ final class AttentionWorkspace: ObservableObject {
         if var resumed = resumable {
             // 接着做：这一段原有的现场、回来先看和累计专注全部留着。
             resumed.state = .active
-            resumed.isBackground = false
             resumed.updatedAt = now
             if context.hasSceneContent { resumed.context = context }
             let trimmedCue = returnCue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1405,7 +1327,6 @@ final class AttentionWorkspace: ObservableObject {
     func beginWaitingFromCapture(
         _ captureID: UUID,
         episodeID: UUID? = nil,
-        kind: WaitingKind = .manual,
         completionCondition: String = "用户确认已到达",
         restorePolicy: WaitingRestorePolicy = .manual,
         monitor: WaitingMonitorConfiguration? = nil,
@@ -1421,7 +1342,6 @@ final class AttentionWorkspace: ObservableObject {
             : capture.body
         let waiting = WaitingItem(
             episodeID: episodeID,
-            kind: kind,
             description: description,
             completionCondition: completionCondition,
             startedAt: now,
@@ -1491,7 +1411,6 @@ final class AttentionWorkspace: ObservableObject {
     @discardableResult
     func beginWaiting(
         episodeID: UUID,
-        kind: WaitingKind,
         description: String,
         completionCondition: String = "",
         restorePolicy: WaitingRestorePolicy = .manual,
@@ -1507,21 +1426,13 @@ final class AttentionWorkspace: ObservableObject {
             episode.context = boundaryContext(for: episode, at: now)
         }
 
-        var configuredMonitor = monitor
-        if configuredMonitor?.kind == .event {
-            var eventMonitor = configuredMonitor!
-            eventMonitor.eventAfter = eventMonitor.eventAfter ?? now
-            configuredMonitor = eventMonitor
-        }
-
         let waiting = WaitingItem(
             episodeID: episodeID,
-            kind: kind,
             description: description,
             completionCondition: completionCondition,
             startedAt: now,
             restorePolicy: restorePolicy,
-            monitor: configuredMonitor,
+            monitor: monitor,
             timeoutAt: timeoutAt,
             originalContext: episode.context
         )
@@ -1622,7 +1533,6 @@ final class AttentionWorkspace: ObservableObject {
 
         var resolvedWaiting = waiting
         resolvedWaiting.status = .resolved
-        episode.isBackground = false
         episode.state = .active
         episode.updatedAt = now
         guard commit([
@@ -1644,183 +1554,6 @@ final class AttentionWorkspace: ObservableObject {
         return commit([
             .waitingChanged(waiting, at: now)
         ])
-    }
-
-    // MARK: - 自动等待（Agent / 终端事件）
-
-    /// 确认一个就绪的等待结果，但不切换当前工作、不恢复现场——
-    /// 自动等待（Agent 回合、终端命令）的「知道了」。
-    @discardableResult
-    func acknowledgeWaitingResult(_ waitingID: UUID, now: Date = Date()) -> Bool {
-        guard var waiting = snapshot.waitingItems[waitingID], waiting.status == .ready else {
-            return false
-        }
-        waiting.status = .resolved
-        var newEvents: [AttentionEvent] = [.waitingChanged(waiting, at: now)]
-        if var episode = snapshot.episodes[waiting.episodeID],
-           episode.isBackground,
-           episode.state == .waiting {
-            episode.state = .paused
-            episode.updatedAt = now
-            newEvents.append(.episodeChanged(episode, at: now))
-        }
-        return commit(newEvents)
-    }
-
-    /// 把一条 Agent / 终端来源的外部事件应用到自动等待上。所有状态时刻都
-    /// 取事件自身的 occurredAt——这让重启后从头重放整个收件箱也收敛到同一状态。
-    func applyAutoWaitEvent(_ event: ExternalEvent) {
-        guard !event.correlationID.isEmpty,
-              AutoWaitHub.descriptor(for: event.source) != nil
-        else { return }
-
-        // 这个 correlationID 已有用户声明的（非自动）等待：让它的检测器处理。
-        let declaredElsewhere = snapshot.waitingItems.values.contains {
-            $0.monitor?.eventCorrelationID == event.correlationID
-                && $0.monitor?.eventAutoManaged != true
-        }
-        guard !declaredElsewhere else { return }
-
-        let existing = snapshot.waitingItems.values
-            .filter {
-                $0.monitor?.eventAutoManaged == true
-                    && $0.monitor?.eventCorrelationID == event.correlationID
-            }
-            .sorted { $0.startedAt > $1.startedAt }
-            .first
-
-        switch event.kind {
-        case .started:
-            if let existing {
-                reopenAutoWait(existing, for: event)
-            } else if activeAutoWaitCount(for: event.source) < Self.maximumActiveAutoWaitsPerSource {
-                _ = createAutoWait(for: event)
-            } else {
-                // 同一来源刷来的新 correlation 超过上限就不再开新等待：每开一个
-                // 都要重写整份事件日志，这里是刷量最容易打到的地方。
-                LocalDiagnostics.shared.record(
-                    operation: "auto-wait.route",
-                    message: "来源 \(event.source.rawValue) 的自动等待已达上限，忽略 \(event.correlationID)"
-                )
-            }
-
-        case .progress:
-            // 目前的生产者不发进度；忽略，避免每次轮询都写事件日志。
-            break
-
-        case .completed, .failed:
-            if let existing {
-                if existing.status == .waiting {
-                    _ = completeWaiting(existing.id, evidence: event.evidence, now: event.occurredAt)
-                } else if event.occurredAt > (existing.completedAt ?? existing.startedAt) {
-                    // 只报完成、不报开始的工具（如 Codex 的 notify 只有
-                    // agent-turn-complete）：更新的完成事件是新一轮结果——
-                    // 重开同一项等待并立即就绪，而不是悄悄丢掉。
-                    reopenAutoWait(existing, for: event)
-                    if snapshot.waitingItems[existing.id]?.status == .waiting {
-                        _ = completeWaiting(existing.id, evidence: event.evidence, now: event.occurredAt)
-                    }
-                }
-            } else if let created = createAutoWait(for: event) {
-                // 等待开始前应用不在运行（或探针没来得及发 started）：
-                // 补一个已完成的结果，长命令跑完的事实仍然值得出现。
-                _ = completeWaiting(created.id, evidence: event.evidence, now: event.occurredAt)
-            }
-
-        case .cancelled:
-            guard let existing, existing.status == .waiting else { return }
-            _ = cancelWaiting(existing.id, evidence: event.evidence, now: event.occurredAt)
-        }
-    }
-
-    static let maximumActiveAutoWaitsPerSource = 200
-
-    private func activeAutoWaitCount(for source: ExternalEventSource) -> Int {
-        guard let hub = AutoWaitHub.descriptor(for: source) else { return 0 }
-        return snapshot.waitingItems.values.filter {
-            $0.status == .waiting
-                && $0.monitor?.eventAutoManaged == true
-                && snapshot.episodes[$0.episodeID]?.targetID == hub.targetID
-        }.count
-    }
-
-    @discardableResult
-    private func createAutoWait(for event: ExternalEvent) -> WaitingItem? {
-        guard let hub = AutoWaitHub.descriptor(for: event.source) else { return nil }
-        let title = event.title.isEmpty ? hub.fallbackTitle : event.title
-        var newEvents: [AttentionEvent] = []
-
-        if snapshot.targets[hub.targetID] == nil {
-            newEvents.append(.targetChanged(
-                AttentionTarget(
-                    id: hub.targetID,
-                    name: hub.name,
-                    note: hub.note,
-                    createdAt: event.occurredAt,
-                    updatedAt: event.occurredAt
-                ),
-                at: event.occurredAt
-            ))
-        }
-
-        let waitingID = UUID()
-        let episode = AttentionEpisode(
-            targetID: hub.targetID,
-            startedAt: event.occurredAt,
-            updatedAt: event.occurredAt,
-            state: .waiting,
-            isBackground: true,
-            returnCue: title,
-            waitingIDs: [waitingID]
-        )
-        let waiting = WaitingItem(
-            id: waitingID,
-            episodeID: episode.id,
-            kind: hub.waitingKind,
-            description: title,
-            completionCondition: event.detail,
-            startedAt: event.occurredAt,
-            restorePolicy: .notify,
-            monitor: WaitingMonitorConfiguration(
-                kind: .event,
-                eventCorrelationID: event.correlationID,
-                eventSources: [event.source],
-                eventAutoManaged: true
-            )
-        )
-        newEvents.append(.episodeChanged(episode, at: event.occurredAt))
-        newEvents.append(.waitingChanged(waiting, at: event.occurredAt))
-        guard commit(newEvents) else { return nil }
-        return snapshot.waitingItems[waitingID]
-    }
-
-    private func reopenAutoWait(_ existing: WaitingItem, for event: ExternalEvent) {
-        switch existing.status {
-        case .waiting:
-            // 已在等待：至多把标题换成最新回合的。
-            guard !event.title.isEmpty, event.title != existing.description else { return }
-            var updated = existing
-            updated.description = event.title
-            _ = commit([.waitingChanged(updated, at: event.occurredAt)])
-
-        case .ready, .resolved, .cancelled:
-            // 只有比上次收尾更新的 started 才重开——重放旧日志不会翻旧账。
-            guard event.occurredAt > (existing.completedAt ?? existing.startedAt) else { return }
-            var reopened = existing
-            reopened.status = .waiting
-            reopened.completedAt = nil
-            reopened.evidence = ""
-            if !event.title.isEmpty {
-                reopened.description = event.title
-            }
-            var newEvents: [AttentionEvent] = [.waitingChanged(reopened, at: event.occurredAt)]
-            if var episode = snapshot.episodes[existing.episodeID], episode.state != .ended {
-                episode.state = .waiting
-                episode.updatedAt = event.occurredAt
-                newEvents.append(.episodeChanged(episode, at: event.occurredAt))
-            }
-            _ = commit(newEvents)
-        }
     }
 
     private func changeEpisodeState(
@@ -2402,7 +2135,6 @@ final class AttentionWorkspace: ObservableObject {
         guard var sceneSnapshot = snapshot.sceneSnapshots[snapshotID] else { return false }
         guard let index = sceneSnapshot.items.firstIndex(where: { $0.id == itemID }) else { return false }
         sceneSnapshot.items[index].isRelevant.toggle()
-        sceneSnapshot.items[index].relevanceSource = .manual
         return commit([.sceneSnapshotChanged(sceneSnapshot, at: now)])
     }
 

@@ -31,10 +31,6 @@ enum LightAnchorStorage {
         rootURL(fileManager: fileManager).appendingPathComponent("assets", isDirectory: true)
     }
 
-    static func externalEventsURL(fileManager: FileManager = .default) -> URL {
-        rootURL(fileManager: fileManager).appendingPathComponent("external-events.jsonl")
-    }
-
     static func diagnosticsURL(fileManager: FileManager = .default) -> URL {
         rootURL(fileManager: fileManager).appendingPathComponent("diagnostics.log")
     }

@@ -12,7 +12,7 @@ SMOKE_BUNDLE_ID="com.lightanchor.smoke.$$"
 DATA_ROOT=${DATA_ROOT:A}
 SMOKE_APP="$DATA_ROOT/LightAnchorSmoke.app"
 APP_LOG="$DATA_ROOT/app.log"
-EVENT_LOG="$DATA_ROOT/external-events.jsonl"
+EVENTS_FILE="$DATA_ROOT/events.json"
 MARKER="$DATA_ROOT/launch-marker.json"
 APP_PID=""
 QUIT_REQUESTED=false
@@ -132,29 +132,33 @@ done
 # anything that also opens one on the side shows up here as a duplicate.
 [[ "${WINDOW_COUNT:-0}" -eq 1 ]] || fail "reopen produced $WINDOW_COUNT windows, expected 1"
 
-CORRELATION="macos-app-smoke-${APP_PID}-${RANDOM}"
-EVENT_URL="lightanchor://event?source=custom&kind=completed&correlation=${CORRELATION}&title=Smoke%20deep%20link&detail=Event%20arrived"
+# Deep link: lightanchor://capture hands a link to the inbox; it must land in
+# the isolated event log as a captureChanged record with the same source URL.
+CAPTURE_TOKEN="macos-app-smoke-${APP_PID}-${RANDOM}"
+CAPTURE_LINK="https://example.com/${CAPTURE_TOKEN}"
+CAPTURE_URL="lightanchor://capture?url=https%3A%2F%2Fexample.com%2F${CAPTURE_TOKEN}&title=Smoke%20deep%20link"
 
-send_event() {
+send_capture() {
     /usr/bin/osascript \
-        -e "tell application id \"$SMOKE_BUNDLE_ID\" to open location \"$EVENT_URL\"" \
+        -e "tell application id \"$SMOKE_BUNDLE_ID\" to open location \"$CAPTURE_URL\"" \
         >/dev/null 2>&1 || true
 }
 
-send_event
+capture_recorded() {
+    [[ -s "$EVENTS_FILE" ]] && /usr/bin/jq -e --arg link "$CAPTURE_LINK" \
+        '.events[] | select(.kind == "captureChanged" and .capture.sourceURL == $link)' \
+        "$EVENTS_FILE" >/dev/null 2>&1
+}
+
+send_capture
 for _ in {1..40}; do
-    if [[ -s "$EVENT_LOG" ]] && \
-        /usr/bin/jq -e --arg correlation "$CORRELATION" \
-        'select(.correlationID == $correlation)' "$EVENT_LOG" >/dev/null 2>&1; then
+    if capture_recorded; then
         break
     fi
     sleep 0.25
 done
-[[ -s "$EVENT_LOG" ]] || fail "deep-link event was not written to the isolated store"
-/usr/bin/jq -e --arg correlation "$CORRELATION" \
-    'select(.correlationID == $correlation and .kind == "completed")' \
-    "$EVENT_LOG" >/dev/null \
-    || fail "deep-link event did not match the expected completion record"
+[[ -s "$EVENTS_FILE" ]] || fail "deep-link capture was not written to the isolated store"
+capture_recorded || fail "deep-link capture did not match the expected captureChanged record"
 
 if /usr/bin/osascript \
     -e "tell application id \"$SMOKE_BUNDLE_ID\" to quit" \
@@ -177,4 +181,4 @@ wait "$APP_PID" 2>/dev/null || true
 [[ "$QUIT_REQUESTED" == "true" ]] || fail "could not send a normal quit request"
 [[ ! -e "$MARKER" ]] || fail "normal app termination did not clean the launch marker"
 
-print -r -- "macOS app smoke passed: window close/reopen (single window), isolated data root, deep link, event persistence, clean exit."
+print -r -- "macOS app smoke passed: window close/reopen (single window), isolated data root, deep-link capture, clean exit."

@@ -4,12 +4,12 @@
 
 ## 项目结构
 
-Swift 6 包，目标 macOS 15，没有 Xcode 工程文件。`Sources/LightAnchor/` 是 SwiftUI 应用（`App/` 运行时状态、`Domain/` 模型与事件、`Services/` 持久化与集成、`Views/` 界面、`Design/` 主题原语），事件协议与 CLI 是独立 target `Sources/LightAnchorEventCore/`、`Sources/LightAnchorEvent/`，测试在 `Tests/LightAnchorTests/`。`Scripts/` 放运维工具，`Integrations/` 放外部 agent 适配器，`Support/` 放权利文件、图标与品牌素材。逐条约定见 [`../AGENTS.md`](../AGENTS.md)。
+Swift 6 包，目标 macOS 15，没有 Xcode 工程文件。`Sources/LightAnchor/` 是 SwiftUI 应用（`App/` 运行时状态、`Domain/` 模型与事件、`Services/` 持久化与系统能力、`Views/` 界面、`Design/` 主题原语），测试在 `Tests/LightAnchorTests/`。`Scripts/` 放运维工具，`Support/` 放权利文件、图标与品牌素材。逐条约定见 [`../AGENTS.md`](../AGENTS.md)。
 
 ## 运行与验证
 
 ```text
-swift test                              # 全部自动化测试（当前 286 项）
+swift test                              # 全部自动化测试
 swift build -c release
 Scripts/build-release.sh                # 出 dist/LightAnchor.app + zip + manifest
 Scripts/verify-release.sh
@@ -19,10 +19,9 @@ Scripts/smoke-data-backup.sh
 Scripts/smoke-release-signature.sh
 Scripts/smoke-update-release.sh
 Scripts/reset-permissions.sh            # 清掉本机 TCC 授权记录，重新走一遍授权
-Scripts/lightanchor-event.sh publish --help
 ```
 
-`Scripts/smoke-macos-app.sh` 在临时 `LIGHTANCHOR_DATA_ROOT` 下启动真实 App 包，验证进程存活、`lightanchor://event` 深链、事件落盘和退出清理，不污染默认数据目录；日常运行也可以用同一变量指定隔离数据根。
+`Scripts/smoke-macos-app.sh` 在临时 `LIGHTANCHOR_DATA_ROOT` 下启动真实 App 包，验证进程存活、`lightanchor://capture` 深链落进事件日志和退出清理，不污染默认数据目录；日常运行也可以用同一变量指定隔离数据根。
 
 ## 提交信息
 
@@ -70,31 +69,16 @@ chore(release): 更新 manifest 校验和与签名脚本
 
 - 所有记录都在本机：事件溯源日志 `events.json` 是唯一真相，附件在同目录 `assets/`。日志带 `schemaVersion`，版本不符整份拒绝读取，不做兼容解码。
 - `Scripts/backup-data.sh` 生成带 schema、文件大小和 SHA-256 manifest 的 `.tar.gz`；`Scripts/restore-data.sh --backup PATH --verify` 只校验，真正恢复必须显式 `--replace`，旧目录保留为 `.pre-restore-*`。
-- 设置 → 数据 提供 JSON 导出、诊断导出（脱敏）、完整备份/恢复和收件箱自动归档配置。备份里除了数据目录还含一份偏好快照（`preferences.plist`）：回顾正文、云端配置、快捷键、采集偏好都在 UserDefaults 里，不一起打包，换机恢复会静静丢掉它们。恢复只写清单内的键——备份文件是外部输入，不让它往 UserDefaults 里塞任意键；包里没有这个文件视为结构不完整，整体拒绝恢复。备份文件被当作**不可信输入**：恢复前先在临时目录里解一遍 `events.json`、拒绝符号链接（含隐藏项）并限制解压总量；恢复后 `.command` 类等待监视器退成手动、环境里的「运行命令 / 快捷指令」动作被停用、云端引擎与整屏截图 / 剪贴板采集回到关闭，更新地址与公钥路径永不写回；附件路径只认 `assets/` 目录内的平铺文件。云端 API Key 存在 Keychain 里，不在偏好 blob 中，因此也不在备份里。每次恢复留下的 `.pre-restore-*` 副本只保留最近一份，「删除全部本地数据」会一并清掉。
+- 设置 → 数据 提供 JSON 导出、诊断导出（脱敏）、完整备份/恢复和收件箱自动归档配置。备份里除了数据目录还含一份偏好快照（`preferences.plist`）：回顾正文、云端配置、快捷键、采集偏好都在 UserDefaults 里，不一起打包，换机恢复会静静丢掉它们。恢复只写清单内的键——备份文件是外部输入，不让它往 UserDefaults 里塞任意键；包里没有这个文件视为结构不完整，整体拒绝恢复。备份文件被当作**不可信输入**：恢复前先在临时目录里解一遍 `events.json`、拒绝符号链接（含隐藏项）并限制解压总量；恢复后环境里的「运行命令 / 快捷指令」动作被停用、云端引擎与整屏截图 / 剪贴板采集回到关闭，更新地址与公钥路径永不写回；附件路径只认 `assets/` 目录内的平铺文件。云端 API Key 存在 Keychain 里，不在偏好 blob 中，因此也不在备份里。每次恢复留下的 `.pre-restore-*` 副本只保留最近一份，「删除全部本地数据」会一并清掉。
 - 「删除全部本地数据」的删/留清单在 `LocalDataErasure` 一处定义：内容、凭据（云端 API Key）与缓存必删，界面与隐私偏好刻意保留——删数据不该把用户收紧过的采集开关退回更宽松的默认。守门测试核对源码里每个偏好键都被显式分类。
 - 权限五项（麦克风、语音识别、屏幕录制、辅助功能、通知）全部按用途显示状态并跳系统设置，应用不代替用户授权。麦克风/语音识别/通知会弹窗要答案；辅助功能和屏幕录制的开关在系统设置里，系统不会回一个明确的「拒绝」，所以这两项只报「待系统设置里开启」，并在权限页开着时按秒复查——拨完开关切回来就是「已授权」。屏幕录制的授权在进程内被缓存，拨完要重开轻锚。
 - 设置 → 权限 可暂停自动现场记录，并按应用 Bundle ID 或网站域名选择「排除列表」/「只记录列表」；规则在读取窗口与终端事实之前生效。这里也可清除最近一小时或全部现场事实与截图，同时保留目标状态、用户备注和专注账本。
-
-## 外部结果交接
-
-构建、下载、导出或任何外部任务都可以发布统一完成事件，等待项只匹配自己声明的 `correlationID`：
-
-```text
-Scripts/lightanchor-event.sh publish \
-  --source terminal \
-  --kind completed \
-  --correlation build-42 \
-  --title "项目构建" \
-  --detail "测试通过"
-```
-
-也可以打开 `lightanchor://event?source=terminal&kind=completed&correlation=build-42`；带 URL 的 `lightanchor://` 深链直接落收件箱。事件日志在应用支持目录持久化，应用重启后继续监视已声明的等待。五个工作台（Claude Code / Codex / PI / dsh / 终端）的手动接入路径见 [`Integrations/`](../Integrations/README.md)。
 
 ## 本地化
 
 本地化 key 是稳定的英文标识符（如 `save`、`ready_to_return`），所有用户可见文案走 `tr()`。简体中文是开发语言：`Sources/LightAnchor/Resources/zh-Hans.lproj/` 是唯一事实源，`en.lproj/` 逐 key 对照翻译；查找顺序「当前语言 → zh-Hans → key」，漏译只会回退中文、不会坏。加新语言 = 加一个 `.lproj` 目录，零代码改动。表随 SPM 资源 bundle（`Bundle.module`）走，`swift run` 开发期同样生效；语言切换写系统 `AppleLanguages` 覆盖，重开应用生效。含插值的文案走 `String(format: tr(...))`，语序不同的语言用位置说明符（`%2$@`）调换实参。守门测试保证两表 key 集一致、格式占位符一致、`tr()` 的 key 都在表里、表里没有没人用的 key，界面层与已收口的服务文件没有裸中文字面量。
 
-三处刻意还没双语，源码里各自写了理由与后果：**提示词与模型输入**留中文，所以界面切到英文时 AI 生成的回答仍是中文（要改是整套提示词按语言出版本，并定一条策略：跟界面语言还是跟提问语言）；**中文问句的分词表**（时间词与套话）是解析器而非文案，英文提问现在解析不出时间范围、只会退到默认最近 7 天，那是没做的功能不是漏译；**App Intents 的标题与说明**用 `LocalizedStringResource`，构建期抽进「快捷指令」元数据、取主 bundle 的表，与 `tr()` 的 `Bundle.module` 不是一条路。事件 CLI 与 `LightAnchorEventCore` 是独立 target，没有本地化表，其面向脚本的错误文案留中文。
+三处刻意还没双语，源码里各自写了理由与后果：**提示词与模型输入**留中文，所以界面切到英文时 AI 生成的回答仍是中文（要改是整套提示词按语言出版本，并定一条策略：跟界面语言还是跟提问语言）；**中文问句的分词表**（时间词与套话）是解析器而非文案，英文提问现在解析不出时间范围、只会退到默认最近 7 天，那是没做的功能不是漏译；**App Intents 的标题与说明**用 `LocalizedStringResource`，构建期抽进「快捷指令」元数据、取主 bundle 的表，与 `tr()` 的 `Bundle.module` 不是一条路。
 
 ## 文档地图
 
@@ -103,10 +87,9 @@ Scripts/lightanchor-event.sh publish \
 | [`../AGENTS.md`](../AGENTS.md) | 仓库约定：结构、命令、代码风格、测试与提交要求 |
 | [`chat-memory-design.md`](./chat-memory-design.md) | 「对话」页三种记忆与检索的设计与验收标准 |
 | [`design/README.md`](./design/README.md) | 界面视觉基准（已冻结，不再更新） |
-| [`../Integrations/README.md`](../Integrations/README.md) | 五个工作台接入的协议与手动安装 |
 | [`../Support/Brand/BRAND.md`](../Support/Brand/BRAND.md) | 「蜜芽方块」品牌与菜单栏蓝点形态 |
 
 ## 第三方素材
 
 - 侧栏导航字形：[Lucide](https://github.com/lucide-icons/lucide)（ISC License，源自 Feather 的部分为 MIT）。只保留实际用到的 SVG，见 [`Support/Icons/lucide/`](../Support/Icons/lucide/)（含 LICENSE 与更新说明）。字形经 `Scripts/import-lucide-glyphs.py` 转成 `Sources/LightAnchor/Design/LightAnchorNavGlyphs.swift`，该文件由脚本生成，勿手改；线宽和颜色由渲染侧给（侧栏 1.75 / 24 网格，单色跟随 `foregroundStyle`）。
-- 应用/菜单栏图标（蜜芽方块）与连接页的服务商标识是自绘或各家官方标识，不走本条。
+- 应用/菜单栏图标（蜜芽方块）是自绘，不走本条。

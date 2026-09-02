@@ -265,7 +265,7 @@ struct ReviewView: View {
     private var dailyFocusCounts: [Date: Int] {
         let calendar = Calendar.current
         var counts: [Date: Int] = [:]
-        for episode in workspace.snapshot.episodes.values where !episode.isBackground {
+        for episode in workspace.snapshot.episodes.values {
             counts[calendar.startOfDay(for: episode.startedAt), default: 0] += 1
         }
         return counts
@@ -283,7 +283,7 @@ struct ReviewView: View {
         let now = Date()
         let weekAgo = now.addingTimeInterval(-7 * 24 * 3600)
         let twoWeeksAgo = now.addingTimeInterval(-14 * 24 * 3600)
-        let ended = workspace.snapshot.episodes.values.filter { !$0.isBackground && $0.endedAt != nil }
+        let ended = workspace.snapshot.episodes.values.filter { $0.endedAt != nil }
         let thisWeek = ended.filter { ($0.endedAt ?? now) > weekAgo }
         let lastWeek = ended.filter {
             let end = $0.endedAt ?? now

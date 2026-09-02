@@ -14,7 +14,6 @@ trap 'rm -rf "$SMOKE_DIR"' EXIT
 
 mkdir -p "$DATA_ROOT/assets/nested"
 print -r -- '{"schemaVersion":2,"events":[{"id":"backup-smoke"}]}' > "$DATA_ROOT/events.json"
-print -r -- 'external event' > "$DATA_ROOT/external-events.jsonl"
 print -r -- 'attachment bytes' > "$DATA_ROOT/assets/nested/attachment.txt"
 print -r -- 'should not be archived' > "$DATA_ROOT/launch-marker.json"
 print -r -- 'should not be archived' > "$DATA_ROOT/events.json.lock"

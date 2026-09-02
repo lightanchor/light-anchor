@@ -140,7 +140,6 @@ final class SceneSnapshotTests: XCTestCase {
 
         let updated = workspace.snapshot.sceneSnapshots[snapshot.id]
         XCTAssertEqual(updated?.items.first?.isRelevant, true)
-        XCTAssertEqual(updated?.items.first?.relevanceSource, .manual)
     }
 
     func testUpdateSceneReturnCue() {
@@ -196,7 +195,6 @@ final class SceneSnapshotTests: XCTestCase {
 
         let waiting = workspace.beginWaiting(
             episodeID: episode.id,
-            kind: .build,
             description: "等 xcodebuild"
         )
         XCTAssertNotNil(waiting)
@@ -298,7 +296,6 @@ final class SceneSnapshotTests: XCTestCase {
         ))
         let waiting = try XCTUnwrap(workspace.beginWaiting(
             episodeID: episode.id,
-            kind: .manual,
             description: "等待确认",
             now: startedAt.addingTimeInterval(11 * 60)
         ))
@@ -361,7 +358,6 @@ final class SceneSnapshotTests: XCTestCase {
         XCTAssertEqual(link?.title, "FoundationModels - Apple Developer")
 
         XCTAssertTrue(snapshot.items.allSatisfy(\.isRelevant))
-        XCTAssertTrue(snapshot.items.allSatisfy { $0.relevanceSource == .all })
     }
 
     func testSceneSnapshotBuilderKeepsAllWhenEngineDeclinesToJudge() async {
@@ -392,7 +388,6 @@ final class SceneSnapshotTests: XCTestCase {
 
         // 启发式不猜相关性：aiFiltered 下无判断可用时全部保留，来源如实标 all。
         XCTAssertTrue(snapshot.items.allSatisfy(\.isRelevant))
-        XCTAssertTrue(snapshot.items.allSatisfy { $0.relevanceSource == .all })
         XCTAssertEqual(snapshot.tuckedAwayCount, 0)
     }
 

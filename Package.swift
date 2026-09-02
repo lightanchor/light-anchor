@@ -12,14 +12,6 @@ let package = Package(
         .executable(
             name: "LightAnchor",
             targets: ["LightAnchor"]
-        ),
-        .library(
-            name: "LightAnchorEventCore",
-            targets: ["LightAnchorEventCore"]
-        ),
-        .executable(
-            name: "LightAnchorEvent",
-            targets: ["LightAnchorEvent"]
         )
     ],
     targets: [
@@ -30,18 +22,9 @@ let package = Package(
                 .process("Resources")
             ]
         ),
-        .target(
-            name: "LightAnchorEventCore",
-            path: "Sources/LightAnchorEventCore"
-        ),
-        .executableTarget(
-            name: "LightAnchorEvent",
-            dependencies: ["LightAnchorEventCore"],
-            path: "Sources/LightAnchorEvent"
-        ),
         .testTarget(
             name: "LightAnchorTests",
-            dependencies: ["LightAnchor", "LightAnchorEventCore"],
+            dependencies: ["LightAnchor"],
             path: "Tests/LightAnchorTests"
         )
     ]

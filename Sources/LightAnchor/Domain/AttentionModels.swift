@@ -379,7 +379,6 @@ struct AttentionEpisode: Codable, Equatable, Identifiable {
     var state: AttentionEpisodeState
     var endedAt: Date?
     var endedReason: AttentionEpisodeEndReason?
-    var isBackground: Bool
     var context: ContextCapsule
     var returnCue: String
     var waitingIDs: [UUID]
@@ -392,7 +391,6 @@ struct AttentionEpisode: Codable, Equatable, Identifiable {
         state: AttentionEpisodeState = .active,
         endedAt: Date? = nil,
         endedReason: AttentionEpisodeEndReason? = nil,
-        isBackground: Bool = false,
         context: ContextCapsule = ContextCapsule(),
         returnCue: String = "",
         waitingIDs: [UUID] = []
@@ -404,34 +402,9 @@ struct AttentionEpisode: Codable, Equatable, Identifiable {
         self.state = state
         self.endedAt = endedAt
         self.endedReason = endedReason
-        self.isBackground = isBackground
         self.context = context
         self.returnCue = returnCue.trimmingCharacters(in: .whitespacesAndNewlines)
         self.waitingIDs = waitingIDs
-    }
-}
-
-enum WaitingKind: String, Codable, CaseIterable, Identifiable {
-    case build
-    case download
-    case export
-    case reply
-    case agent
-    case command
-    case manual
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .build: tr("build")
-        case .download: tr("download")
-        case .export: tr("export")
-        case .reply: tr("reply")
-        case .agent: tr("agent_session")
-        case .command: tr("command")
-        case .manual: tr("manual_wait")
-        }
     }
 }
 
@@ -459,7 +432,6 @@ enum WaitingRestorePolicy: String, Codable, CaseIterable {
 struct WaitingItem: Codable, Equatable, Identifiable {
     let id: UUID
     let episodeID: UUID
-    let kind: WaitingKind
     var description: String
     var completionCondition: String
     let startedAt: Date
@@ -475,7 +447,6 @@ struct WaitingItem: Codable, Equatable, Identifiable {
     init(
         id: UUID = UUID(),
         episodeID: UUID,
-        kind: WaitingKind,
         description: String,
         completionCondition: String = "",
         startedAt: Date = Date(),
@@ -490,7 +461,6 @@ struct WaitingItem: Codable, Equatable, Identifiable {
     ) {
         self.id = id
         self.episodeID = episodeID
-        self.kind = kind
         self.description = description.trimmingCharacters(in: .whitespacesAndNewlines)
         self.completionCondition = completionCondition.trimmingCharacters(in: .whitespacesAndNewlines)
         self.startedAt = startedAt
@@ -511,82 +481,24 @@ struct WaitingItem: Codable, Equatable, Identifiable {
 
 enum WaitingMonitorKind: String, Codable, CaseIterable, Identifiable, Sendable {
     case manual
-    case command
-    case process
-    case file
     case date
-    case event
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .manual: tr("confirm_manually")
-        case .command: tr("command_finished")
-        case .process: tr("background_task_finished")
-        case .file: tr("file_ready")
         case .date: tr("at_a_set_time")
-        case .event: tr("another_tool_reported_done")
         }
     }
 }
 
 struct WaitingMonitorConfiguration: Codable, Equatable, Sendable {
     var kind: WaitingMonitorKind
-    var command: String?
-    var arguments: [String]
-    var workingDirectory: URL?
-    var processIdentifier: Int32?
-    var fileURL: URL?
     var date: Date?
-    var eventInboxURL: URL?
-    var eventCorrelationID: String?
-    var eventSources: [ExternalEventSource]
-    var eventKinds: [ExternalEventKind]
-    var eventAfter: Date?
-    /// 自动等待（Agent/终端事件自动归集）：由 AutoWaitRouter 全权驱动，
-    /// WaitingCoordinator 不为它启动轮询检测器。
-    var eventAutoManaged: Bool
-    var fileBaselineModificationDate: Date?
-    var fileBaselineSize: Int64?
-    var fileRequiresChange: Bool
-    var fileStableDuration: TimeInterval
 
-    init(
-        kind: WaitingMonitorKind,
-        command: String? = nil,
-        arguments: [String] = [],
-        workingDirectory: URL? = nil,
-        processIdentifier: Int32? = nil,
-        fileURL: URL? = nil,
-        date: Date? = nil,
-        eventInboxURL: URL? = nil,
-        eventCorrelationID: String? = nil,
-        eventSources: [ExternalEventSource] = [],
-        eventKinds: [ExternalEventKind] = [.completed, .failed, .cancelled],
-        eventAfter: Date? = nil,
-        eventAutoManaged: Bool = false,
-        fileBaselineModificationDate: Date? = nil,
-        fileBaselineSize: Int64? = nil,
-        fileRequiresChange: Bool = false,
-        fileStableDuration: TimeInterval = 0
-    ) {
+    init(kind: WaitingMonitorKind, date: Date? = nil) {
         self.kind = kind
-        self.command = command?.trimmingCharacters(in: .whitespacesAndNewlines)
-        self.arguments = arguments
-        self.workingDirectory = workingDirectory
-        self.processIdentifier = processIdentifier
-        self.fileURL = fileURL
         self.date = date
-        self.eventInboxURL = eventInboxURL
-        self.eventCorrelationID = eventCorrelationID?.trimmingCharacters(in: .whitespacesAndNewlines)
-        self.eventSources = eventSources
-        self.eventKinds = eventKinds
-        self.eventAfter = eventAfter
-        self.eventAutoManaged = eventAutoManaged
-        self.fileBaselineModificationDate = fileBaselineModificationDate
-        self.fileBaselineSize = fileBaselineSize
-        self.fileRequiresChange = fileRequiresChange
-        self.fileStableDuration = max(fileStableDuration, 0)
     }
 }

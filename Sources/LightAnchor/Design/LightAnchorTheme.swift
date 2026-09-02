@@ -1,28 +1,6 @@
 import AppKit
 import SwiftUI
 
-/// 第三方品牌本色（接入方的产品记号）：品牌色不随主题变化，
-/// 在浅色和深色下都保持原样，否则就不是「人家的图标」了。
-enum LightAnchorBrandPalette {
-    /// Claude 的珊瑚橙与奶油底。
-    static let claudeCoral = Color(red: 217 / 255, green: 119 / 255, blue: 87 / 255)
-    static let claudeCream = Color(red: 240 / 255, green: 238 / 255, blue: 230 / 255)
-    /// OpenAI/Codex 的白标；花云记号用的蓝紫渐变。
-    static let codexPaper = Color.white
-    static let codexGradient = LinearGradient(
-        colors: [
-            Color(red: 139 / 255, green: 124 / 255, blue: 246 / 255),
-            Color(red: 59 / 255, green: 55 / 255, blue: 230 / 255),
-        ],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-    )
-    /// PI 的记号底色（青灰板岩）。
-    static let piSlate = Color(red: 47 / 255, green: 111 / 255, blue: 109 / 255)
-    /// DeepSeek 的品牌蓝。
-    static let deepseekBlue = Color(red: 77 / 255, green: 107 / 255, blue: 254 / 255)
-}
-
 enum LightAnchorTheme {
 
     static let primary = LightAnchorThemeColor(.brand)

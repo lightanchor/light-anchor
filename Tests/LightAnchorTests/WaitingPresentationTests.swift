@@ -31,12 +31,10 @@ final class WaitingPresentationTests: XCTestCase {
         let episode = try XCTUnwrap(workspace.startEpisode(targetID: target.id))
         let ready = try XCTUnwrap(workspace.beginWaiting(
             episodeID: episode.id,
-            kind: .manual,
             description: "先完成的结果"
         ))
         let active = try XCTUnwrap(workspace.beginWaiting(
             episodeID: episode.id,
-            kind: .manual,
             description: "仍在等待的结果"
         ))
         XCTAssertTrue(workspace.completeWaiting(ready.id, evidence: "完成依据"))
@@ -60,7 +58,6 @@ final class WaitingPresentationTests: XCTestCase {
         let episode = try XCTUnwrap(workspace.startEpisode(targetID: target.id))
         let waiting = try XCTUnwrap(workspace.beginWaiting(
             episodeID: episode.id,
-            kind: .manual,
             description: "保留等待记录"
         ))
 
