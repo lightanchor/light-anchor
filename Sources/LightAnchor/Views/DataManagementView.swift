@@ -231,7 +231,7 @@ struct DataManagementView: View {
             try service.restoreArchive(from: archive, onProgress: report)
             return nil
         } onFinish: {
-            guard workspace.reloadFromDisk() else {
+            guard workspace.reloadFromDisk(quarantiningRestoredAutomation: true) else {
                 operationError = workspace.lastError ?? tr("backup_restored_but_the_data_couldn")
                 return
             }

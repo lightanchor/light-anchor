@@ -343,11 +343,32 @@ actor MemoryIndex {
     }
 
     func removeAll() {
+        close()
+        try? FileManager.default.removeItem(at: fileURL)
+    }
+
+    /// 只关句柄不删文件：数据目录被整体替换（恢复备份）后，旧句柄还指着被改名
+    /// 的旧文件，之后的写入会全进旧副本。关掉，下一次访问自然打开新位置。
+    func close() {
         if let database {
             sqlite3_close_v2(database)
             self.database = nil
         }
-        try? FileManager.default.removeItem(at: fileURL)
+        lastRefreshAt = nil
+    }
+
+    /// 来源被用户删掉时立刻清行，不等 60 秒节流的全量刷新。
+    func remove(keys: [String]) {
+        guard !keys.isEmpty, let db = try? open() else { return }
+        for key in keys {
+            try? run(db, "DELETE FROM docs WHERE key = ?1", binds: [.text(key)])
+            try? run(db, "DELETE FROM docs_fts WHERE key = ?1", binds: [.text(key)])
+        }
+    }
+
+    /// 立刻按有效键清理（chat 类除外），绕过节流。
+    func pruneNow(validKeys: Set<String>) {
+        try? prune(validKeys: validKeys)
     }
 
     // MARK: 检索
@@ -460,6 +481,8 @@ actor MemoryIndex {
     }
 
     private func migrateIfNeeded(_ db: OpaquePointer) throws {
+        // 删掉的行不能在空闲页里留下正文：这个库装的是屏幕文字与问答。
+        try exec(db, "PRAGMA secure_delete = ON")
         try exec(db, """
             CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS docs(

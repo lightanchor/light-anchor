@@ -64,12 +64,21 @@ final class AutoWaitRouter {
         self.inboxURL = inboxURL
     }
 
-    func route(into workspace: AttentionWorkspace) {
+    func route(into workspace: AttentionWorkspace, now: Date = Date()) {
         let store = ExternalEventStore(fileURL: inboxURL)
         let events: [ExternalEvent]
         do {
             events = try store.events()
             reportedReadFailure = false
+        } catch ExternalEventStoreError.inboxTooLarge {
+            // 被刷量了：只留最近一批，游标归零，下一轮从压缩后的文件继续。
+            try? store.compact()
+            processedEventCount = 0
+            LocalDiagnostics.shared.record(
+                operation: "auto-wait.read",
+                message: "外部事件收件箱超限，已压缩"
+            )
+            return
         } catch {
             // 收件箱损坏不应打断维护循环；记一次诊断，等它被修复。
             if !reportedReadFailure {
@@ -91,7 +100,7 @@ final class AutoWaitRouter {
         // 归集得了的来源由 AutoWaitHub.descriptor 决定（agent / terminal）；
         // 其余来源在工作区一侧原样落地。
         for event in fresh {
-            workspace.applyAutoWaitEvent(event)
+            workspace.applyAutoWaitEvent(event.clampingOccurredAt(to: now))
         }
     }
 }

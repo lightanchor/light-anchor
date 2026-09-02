@@ -495,7 +495,7 @@
 "restore_from_backup" = "从备份恢复";
 "restore_from_backup_2" = "从备份恢复？";
 "current_data_is_kept_as_a" = "恢复前会保留当前数据副本";
-"current_data_is_saved_as_a" = "当前数据会先保留为恢复前副本，然后由备份内容替换。备份里的设置（回顾正文、云端配置、快捷键、采集偏好）也会一并写回，语言改动重启后生效。";
+"current_data_is_saved_as_a" = "当前数据会先保留为恢复前副本，然后由备份内容替换。备份里的设置（回顾正文、快捷键、采集偏好）也会一并写回；出于安全，备份里的 shell 命令与快捷指令动作会被停用，云端引擎、整屏截图与剪贴板采集需要你在设置里重新打开，更新地址与公钥不会从备份写回。语言改动重启后生效。";
 "local_data_restored_from_backup" = "已从备份恢复本地数据与设置。语言改动重启后生效。";
 "writing_local_data" = "正在写入本地数据…";
 "compressing_backup" = "正在压缩备份…";
@@ -850,6 +850,7 @@
 "last_week" = "上周";
 "last_month" = "上个月";
 "invalid_backup_location" = "备份位置无效，请选择应用支持目录以外的位置。";
+"backup_is_too_large_to_restore" = "这份备份超过了可恢复的大小上限。";
 "couldn_t_create_a_local_backup" = "无法创建本地备份。";
 "unrecognized_backup_structure" = "备份文件结构无法识别，数据没有被修改。";
 "backup_contains_unsupported_link" = "备份中包含不支持的链接：%@";
@@ -865,6 +866,7 @@
 "waiting_for" = "等待：%@";
 "the_external_event_has_no_valid_correlation" = "外部事件缺少有效的关联 ID 或内容。";
 "the_external_event_log_has_an_unreadable_record" = "外部事件日志中存在无法读取的记录。";
+"the_external_event_log_is_too_large" = "外部事件日志过大，已压缩保留最近的记录。";
 "no_detector_for_this_wait_type" = "当前等待类型没有可用的检测器。";
 "the_wait_detection_setup_is_incomplete" = "等待检测配置不完整。";
 "the_wait_command_failed" = "等待命令执行失败。";

@@ -492,7 +492,7 @@
 "restore_from_backup" = "Restore from backup";
 "restore_from_backup_2" = "Restore from backup?";
 "current_data_is_kept_as_a" = "Current data is kept as a copy before restoring";
-"current_data_is_saved_as_a" = "Current data is saved as a pre-restore copy, then replaced by the backup. Settings in the backup (review write-ups, cloud configuration, shortcuts, capture preferences) are written back too; a language change takes effect after a restart.";
+"current_data_is_saved_as_a" = "Current data is saved as a pre-restore copy, then replaced by the backup. Settings in the backup (review write-ups, shortcuts, capture preferences) are written back too. For safety, shell-command and Shortcuts actions from the backup are disabled, the cloud engine, full-screen screenshots and clipboard capture must be re-enabled in Settings, and the update address and public key are never restored from a backup. A language change takes effect after a restart.";
 "local_data_restored_from_backup" = "Local data and settings restored from backup. A language change takes effect after a restart.";
 "writing_local_data" = "Writing local data…";
 "compressing_backup" = "Compressing backup…";
@@ -847,6 +847,7 @@
 "last_week" = "Last week";
 "last_month" = "Last month";
 "invalid_backup_location" = "Invalid backup location — pick somewhere outside the app support directory.";
+"backup_is_too_large_to_restore" = "This backup exceeds the size limit for restoring.";
 "couldn_t_create_a_local_backup" = "Couldn't create a local backup.";
 "unrecognized_backup_structure" = "Unrecognized backup structure; your data was left untouched.";
 "backup_contains_unsupported_link" = "The backup contains an unsupported link: %@";
@@ -862,6 +863,7 @@
 "waiting_for" = "Waiting: %@";
 "the_external_event_has_no_valid_correlation" = "The external event has no valid correlation ID or content.";
 "the_external_event_log_has_an_unreadable_record" = "The external event log has an unreadable record.";
+"the_external_event_log_is_too_large" = "The external event log is too large; it was compacted to the most recent records.";
 "no_detector_for_this_wait_type" = "No detector is available for this wait type.";
 "the_wait_detection_setup_is_incomplete" = "The wait detection setup is incomplete.";
 "the_wait_command_failed" = "The wait command failed.";

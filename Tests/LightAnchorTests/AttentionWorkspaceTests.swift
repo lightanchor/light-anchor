@@ -13,7 +13,9 @@ final class AttentionWorkspaceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
 
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        try Data("original".utf8).write(to: root.appendingPathComponent("events.json"))
+        // 恢复前会校验事件日志能否解码，夹具用一份真实的空日志。
+        try LocalEventStore(fileURL: root.appendingPathComponent("events.json")).save(events: [])
+        let original = try Data(contentsOf: root.appendingPathComponent("events.json"))
         try Data("runtime".utf8).write(to: root.appendingPathComponent("launch-marker.json"))
         try Data("lock".utf8).write(to: root.appendingPathComponent("writer.lock"))
 
@@ -27,8 +29,8 @@ final class AttentionWorkspaceTests: XCTestCase {
         try service.restoreArchive(from: archive)
 
         XCTAssertEqual(
-            try String(contentsOf: root.appendingPathComponent("events.json"), encoding: .utf8),
-            "original"
+            try Data(contentsOf: root.appendingPathComponent("events.json")),
+            original
         )
         XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("launch-marker.json").path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("writer.lock").path))
@@ -653,18 +655,17 @@ final class AttentionWorkspaceTests: XCTestCase {
         )
     }
 
-    func testExternalEventStoreRejectsCorruptedRecordsInsteadOfDroppingThem() throws {
+    /// 收件箱是同一用户下任何进程都能追加的文件。一条坏行只丢那一条：
+    /// 让整条通道失效会顺带取消用户正在等的下载/导出，代价比丢一条事件大得多。
+    func testExternalEventStoreSkipsCorruptedRecordsAndKeepsTheRest() throws {
         let inboxURL = temporaryFileURL().deletingPathExtension().appendingPathExtension("jsonl")
         try FileManager.default.createDirectory(
             at: inboxURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
         try Data("not-json\n".utf8).write(to: inboxURL, options: .atomic)
-        XCTAssertThrowsError(try ExternalEventStore(fileURL: inboxURL).events()) { error in
-            XCTAssertEqual(error as? ExternalEventStoreError, .unreadableRecord)
-        }
+        XCTAssertEqual(try ExternalEventStore(fileURL: inboxURL).events(), [])
 
-        try FileManager.default.removeItem(at: inboxURL)
         try ExternalEventStore(fileURL: inboxURL).publish(ExternalEvent(
             source: .terminal,
             kind: .completed,
@@ -673,10 +674,11 @@ final class AttentionWorkspaceTests: XCTestCase {
             detail: "完成"
         ))
         let validData = try Data(contentsOf: inboxURL)
-        try (validData + Data([0x0A])).write(to: inboxURL, options: .atomic)
-        XCTAssertThrowsError(try ExternalEventStore(fileURL: inboxURL).events()) { error in
-            XCTAssertEqual(error as? ExternalEventStoreError, .unreadableRecord)
-        }
+        try (validData + Data("\n{\"source\":\"jenkins\"}\n\n".utf8)).write(to: inboxURL, options: .atomic)
+        XCTAssertEqual(
+            try ExternalEventStore(fileURL: inboxURL).events().map(\.correlationID),
+            ["blank-line"]
+        )
     }
 
     func testExternalEventWaitingDetectorResolvesFromPublishedEvent() async throws {

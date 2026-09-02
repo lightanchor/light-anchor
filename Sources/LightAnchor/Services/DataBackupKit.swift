@@ -7,11 +7,14 @@ enum LocalDataArchiveError: LocalizedError {
     case symbolicLinkNotAllowed(String)
     case unsupportedFile(String)
     case restoreFailed(String)
+    case archiveTooLarge
 
     var errorDescription: String? {
         switch self {
         case .invalidDestination:
             tr("invalid_backup_location")
+        case .archiveTooLarge:
+            tr("backup_is_too_large_to_restore")
         case .archiveFailed(let message):
             message.isEmpty ? tr("couldn_t_create_a_local_backup") : message
         case .archiveStructureInvalid:
@@ -72,6 +75,18 @@ enum LocalPreferencesArchive {
         )
     }
 
+    /// 备份里有、恢复时却不写回的键：更新链的地址与公钥路径决定了「谁能告诉
+    /// 这台机器有新版本」，权限缓存是另一台机器的授权状态——都不该跟着一个
+    /// 文件走。备份仍然装着它们，方便人工核对。
+    static var restoreExcludedKeys: Set<String> {
+        Set([
+            "lightanchor.updateChecksEnabled",
+            "lightanchor.updateManifestURL",
+            "lightanchor.updatePublicKeyPath",
+            "lightanchor.updateLastCheckedAt"
+        ] + PrivacyPermissionCache.allCacheKeys)
+    }
+
     /// 写回偏好。只认清单里的键：备份文件是外部输入，不能让它往
     /// UserDefaults 里塞任意键。
     static func restore(from data: Data, into defaults: UserDefaults) throws {
@@ -83,10 +98,23 @@ enum LocalPreferencesArchive {
         guard let snapshot = plist as? [String: Any] else {
             throw LocalDataArchiveError.archiveStructureInvalid
         }
-        let allowed = Set(archivedKeys)
+        let allowed = Set(archivedKeys).subtracting(restoreExcludedKeys)
         for (key, value) in snapshot where allowed.contains(key) {
             defaults.set(value, forKey: key)
         }
+        narrowRestoredIntelligencePreferences(in: defaults)
+    }
+
+    /// 恢复回来的智能偏好里，会把内容送出这台机器或扩大采集面的开关一律收回：
+    /// 云端端点是备份文件里的一串文本，指向谁都有可能；整屏截图与剪贴板则是
+    /// 最容易装下别人信息的两项。用户在设置里重新打开，才算是这台机器上的决定。
+    private static func narrowRestoredIntelligencePreferences(in defaults: UserDefaults) {
+        guard defaults.object(forKey: IntelligencePreferences.storageKey) != nil else { return }
+        var preferences = IntelligencePreferences.load(from: defaults)
+        preferences.engine = .onDevice
+        preferences.saveWindowScreenshot = false
+        preferences.saveClipboardContent = false
+        preferences.save(to: defaults)
     }
 }
 
@@ -159,6 +187,11 @@ struct LocalDataArchiveService: @unchecked Sendable {
         guard fileManager.fileExists(atPath: source.path), source != rootURL else {
             throw LocalDataArchiveError.invalidDestination
         }
+        try Self.guardDataRoot(rootURL)
+        let archiveSize = (try? source.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        guard archiveSize <= Self.maximumArchiveBytes else {
+            throw LocalDataArchiveError.archiveTooLarge
+        }
 
         let temporaryRoot = fileManager.temporaryDirectory
             .appendingPathComponent("light-anchor-restore-\(UUID().uuidString)", isDirectory: true)
@@ -173,7 +206,20 @@ struct LocalDataArchiveService: @unchecked Sendable {
             throw LocalDataArchiveError.archiveStructureInvalid
         }
         onProgress(.verifying)
-        try validateContents(at: restoredRoot, relativePath: "")
+        var extractedBytes = 0
+        try validateContents(at: restoredRoot, relativePath: "", totalBytes: &extractedBytes)
+        // 事件日志先在临时目录里解一遍：坏文件应当在这里被拒绝，而不是装进去之后
+        // 让应用进入「读不了本地记录」的只读态。
+        let restoredEventsURL = restoredRoot.appendingPathComponent(
+            LightAnchorStorage.eventsURL().lastPathComponent
+        )
+        if fileManager.fileExists(atPath: restoredEventsURL.path) {
+            do {
+                _ = try LocalEventStore(fileURL: restoredEventsURL).load()
+            } catch {
+                throw LocalDataArchiveError.restoreFailed(error.localizedDescription)
+            }
+        }
         // 偏好从包里取出来后就把文件拿掉：它不属于数据目录，装进去只会留个残留。
         let preferencesURL = restoredRoot.appendingPathComponent(LocalPreferencesArchive.fileName)
         let archivedPreferences = try? Data(contentsOf: preferencesURL)
@@ -207,6 +253,8 @@ struct LocalDataArchiveService: @unchecked Sendable {
         if let archivedPreferences {
             try LocalPreferencesArchive.restore(from: archivedPreferences, into: defaults)
         }
+        // 只留这一次的回退副本，更早的整目录旧数据不该无限期堆在旁边。
+        Self.removePreRestoreCopies(of: rootURL, keepingLatest: 1)
     }
 
     private func copyContents(
@@ -239,25 +287,86 @@ struct LocalDataArchiveService: @unchecked Sendable {
         }
     }
 
-    private func validateContents(at directory: URL, relativePath: String) throws {
+    /// 单个备份文件的上限；解压后的总量另有上限，防止小包解出大山。
+    static let maximumArchiveBytes = 4 * 1024 * 1024 * 1024
+    static let maximumExtractedBytes = 8 * 1024 * 1024 * 1024
+
+    /// 隐藏项也要查：`validateContents` 从前跳过隐藏文件，一个 `.name -> /etc`
+    /// 的符号链接就能原样落进数据目录。
+    private func validateContents(
+        at directory: URL,
+        relativePath: String,
+        totalBytes: inout Int
+    ) throws {
         let fileManager = FileManager.default
         for item in try fileManager.contentsOfDirectory(
             at: directory,
-            includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
-            options: [.skipsHiddenFiles]
+            includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey],
+            options: []
         ) {
             let name = item.lastPathComponent
             guard name != "launch-marker.json", !name.hasSuffix(".lock") else { continue }
             let relative = relativePath.isEmpty ? name : relativePath + "/" + name
-            let values = try item.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+            let values = try item.resourceValues(
+                forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey]
+            )
             if values.isSymbolicLink == true {
                 throw LocalDataArchiveError.symbolicLinkNotAllowed(relative)
             }
             if values.isDirectory == true {
-                try validateContents(at: item, relativePath: relative)
-            } else if values.isDirectory != false {
+                try validateContents(at: item, relativePath: relative, totalBytes: &totalBytes)
+            } else if values.isDirectory == false {
+                totalBytes += values.fileSize ?? 0
+                guard totalBytes <= Self.maximumExtractedBytes else {
+                    throw LocalDataArchiveError.archiveTooLarge
+                }
+            } else {
                 throw LocalDataArchiveError.unsupportedFile(relative)
             }
+        }
+    }
+
+    /// 数据根目录来自 `LIGHTANCHOR_DATA_ROOT`，可以是任何路径；恢复会整目录搬走、
+    /// 删数据会按名删子项，所以先拒掉明显不该是数据目录的位置。
+    static func guardDataRoot(_ root: URL) throws {
+        let path = root.standardizedFileURL.path
+        let home = NSHomeDirectory()
+        let forbidden: Set<String> = ["/", home, home + "/Library", home + "/Desktop", home + "/Documents"]
+        guard !forbidden.contains(path), !path.isEmpty else {
+            throw LocalDataArchiveError.invalidDestination
+        }
+        if let values = try? root.resourceValues(forKeys: [.isSymbolicLinkKey]),
+           values.isSymbolicLink == true {
+            throw LocalDataArchiveError.invalidDestination
+        }
+    }
+
+    /// 每次恢复都会把旧目录改名成 `<root>.pre-restore-<时间戳>` 留着，方便回退。
+    /// 这些副本装着完整的旧数据，「删除全部本地数据」也要把它们一起清掉；
+    /// 恢复时则只保留最近一份。
+    static func preRestoreCopies(of root: URL, fileManager: FileManager = .default) -> [URL] {
+        let parent = root.deletingLastPathComponent()
+        let prefix = "\(root.lastPathComponent).pre-restore-"
+        let entries = (try? fileManager.contentsOfDirectory(
+            at: parent,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: []
+        )) ?? []
+        return entries
+            .filter { $0.lastPathComponent.hasPrefix(prefix) }
+            .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
+    static func removePreRestoreCopies(
+        of root: URL,
+        keepingLatest keep: Int = 0,
+        fileManager: FileManager = .default
+    ) {
+        let copies = preRestoreCopies(of: root, fileManager: fileManager)
+        guard copies.count > keep else { return }
+        for url in copies.dropLast(keep) {
+            try? fileManager.removeItem(at: url)
         }
     }
 

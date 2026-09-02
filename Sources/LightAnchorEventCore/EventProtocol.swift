@@ -66,14 +66,27 @@ public struct LightAnchorEventRecord: Codable, Equatable, Sendable {
         self.id = id
         self.source = source
         self.kind = kind
-        self.correlationID = correlationID.trimmingCharacters(in: .whitespacesAndNewlines)
-        self.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        self.detail = detail.trimmingCharacters(in: .whitespacesAndNewlines)
-        self.payload = payload
+        self.correlationID = String(
+            correlationID.trimmingCharacters(in: .whitespacesAndNewlines).prefix(Self.maxCorrelationLength)
+        )
+        self.title = String(title.trimmingCharacters(in: .whitespacesAndNewlines).prefix(Self.maxTitleLength))
+        self.detail = String(detail.trimmingCharacters(in: .whitespacesAndNewlines).prefix(Self.maxDetailLength))
+        self.payload = Dictionary(
+            uniqueKeysWithValues: payload
+                .sorted { $0.key < $1.key }
+                .prefix(Self.maxPayloadEntries)
+                .map { (String($0.key.prefix(64)), String($0.value.prefix(Self.maxDetailLength))) }
+        )
         self.occurredAt = occurredAt
         self.processIdentifier = processIdentifier
         self.workingDirectory = workingDirectory
     }
+
+    /// 与应用一侧 `ExternalEvent` 相同的上限：收件箱是共享文件，长度在写入端就收口。
+    public static let maxCorrelationLength = 256
+    public static let maxTitleLength = 240
+    public static let maxDetailLength = 1_000
+    public static let maxPayloadEntries = 16
 
     public var isValid: Bool {
         !correlationID.isEmpty && (!title.isEmpty || !detail.isEmpty || kind.isTerminal)

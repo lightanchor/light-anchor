@@ -6,3 +6,5 @@ dist/
 .alma-snapshots
 **/xcuserdata/
 *.xcuserstate
+# 发布构建时由私钥派生、构建结束即删除；不该进仓库
+Sources/LightAnchor/Resources/update-public.pem

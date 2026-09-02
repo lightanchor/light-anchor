@@ -271,9 +271,15 @@ final class WaitingCoordinator {
         })
     }
 
+    /// 启动与维护循环的补挂入口。命令类监视器只在本次会话里显式创建时才会被
+    /// 挂上（`beginWaiting` → `startMonitoring`）：事件日志是可被替换的文件，
+    /// 从盘上读回来的命令不能在没人看的时候自动跑进 `zsh -lc`。
     func startMonitoringActiveWaits() {
         workspace?.snapshot.activeWaitingItems
             .filter { $0.status == .waiting }
+            .filter { waiting in
+                waiting.monitor?.kind != .command || tasks[waiting.id] != nil
+            }
             .forEach(startMonitoring)
     }
 

@@ -11,7 +11,7 @@ final class LocalBackupPreferencesTests: XCTestCase {
     func testArchiveCarriesPreferencesAndRestoreWritesThemBack() throws {
         let workspace = try makeWorkspaceDirectory()
         let defaults = try makeScratchDefaults()
-        try Data("original".utf8).write(to: workspace.root.appendingPathComponent("events.json"))
+        try writeEmptyEventLog(in: workspace.root)
 
         // 用户写的回顾正文与填过的云端配置。
         NarrativeStore.save("这周把删除链路补齐了。", forKey: "week-2026-08-17", defaults: defaults)
@@ -42,7 +42,7 @@ final class LocalBackupPreferencesTests: XCTestCase {
     func testRestoreDoesNotLeavePreferencesFileInsideTheDataDirectory() throws {
         let workspace = try makeWorkspaceDirectory()
         let defaults = try makeScratchDefaults()
-        try Data("original".utf8).write(to: workspace.root.appendingPathComponent("events.json"))
+        try writeEmptyEventLog(in: workspace.root)
 
         let service = LocalDataArchiveService(rootURL: workspace.root, defaults: defaults)
         try service.createArchive(at: workspace.archive)
@@ -84,19 +84,22 @@ final class LocalBackupPreferencesTests: XCTestCase {
         let staging = workspace.directory.appendingPathComponent("staging", isDirectory: true)
         let payload = staging.appendingPathComponent("LightAnchorData", isDirectory: true)
         try FileManager.default.createDirectory(at: payload, withIntermediateDirectories: true)
-        try Data("old-backup".utf8).write(to: payload.appendingPathComponent("events.json"))
+        try writeEmptyEventLog(in: payload)
+        let archivedLog = try Data(contentsOf: payload.appendingPathComponent("events.json"))
         try runDitto(["-c", "-k", "--sequesterRsrc", "--keepParent", payload.path, workspace.archive.path])
 
         let service = LocalDataArchiveService(rootURL: workspace.root, defaults: defaults)
         try service.restoreArchive(from: workspace.archive)
 
         XCTAssertEqual(
-            try String(
-                contentsOf: workspace.root.appendingPathComponent("events.json"),
-                encoding: .utf8
-            ),
-            "old-backup"
+            try Data(contentsOf: workspace.root.appendingPathComponent("events.json")),
+            archivedLog
         )
+    }
+
+    /// 恢复前会先解一遍事件日志，所以夹具必须是合法的空日志，而不是随便一串字节。
+    private func writeEmptyEventLog(in root: URL) throws {
+        try LocalEventStore(fileURL: root.appendingPathComponent("events.json")).save(events: [])
     }
 
     // MARK: - 工具

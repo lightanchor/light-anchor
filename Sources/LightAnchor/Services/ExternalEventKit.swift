@@ -7,6 +7,7 @@ import Darwin
 enum ExternalEventStoreError: LocalizedError, Equatable {
     case invalidEvent
     case unreadableRecord
+    case inboxTooLarge
 
     var errorDescription: String? {
         switch self {
@@ -14,6 +15,8 @@ enum ExternalEventStoreError: LocalizedError, Equatable {
             tr("the_external_event_has_no_valid_correlation")
         case .unreadableRecord:
             tr("the_external_event_log_has_an_unreadable_record")
+        case .inboxTooLarge:
+            tr("the_external_event_log_is_too_large")
         }
     }
 }
@@ -88,20 +91,51 @@ struct ExternalEventStore: Sendable {
 
             var result: [ExternalEvent] = []
             guard !data.isEmpty else { return [] }
-            let lines = data.split(separator: 0x0A, omittingEmptySubsequences: false)
-            for (index, line) in lines.enumerated() {
-                if line.isEmpty {
-                    if index == lines.index(before: lines.endIndex) {
-                        continue
-                    }
-                    throw ExternalEventStoreError.unreadableRecord
-                }
-                guard let event = try? decoder.decode(ExternalEvent.self, from: Data(line)) else {
-                    throw ExternalEventStoreError.unreadableRecord
+            guard data.count <= Self.maximumFileBytes else {
+                throw ExternalEventStoreError.inboxTooLarge
+            }
+            // 一条坏行只丢那一条：这个文件谁都能追加，任何第三方写错一个字段
+            // 都不该让整条接入通道失效、更不该把用户正在等的事取消掉。
+            var skipped = 0
+            for line in data.split(separator: 0x0A, omittingEmptySubsequences: true) {
+                guard line.count <= Self.maximumLineBytes,
+                      let event = try? decoder.decode(ExternalEvent.self, from: Data(line))
+                else {
+                    skipped += 1
+                    continue
                 }
                 result.append(event)
             }
+            if skipped > 0 {
+                LocalDiagnostics.shared.record(
+                    operation: "external-event.read",
+                    message: "跳过 \(skipped) 条无法解析的外部事件记录"
+                )
+            }
             return result
+        }
+    }
+
+    /// 单行与整文件的上限。超过整文件上限时读取会报错，由路由器触发压缩。
+    static let maximumLineBytes = 16 * 1024
+    static let maximumFileBytes = 8 * 1024 * 1024
+    /// 压缩后保留的行数：路由器只关心最近的事件，等待检测器也只看自己的 correlation。
+    static let retainedLinesAfterCompaction = 2_000
+
+    /// 收件箱只追加不删除，被刷量时会无限长。在锁内只保留最后一批可解析的行。
+    func compact(keepingLast keep: Int = ExternalEventStore.retainedLinesAfterCompaction) throws {
+        try withFileLock {
+            guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+            let data = try Data(contentsOf: fileURL)
+            let lines = data.split(separator: 0x0A, omittingEmptySubsequences: true)
+                .filter { $0.count <= Self.maximumLineBytes }
+            let kept = lines.suffix(keep)
+            var output = Data()
+            for line in kept {
+                output.append(contentsOf: line)
+                output.append(0x0A)
+            }
+            try output.write(to: fileURL, options: .atomic)
         }
     }
 
@@ -194,7 +228,7 @@ struct ExternalEventURLParser {
             processIdentifier: processIdentifier,
             workingDirectory: workingDirectory
         )
-        return event.isValid ? event : nil
+        return event.isValid ? event.clampingOccurredAt(to: now) : nil
     }
 }
 

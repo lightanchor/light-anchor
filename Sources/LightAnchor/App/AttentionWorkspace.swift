@@ -38,6 +38,8 @@ final class AttentionWorkspace: ObservableObject {
         traceStore: recordingTraceStore,
         capture: { [weak self] in
             guard let self else { return ContextCapsule() }
+            // 录制采样跟自动场景采集共用一个暂停开关：暂停就是暂停，不分入口。
+            guard !self.sceneCapturePreferences.isAutomaticCapturePaused else { return ContextCapsule() }
             return self.contextCapture(self.intelligencePreferences, self.sceneCapturePreferences)
         }
     )
@@ -221,7 +223,8 @@ final class AttentionWorkspace: ObservableObject {
             targetNote: target.note,
             returnCue: sceneReturnCue.isEmpty ? episode.returnCue : sceneReturnCue,
             awayMinutes: max(0, Int(now.timeIntervalSince(awayReference) / 60)),
-            waitingEvidence: waiting?.evidence ?? "",
+            // 等待证据可能来自外部事件，进提示词前截短。
+            waitingEvidence: String((waiting?.evidence ?? "").prefix(300)),
             sceneItems: scene?.restorableItems ?? [],
             capturesWhileAway: Array(capturesWhileAway),
             targetHistoryLine: historyLine
@@ -394,6 +397,18 @@ final class AttentionWorkspace: ObservableObject {
         }
     }
 
+    /// 用户删了捕获 / 记录 / 场景之后立刻清索引：被删掉的东西不该还能被搜出来，
+    /// 哪怕只是到下一次节流刷新之前的那一分钟。空集也要传——最后一条被删时
+    /// 恰恰要把索引清空。
+    func pruneMemoryIndex(index: MemoryIndex = .shared, now: Date = Date()) {
+        let validKeys = Set(
+            MemoryIndexSource.items(events: events, snapshot: snapshot, now: now).map(\.key)
+        )
+        Task.detached(priority: .utility) {
+            await index.pruneNow(validKeys: validKeys)
+        }
+    }
+
     private static func factLabel(for kind: MemoryIndexItem.Kind) -> String {
         switch kind {
         case .capture: tr("fact_label_capture")
@@ -505,8 +520,10 @@ final class AttentionWorkspace: ObservableObject {
         _ = recordingCoordinator.stop()
     }
 
+    /// - Parameter quarantiningRestoredAutomation: 从备份恢复后为 true。备份是外部
+    ///   文件，里面的 shell 命令与快捷指令不能因为「恢复」这个动作就自动获得执行权。
     @discardableResult
-    func reloadFromDisk() -> Bool {
+    func reloadFromDisk(quarantiningRestoredAutomation: Bool = false, now: Date = Date()) -> Bool {
         waitingCoordinator.cancelAllMonitoring()
         scheduledTaskCoordinator.cancelAllMonitoring()
         do {
@@ -515,7 +532,12 @@ final class AttentionWorkspace: ObservableObject {
             snapshot = AttentionSnapshot.replay(loadedEvents)
             lastError = nil
             isEventLogReadable = true
-            runBackgroundMaintenance()
+            if quarantiningRestoredAutomation {
+                quarantineAutomation(now: now)
+            }
+            // 数据目录可能刚被整体换掉：旧句柄指着被改名的旧库，必须关掉重开。
+            Task.detached(priority: .utility) { await MemoryIndex.shared.close() }
+            runBackgroundMaintenance(now: now)
             return true
         } catch {
             // Drop the in-memory history along with the flag, exactly as `init`
@@ -531,6 +553,38 @@ final class AttentionWorkspace: ObservableObject {
             )
             return false
         }
+    }
+
+    /// 把日志里所有会执行外部代码的东西解除武装：命令类等待监视器退成手动等待，
+    /// 环境里的「运行命令 / 运行快捷指令」动作关掉。用户在界面里重新打开，才算授权。
+    /// 返回处理过的条目数。
+    @discardableResult
+    func quarantineAutomation(now: Date = Date()) -> Int {
+        var newEvents: [AttentionEvent] = []
+        for var waiting in snapshot.waitingItems.values
+        where waiting.status == .waiting && waiting.monitor?.kind == .command {
+            waiting.monitor?.kind = .manual
+            waiting.monitor?.command = nil
+            waiting.monitor?.arguments = []
+            newEvents.append(.waitingChanged(waiting, at: now))
+        }
+        for var environment in snapshot.environments.values {
+            var changed = false
+            environment.actions = environment.actions.map { action in
+                guard action.isEnabled, action.kind == .runCommand || action.kind == .runShortcut else {
+                    return action
+                }
+                var disabled = action
+                disabled.isEnabled = false
+                changed = true
+                return disabled
+            }
+            if changed {
+                newEvents.append(.environmentChanged(environment, at: now))
+            }
+        }
+        guard !newEvents.isEmpty else { return 0 }
+        return commit(newEvents) ? newEvents.count : 0
     }
 
     @discardableResult
@@ -579,6 +633,10 @@ final class AttentionWorkspace: ObservableObject {
             where fileManager.fileExists(atPath: url.path) {
                 try fileManager.removeItem(at: url)
             }
+            // 索引文件已经 unlink，但 actor 手里的句柄还能读到全部旧行；关掉它。
+            Task.detached(priority: .utility) { await MemoryIndex.shared.removeAll() }
+            // 每次恢复备份留下的整目录旧副本也算「这台 Mac 上的数据」。
+            LocalDataArchiveService.removePreRestoreCopies(of: dataRoot)
             try? ExternalEventStore().removeAll()
             for key in LocalDataErasure.erasableUserDefaultsKeys {
                 defaults.removeObject(forKey: key)
@@ -1190,6 +1248,7 @@ final class AttentionWorkspace: ObservableObject {
     private func scheduleCaptureTextExtraction(for capture: CaptureItem) {
         guard capture.kind == .screenshot,
               let assetURL = capture.assetURL,
+              assetStore.isManaged(assetURL),
               capture.textExtractedAt == nil,
               !extractingCaptureIDs.contains(capture.id)
         else { return }
@@ -1206,7 +1265,9 @@ final class AttentionWorkspace: ObservableObject {
     func backfillCaptureText() {
         guard extractingCaptureIDs.isEmpty else { return }
         let candidate = snapshot.captures.values
-            .filter { $0.kind == .screenshot && $0.assetURL != nil && $0.textExtractedAt == nil }
+            .filter {
+                $0.kind == .screenshot && assetStore.isManaged($0.assetURL) && $0.textExtractedAt == nil
+            }
             .sorted { $0.capturedAt > $1.capturedAt }
             .first
         guard let candidate else { return }
@@ -1418,6 +1479,7 @@ final class AttentionWorkspace: ObservableObject {
             events = retainedEvents
             snapshot = AttentionSnapshot.replay(retainedEvents)
             assetStore.removeIfPresent(at: capture.assetURL)
+            pruneMemoryIndex()
             lastError = nil
             return true
         } catch {
@@ -1631,8 +1693,15 @@ final class AttentionWorkspace: ObservableObject {
         case .started:
             if let existing {
                 reopenAutoWait(existing, for: event)
-            } else {
+            } else if activeAutoWaitCount(for: event.source) < Self.maximumActiveAutoWaitsPerSource {
                 _ = createAutoWait(for: event)
+            } else {
+                // 同一来源刷来的新 correlation 超过上限就不再开新等待：每开一个
+                // 都要重写整份事件日志，这里是刷量最容易打到的地方。
+                LocalDiagnostics.shared.record(
+                    operation: "auto-wait.route",
+                    message: "来源 \(event.source.rawValue) 的自动等待已达上限，忽略 \(event.correlationID)"
+                )
             }
 
         case .progress:
@@ -1662,6 +1731,17 @@ final class AttentionWorkspace: ObservableObject {
             guard let existing, existing.status == .waiting else { return }
             _ = cancelWaiting(existing.id, evidence: event.evidence, now: event.occurredAt)
         }
+    }
+
+    static let maximumActiveAutoWaitsPerSource = 200
+
+    private func activeAutoWaitCount(for source: ExternalEventSource) -> Int {
+        guard let hub = AutoWaitHub.descriptor(for: source) else { return 0 }
+        return snapshot.waitingItems.values.filter {
+            $0.status == .waiting
+                && $0.monitor?.eventAutoManaged == true
+                && snapshot.episodes[$0.episodeID]?.targetID == hub.targetID
+        }.count
     }
 
     @discardableResult
@@ -1893,6 +1973,8 @@ final class AttentionWorkspace: ObservableObject {
     /// 隐私排除规则照常在读取时生效。
     @discardableResult
     func captureCheckpointScene(now: Date = Date()) async -> SceneSnapshot? {
+        // 「暂停自动采集」对定时检查点同样有效：它和切换、等待一样没人在场确认。
+        guard !sceneCapturePreferences.isAutomaticCapturePaused else { return nil }
         let capsule = contextCapture(intelligencePreferences, sceneCapturePreferences)
         guard capsule.hasSceneContent else { return nil }
         let scene = await SceneSnapshotBuilder.buildSnapshot(
@@ -1995,7 +2077,9 @@ final class AttentionWorkspace: ObservableObject {
     func deleteRecordingSession(_ sessionID: UUID, now: Date = Date()) -> Bool {
         guard snapshot.recordingSessions[sessionID] != nil else { return false }
         recordingCoordinator.discard(sessionID)
-        return commit([.recordingSessionDeleted(id: sessionID, at: now)])
+        let committed = commit([.recordingSessionDeleted(id: sessionID, at: now)])
+        if committed { pruneMemoryIndex(now: now) }
+        return committed
     }
 
     /// AI 整理：把 trace 事实行交给当前引擎生成成稿并存回。
@@ -2192,7 +2276,9 @@ final class AttentionWorkspace: ObservableObject {
             .latestSceneSnapshot(for: episode.targetID)?
             .screenshotAssetURL
         if intelligencePreferences.saveWindowScreenshot,
-           let imageData = await SceneScreenshotRecorder.captureDesktop(),
+           let imageData = await SceneScreenshotRecorder.captureDesktop(
+               allowsApplication: sceneCapturePreferences.allowsApplication
+           ),
            let storedURL = try? assetStore.save(data: imageData, fileExtension: "jpg") {
             sceneSnapshot.screenshotAssetURL = storedURL
         }
@@ -2395,6 +2481,7 @@ final class AttentionWorkspace: ObservableObject {
             for url in screenshotCandidates where !retainedScreenshots.contains(url) {
                 assetStore.removeIfPresent(at: url)
             }
+            pruneMemoryIndex()
             lastError = nil
             return result
         } catch {
@@ -2510,14 +2597,19 @@ final class AttentionWorkspace: ObservableObject {
         var capsule = ContextCapsule(capturedAt: sceneSnapshot.capturedAt)
         capsule.note = sceneSnapshot.returnCue
 
+        // 地址是从事件日志里读回来的字符串；恢复时按种类校验 scheme，别的一概不开。
         for item in items {
             switch item.kind {
             case .file:
-                if let url = URL(string: item.address) { capsule.files.append(url) }
+                if let url = URL(string: item.address), url.isFileURL { capsule.files.append(url) }
             case .link:
-                if let url = URL(string: item.address) { capsule.links.append(url) }
+                if let url = URL(string: item.address),
+                   let scheme = url.scheme?.lowercased(),
+                   scheme == "http" || scheme == "https" {
+                    capsule.links.append(url)
+                }
             case .terminal:
-                if let url = URL(string: item.address) {
+                if let url = URL(string: item.address), url.isFileURL {
                     capsule.terminalWorkingDirectories.append(url)
                 }
             case .application:
