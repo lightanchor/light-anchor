@@ -632,6 +632,15 @@ private struct CloudProfileEditorView: View {
                     .font(LightAnchorTheme.supportingFont(size: 11))
                     .foregroundStyle(LightAnchorTheme.faintInk)
                     .fixedSize(horizontal: false, vertical: true)
+                // 明文 http 发给非本机：Key 会裸着走网络，请求时会被拦下。
+                // 这里先把话说清，别等到「测试连接」才报错。
+                if CloudNetworkPolicy.isInsecureRemote(endpoint: draft.chatEndpoint) {
+                    Text(tr("http_endpoint_to_remote_host_warning"))
+                        .font(LightAnchorTheme.supportingFont(size: 11))
+                        .foregroundStyle(LightAnchorTheme.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityLabel(tr("http_endpoint_to_remote_host_warning"))
+                }
             }
 
             VStack(alignment: .leading, spacing: 6) {

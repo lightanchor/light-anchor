@@ -1164,3 +1164,6 @@
 "file_isn_t_a_plain_document" = "只会打开普通文档，不打开应用、脚本、安装包或可执行文件";
 "shortcut_name_can_t_start_with_a_dash" = "快捷指令名称不能以「-」开头";
 "on_device_speech_recognition_unavailable" = "这台 Mac 暂不支持该语言的本机语音识别；为了不上传录音，没有进行转写";
+"cloud_endpoint_requires_https_for_api_key" = "API Key 只能通过 https 发送。%@ 是明文 http 地址，请改用 https，或只对本机服务（localhost）使用 http。";
+"http_endpoint_to_remote_host_warning" = "这是发往非本机的明文 http 地址：带 API Key 的请求会被拦下，不会发出。";
+"streamed_answer_exceeded_size_limit" = "回答超过 512 KB，已停止接收。";

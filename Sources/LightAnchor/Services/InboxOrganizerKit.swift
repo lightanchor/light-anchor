@@ -36,11 +36,15 @@ enum InboxAutoOrganizer {
     }
 }
 
-/// 抓网页 <title>。只取前 64KB、8 秒超时；失败静默返回 nil。
+/// 抓网页 <title>。只读前 64KB 就掐断连接（不把整页下载下来）、8 秒超时；
+/// 走 `CloudNetworkPolicy.session`：换主机、降协议的重定向一律不跟。
+/// 失败静默返回 nil。
 enum InboxLinkTitleFetcher {
+    static let maxBytes = 64 * 1024
+
     static func fetchTitle(
         for url: URL,
-        session: URLSession = .shared
+        session: URLSession = CloudNetworkPolicy.session
     ) async -> String? {
         guard let scheme = url.scheme?.lowercased(),
               scheme == "http" || scheme == "https"
@@ -48,11 +52,24 @@ enum InboxLinkTitleFetcher {
         var request = URLRequest(url: url)
         request.timeoutInterval = 8
         request.setValue("text/html", forHTTPHeaderField: "Accept")
-        guard let (data, response) = try? await session.data(for: request),
+        guard let (bytes, response) = try? await session.bytes(for: request),
               let httpResponse = response as? HTTPURLResponse,
               (200..<300).contains(httpResponse.statusCode)
         else { return nil }
-        let html = String(decoding: data.prefix(64 * 1024), as: UTF8.self)
+
+        var data = Data()
+        data.reserveCapacity(maxBytes)
+        do {
+            for try await byte in bytes {
+                data.append(byte)
+                if data.count >= maxBytes { break }
+            }
+        } catch {
+            // 中途断了：手里已有的那截也许就包含 <title>，照样解析。
+        }
+        bytes.task.cancel()
+        guard !data.isEmpty else { return nil }
+        let html = String(decoding: data, as: UTF8.self)
         return parseTitle(from: html)
     }
 

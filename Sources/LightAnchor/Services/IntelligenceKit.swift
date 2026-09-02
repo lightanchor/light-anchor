@@ -215,9 +215,45 @@ struct CloudProviderProfile: Codable, Equatable, Identifiable, Sendable {
     var apiProtocol: CloudAPIProtocol
     /// API Key 允许为空。本地服务、公司网关、免鉴权反代都可能不需要 Key：
     /// 空 Key 只是不发认证头，不算配置不完整，也不拦「测试连接」。
+    ///
+    /// 只住在内存里：编码时默认不写出（见 `encode(to:)`），持久化由
+    /// `IntelligencePreferences.save` 单独交给 `CloudAPIKeyStore`（钥匙串）。
     var apiKey: String
     var chatEndpoint: String
     var model: String
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, provider, apiProtocol, apiKey, chatEndpoint, model
+    }
+
+    /// 编码器 userInfo 里放 true 才把 Key 一起写出。默认不写：偏好 blob 会进
+    /// 备份 zip、也曾明文躺在 UserDefaults 里，Key 不该跟着走。
+    static let encodeAPIKeyUserInfoKey = CodingUserInfoKey(rawValue: "com.lightanchor.encodeAPIKey")!
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        provider = try container.decode(CloudServicePreset.self, forKey: .provider)
+        apiProtocol = try container.decode(CloudAPIProtocol.self, forKey: .apiProtocol)
+        // 老 blob 里还带着 Key（迁移前的数据）：照读，由 load 搬进钥匙串。
+        apiKey = try container.decodeIfPresent(String.self, forKey: .apiKey) ?? ""
+        chatEndpoint = try container.decode(String.self, forKey: .chatEndpoint)
+        model = try container.decode(String.self, forKey: .model)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(provider, forKey: .provider)
+        try container.encode(apiProtocol, forKey: .apiProtocol)
+        if encoder.userInfo[Self.encodeAPIKeyUserInfoKey] as? Bool == true {
+            try container.encode(apiKey, forKey: .apiKey)
+        }
+        try container.encode(chatEndpoint, forKey: .chatEndpoint)
+        try container.encode(model, forKey: .model)
+    }
 
     init(
         id: UUID = UUID(),
@@ -257,6 +293,8 @@ struct CloudProviderProfile: Codable, Equatable, Identifiable, Sendable {
     }
 
     /// 复制一套方案（含 Key）：同一家服务换个模型是最常见的第二套配置。
+    /// Key 随内存副本一起带到新 id 上，`IntelligencePreferences.save` 时按新 id
+    /// 写进钥匙串。
     func duplicated(existingNames: Set<String>) -> CloudProviderProfile {
         var copy = self
         copy.id = UUID()
@@ -341,7 +379,8 @@ struct IntelligencePreferences: Codable, Equatable, Sendable {
         engine: .cloud,
         sceneFilterDefault: .aiFiltered,
         saveTerminalCommands: true,
-        saveClipboardContent: true,
+        // 剪贴板最容易装下别人的信息（密码、他人的消息）：默认不存，用户自己开。
+        saveClipboardContent: false,
         saveWindowScreenshot: false,
         generateReturnCue: true,
         checkSceneStaleness: true,
@@ -525,15 +564,56 @@ struct IntelligencePreferences: Codable, Equatable, Sendable {
         let fresh = CloudProviderProfile.make(provider: .openAI)
         preferences.cloudProfiles = [fresh]
         preferences.activeCloudProfileID = fresh.id
+        // 钥匙串里的每一把 Key 都是用户凭据：整个清空，不只清方案列表里的。
+        CloudAPIKeyStore.shared.removeAll()
         preferences.save(to: defaults)
     }
 
+    /// 读偏好，并把每套方案的 Key 从钥匙串补回内存。
+    ///
+    /// 迁移：blob 里若还带着 Key（钥匙串之前的版本存的），先搬进钥匙串，再
+    /// 立刻把不含 Key 的 blob 写回——用户升级后第一次启动，明文就从磁盘上消失。
+    /// 0.1.0 的扁平字段（`cloudAPIKey`）也走同一条路：`init(from:)` 把它拼成
+    /// 一套带 Key 的方案，这里一并搬走。
     static func load(from defaults: UserDefaults = .standard) -> IntelligencePreferences {
-        guard let data = defaults.data(forKey: storageKey) else { return .default }
-        return (try? JSONDecoder().decode(IntelligencePreferences.self, from: data)) ?? .default
+        guard let data = defaults.data(forKey: storageKey),
+              var preferences = try? JSONDecoder().decode(IntelligencePreferences.self, from: data) else {
+            return .default
+        }
+        let store = CloudAPIKeyStore.shared
+        var blobCarriedKeys = false
+        for index in preferences.cloudProfiles.indices {
+            let profile = preferences.cloudProfiles[index]
+            if !profile.apiKey.isEmpty {
+                store.setKey(profile.apiKey, for: profile.id)
+                blobCarriedKeys = true
+            } else if let stored = store.key(for: profile.id) {
+                preferences.cloudProfiles[index].apiKey = stored
+            }
+        }
+        if blobCarriedKeys {
+            preferences.save(to: defaults)
+        }
+        return preferences
     }
 
+    /// 存偏好：Key 逐把进钥匙串，blob 里不留 Key。
+    ///
+    /// 被删掉的方案（上一份 blob 里有、这一份没有）的 Key 一并从钥匙串清掉，
+    /// 不让孤儿凭据越攒越多。只跟同一个 UserDefaults 里的上一份比：多个
+    /// defaults 域共用一个钥匙串时（测试就是），互不误删。
     func save(to defaults: UserDefaults = .standard) {
+        let store = CloudAPIKeyStore.shared
+        let currentIDs = Set(cloudProfiles.map(\.id))
+        if let previousData = defaults.data(forKey: Self.storageKey),
+           let previous = try? JSONDecoder().decode(IntelligencePreferences.self, from: previousData) {
+            for dropped in previous.cloudProfiles where !currentIDs.contains(dropped.id) {
+                store.setKey(nil, for: dropped.id)
+            }
+        }
+        for profile in cloudProfiles {
+            store.setKey(profile.apiKey, for: profile.id)
+        }
         if let data = try? JSONEncoder().encode(self) {
             defaults.set(data, forKey: Self.storageKey)
         }
@@ -1579,6 +1659,107 @@ struct CloudConnectionConfiguration: Equatable, Sendable {
     }
 }
 
+// MARK: - 出网规则
+
+/// 所有云端请求（对话、流式、模型列表、抓链接标题）共用的一套出网规则：
+/// 1. 不跟着重定向换主机或降级协议——带着 Key 的请求被 302 到别处，Key 就送人了；
+/// 2. Key 只走 https；明文 http 只许发给本机（Ollama / LM Studio 那类本地服务）。
+enum CloudNetworkPolicy {
+    enum Error: LocalizedError, Equatable {
+        /// 想把 API Key 发到非本机的 http:// 端点。
+        case apiKeyOverInsecureTransport(host: String)
+
+        var errorDescription: String? {
+            switch self {
+            case .apiKeyOverInsecureTransport(let host):
+                String(format: tr("cloud_endpoint_requires_https_for_api_key"), host)
+            }
+        }
+    }
+
+    static let loopbackHosts: Set<String> = ["localhost", "127.0.0.1", "::1", "[::1]"]
+
+    /// 全部云端请求共用的会话：临时配置（不落缓存、不留 cookie），
+    /// 重定向由 `CloudRedirectGuard` 把关。
+    static let session: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpShouldSetCookies = false
+        configuration.httpCookieAcceptPolicy = .never
+        return URLSession(configuration: configuration, delegate: CloudRedirectGuard(), delegateQueue: nil)
+    }()
+
+    static func isLoopback(host: String?) -> Bool {
+        guard let host = host?.lowercased(), !host.isEmpty else { return false }
+        return loopbackHosts.contains(host)
+    }
+
+    /// 明文 http 且目标不是本机：Key 会裸着走网络。
+    static func isInsecureRemote(url: URL) -> Bool {
+        guard url.scheme?.lowercased() == "http" else { return false }
+        return !isLoopback(host: url.host)
+    }
+
+    /// 同上，接受用户填的端点文本（解析不出 URL 时算不上「不安全」，那是另一种错）。
+    static func isInsecureRemote(endpoint: String) -> Bool {
+        guard let url = CloudConnectionConfiguration.url(from: endpoint) else { return false }
+        return isInsecureRemote(url: url)
+    }
+
+    /// 要带 Key 的请求，先过这一关。空 Key 不受限：本地服务、免鉴权网关照旧。
+    static func validateAPIKeyTransport(url: URL, apiKey: String) throws {
+        guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        if isInsecureRemote(url: url) {
+            throw Error.apiKeyOverInsecureTransport(host: url.host ?? url.absoluteString)
+        }
+    }
+
+    /// 重定向是否还留在原地：主机、端口不变，协议不变或只许 http → https 升级。
+    static func allowsRedirect(from original: URL, to next: URL) -> Bool {
+        guard let originalScheme = original.scheme?.lowercased(),
+              let nextScheme = next.scheme?.lowercased(),
+              let originalHost = original.host?.lowercased(),
+              let nextHost = next.host?.lowercased(),
+              originalHost == nextHost else {
+            return false
+        }
+        if originalScheme == nextScheme {
+            return effectivePort(of: original) == effectivePort(of: next)
+        }
+        // 升级到 https：默认端口自然从 80 变 443，只要求显式端口不变。
+        guard originalScheme == "http", nextScheme == "https" else { return false }
+        return original.port == next.port
+    }
+
+    private static func effectivePort(of url: URL) -> Int? {
+        if let port = url.port { return port }
+        switch url.scheme?.lowercased() {
+        case "https": return 443
+        case "http": return 80
+        default: return nil
+        }
+    }
+}
+
+/// 拒绝换主机、换端口、降协议的重定向：`completionHandler(nil)` 让会话把那个
+/// 3xx 原样交回调用方，调用方按非 2xx 报错，Key 一步都不多走。
+final class CloudRedirectGuard: NSObject, URLSessionTaskDelegate {
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping @Sendable (URLRequest?) -> Void
+    ) {
+        guard let original = task.originalRequest?.url,
+              let next = request.url,
+              CloudNetworkPolicy.allowsRedirect(from: original, to: next) else {
+            completionHandler(nil)
+            return
+        }
+        completionHandler(request)
+    }
+}
+
 struct CloudModelCatalog: Sendable {
     enum Error: LocalizedError, Equatable {
         case missingModelsEndpoint
@@ -1601,7 +1782,7 @@ struct CloudModelCatalog: Sendable {
 
     private let session: URLSession
 
-    init(session: URLSession = .shared) {
+    init(session: URLSession = CloudNetworkPolicy.session) {
         self.session = session
     }
 
@@ -1615,6 +1796,7 @@ struct CloudModelCatalog: Sendable {
         guard let url = CloudConnectionConfiguration.url(from: endpoint) else {
             throw Error.missingModelsEndpoint
         }
+        try CloudNetworkPolicy.validateAPIKeyTransport(url: url, apiKey: trimmedAPIKey)
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
@@ -1673,7 +1855,7 @@ struct CloudIntelligenceEngine: IntelligenceEngineProtocol {
         model: String,
         apiProtocol: CloudAPIProtocol = .openAIChatCompletions,
         adhdFriendlyOutput: Bool = true,
-        session: URLSession = .shared
+        session: URLSession = CloudNetworkPolicy.session
     ) {
         self.apiKey = apiKey
         // 基地址（…/v1）也照发：请求路径在这里补齐，见 completedRequestEndpoint。
@@ -2051,6 +2233,8 @@ struct CloudIntelligenceEngine: IntelligenceEngineProtocol {
         guard let url = CloudConnectionConfiguration.url(from: endpoint) else {
             throw CloudEngineError.badEndpoint
         }
+        // Key 只走 https（本机 http 例外）：在拼请求这一步就拦住，一个字节都不发。
+        try CloudNetworkPolicy.validateAPIKeyTransport(url: url, apiKey: apiKey)
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -2310,6 +2494,11 @@ struct CloudIntelligenceEngine: IntelligenceEngineProtocol {
         }
     }
 
+    /// 一段流式回答最多累积多少字节（UTF-8）。
+    static let maxStreamedAnswerBytes = 512 * 1024
+    /// 相邻两次向消费方 yield 全文的最小间隔。
+    static let streamYieldInterval: Duration = .milliseconds(40)
+
     func streamMemoryAnswer(_ input: MemoryQuestionInput) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
@@ -2351,17 +2540,38 @@ struct CloudIntelligenceEngine: IntelligenceEngineProtocol {
                         )
                     }
 
+                    // 消费方（对话页）拿的是「到目前为止的全文」，每次 yield 都要
+                    // 拷一份全文：按增量逐次 yield 会随回答变长变成平方开销。
+                    // 所以按时间节流——两次 yield 至少隔 40ms，收尾时把最后一段补上。
                     var accumulated = ""
+                    var lastYield: ContinuousClock.Instant?
+                    var hasUnsentText = false
                     lineLoop: for try await line in bytes.lines {
                         switch try Self.parseStreamLine(line, apiProtocol: apiProtocol) {
                         case .text(let delta):
                             accumulated += delta
+                            // 封顶：一段回答不该有半兆字节。超过就是服务端失控或
+                            // 恶意灌数据，掐断连接，按流内失败报出去。
+                            guard accumulated.utf8.count <= Self.maxStreamedAnswerBytes else {
+                                bytes.task.cancel()
+                                throw CloudEngineError.streamFailed(tr("streamed_answer_exceeded_size_limit"))
+                            }
+                            hasUnsentText = true
+                            let now = ContinuousClock.now
+                            if let lastYield, now - lastYield < Self.streamYieldInterval {
+                                continue
+                            }
                             continuation.yield(accumulated)
+                            hasUnsentText = false
+                            lastYield = now
                         case .done:
                             break lineLoop
                         case .ignored:
                             continue
                         }
+                    }
+                    if hasUnsentText {
+                        continuation.yield(accumulated)
                     }
                     guard !accumulated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                         throw MemoryAnswerError.emptyAnswer

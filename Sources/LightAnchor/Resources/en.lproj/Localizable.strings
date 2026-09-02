@@ -1161,3 +1161,6 @@
 "file_isn_t_a_plain_document" = "Only plain documents are opened, not apps, scripts, installers, or executables";
 "shortcut_name_can_t_start_with_a_dash" = "Shortcut names can't start with a dash";
 "on_device_speech_recognition_unavailable" = "On-device speech recognition isn't available for this language on this Mac; the recording wasn't transcribed so no audio is uploaded";
+"cloud_endpoint_requires_https_for_api_key" = "API keys are only sent over https. %@ is a plain http address; switch to https, or use http only for a local service (localhost).";
+"http_endpoint_to_remote_host_warning" = "This is a plain http address to a remote host: requests carrying an API key will be blocked, not sent.";
+"streamed_answer_exceeded_size_limit" = "The answer exceeded 512 KB; stopped receiving.";
