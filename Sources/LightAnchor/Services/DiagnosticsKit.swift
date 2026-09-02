@@ -4,7 +4,6 @@ struct DiagnosticEvent: Codable, Equatable {
     let occurredAt: Date
     let operation: String
     let message: String
-    let durationMilliseconds: Int?
 }
 
 struct DiagnosticBundle: Codable, Equatable {
@@ -27,16 +26,11 @@ final class LocalDiagnostics: @unchecked Sendable {
         self.fileURL = fileURL ?? LightAnchorStorage.diagnosticsURL()
     }
 
-    func record(
-        operation: String,
-        message: String,
-        duration: TimeInterval? = nil
-    ) {
+    func record(operation: String, message: String) {
         let event = DiagnosticEvent(
             occurredAt: Date(),
             operation: redact(operation),
-            message: redact(message),
-            durationMilliseconds: duration.map { Int(($0 * 1_000).rounded()) }
+            message: redact(message)
         )
         guard let data = try? JSONEncoder().encode(event) else { return }
 
@@ -92,8 +86,7 @@ final class LocalDiagnostics: @unchecked Sendable {
                 DiagnosticEvent(
                     occurredAt: event.occurredAt,
                     operation: redact(event.operation),
-                    message: redact(event.message),
-                    durationMilliseconds: event.durationMilliseconds
+                    message: redact(event.message)
                 )
             }
         let bundle = DiagnosticBundle(

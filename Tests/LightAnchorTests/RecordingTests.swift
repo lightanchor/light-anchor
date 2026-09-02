@@ -205,10 +205,11 @@ final class RecordingTests: XCTestCase {
         let session = try XCTUnwrap(workspace.startManualRecording())
         let baseline = workspace.recordingEntries(for: session.id).count
 
-        // 期间的两条相同备注：相邻去重只留一条。
-        workspace.noteRecordingFactForTesting(kind: .note, title: "同一件事")
-        workspace.noteRecordingFactForTesting(kind: .note, title: "同一件事")
+        // 期间两条内容相同的捕获落下两条相同的生命周期事实：相邻去重只留一条。
+        XCTAssertNotNil(workspace.captureText("同一件事"))
+        XCTAssertNotNil(workspace.captureText("同一件事"))
         let entries = workspace.recordingEntries(for: session.id)
         XCTAssertEqual(entries.count - baseline, 1)
+        XCTAssertEqual(entries.last?.kind, .capture)
     }
 }

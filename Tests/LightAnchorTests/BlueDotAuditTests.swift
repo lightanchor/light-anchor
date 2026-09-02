@@ -171,7 +171,7 @@ final class BlueDotAuditTests: XCTestCase {
         XCTAssertTrue(capture.contains("captureDestinationChip"))
         XCTAssertTrue(capture.contains("draftValidationMessage"))
         XCTAssertTrue(capture.contains("CaptureDraftCoordinator.shared.begin()"))
-        XCTAssertTrue(capture.contains("CaptureDraftCoordinator.shared.discard(draftID: draftID)"))
+        XCTAssertTrue(capture.contains("CaptureDraftCoordinator.shared.end(draftID: draftID)"))
         XCTAssertTrue(capture.contains("requestCaptureDraftTerminationDecision"))
     }
 

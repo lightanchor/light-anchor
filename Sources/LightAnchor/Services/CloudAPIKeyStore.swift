@@ -12,8 +12,6 @@ protocol CloudAPIKeyStoring: Sendable {
     func key(for profileID: UUID) -> String?
     func setKey(_ key: String?, for profileID: UUID)
     func removeAll()
-    /// 目前存着 Key 的全部方案 id（用于清理已删方案遗留的 Key）。
-    func allProfileIDs() -> [UUID]
 }
 
 /// 进程内的存放处：单测用，绝不碰跑测试这台机器的真实钥匙串。
@@ -40,18 +38,14 @@ final class InMemoryAPIKeyStore: CloudAPIKeyStoring, @unchecked Sendable {
     func removeAll() {
         lock.withLock { storage.removeAll() }
     }
-
-    func allProfileIDs() -> [UUID] {
-        lock.withLock { Array(storage.keys) }
-    }
 }
 
 /// 系统钥匙串：通用密码项，service 固定、account 是方案 id。
 ///
 /// 用的是登录钥匙串（文件型）而不是 data-protection 钥匙串：后者要求应用带
 /// application-identifier 权限，`swift run` 与 ad-hoc 签名的构建都没有，会直接
-/// 拒绝写入。项目不同步到 iCloud 钥匙串；可访问性按「解锁后可读」声明，文件型
-/// 钥匙串不认这个属性时退一步不带它重试。
+/// 拒绝写入。项目不同步到 iCloud 钥匙串；`kSecAttrAccessible` 只对
+/// data-protection 钥匙串有意义，这里不带。
 final class KeychainAPIKeyStore: CloudAPIKeyStoring {
     static let defaultService = "com.lightanchor.cloud-api-key"
 
@@ -88,13 +82,7 @@ final class KeychainAPIKeyStore: CloudAPIKeyStoring {
         var attributes = query
         attributes[kSecValueData as String] = data
         attributes[kSecAttrLabel as String] = "Light Anchor 云端 API Key"
-        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlocked
-        let addStatus = SecItemAdd(attributes as CFDictionary, nil)
-        if addStatus == errSecParam {
-            // 文件型钥匙串不接受 kSecAttrAccessible：去掉它再存一次。
-            attributes.removeValue(forKey: kSecAttrAccessible as String)
-            SecItemAdd(attributes as CFDictionary, nil)
-        }
+        SecItemAdd(attributes as CFDictionary, nil)
     }
 
     func removeAll() {
@@ -102,19 +90,6 @@ final class KeychainAPIKeyStore: CloudAPIKeyStoring {
         // 文件型钥匙串的 SecItemDelete 默认只删一条；限定「全部」才真清空。
         query[kSecMatchLimit as String] = kSecMatchLimitAll
         SecItemDelete(query as CFDictionary)
-    }
-
-    func allProfileIDs() -> [UUID] {
-        var query = baseQuery(account: nil)
-        query[kSecReturnAttributes as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitAll
-
-        var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess, let rows = result as? [[String: Any]] else { return [] }
-        return rows.compactMap { row in
-            (row[kSecAttrAccount as String] as? String).flatMap(UUID.init(uuidString:))
-        }
     }
 
     private func baseQuery(account: String?) -> [String: Any] {
@@ -134,30 +109,23 @@ final class KeychainAPIKeyStore: CloudAPIKeyStoring {
 ///
 /// 默认落钥匙串；XCTest 进程里换成内存实现——现有测试大量「造一份带 Key 的
 /// 偏好、存进临时 UserDefaults 再读回」，这些不该在跑测试的机器上留下钥匙串项。
-/// 测试也可以显式换一个实现（`shared` 可写）。
+/// 测试也可以显式换一个实现（`shared` 可写，用完换回原来的）。
 enum CloudAPIKeyStore {
     private static let lock = NSLock()
-    nonisolated(unsafe) private static var override: (any CloudAPIKeyStoring)?
-
-    static var isRunningUnderXCTest: Bool {
-        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
-            || NSClassFromString("XCTestCase") != nil
-    }
-
-    private static let defaultStore: any CloudAPIKeyStoring = {
+    nonisolated(unsafe) private static var current: any CloudAPIKeyStoring = {
         if isRunningUnderXCTest {
             return InMemoryAPIKeyStore()
         }
         return KeychainAPIKeyStore()
     }()
 
-    static var shared: any CloudAPIKeyStoring {
-        get { lock.withLock { override ?? defaultStore } }
-        set { lock.withLock { override = newValue } }
+    static var isRunningUnderXCTest: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+            || NSClassFromString("XCTestCase") != nil
     }
 
-    /// 测试用：撤掉显式替换，回到默认实现。
-    static func resetOverride() {
-        lock.withLock { override = nil }
+    static var shared: any CloudAPIKeyStoring {
+        get { lock.withLock { current } }
+        set { lock.withLock { current = newValue } }
     }
 }

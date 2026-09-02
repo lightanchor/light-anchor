@@ -52,7 +52,9 @@ final class ZZDemoSeedTests: XCTestCase {
         ))
 
         // 现场卡演示条目：覆盖四类条目（应用图标解析各走一条路径）。
-        _ = workspace.commitSceneSnapshot(SceneSnapshot(
+        // 生产里现场只由实时采集产出；演示夹具直接追加进事件日志。
+        let store = LocalEventStore()
+        let scene = SceneSnapshot(
             targetID: target.id,
             episodeID: episode.id,
             items: [
@@ -84,6 +86,7 @@ final class ZZDemoSeedTests: XCTestCase {
             ],
             filterMode: .saveAll,
             clipboardText: "lightanchor/light-anchor"
-        ))
+        )
+        try store.save(events: try store.load() + [.sceneSnapshotChanged(scene, at: scene.capturedAt)])
     }
 }

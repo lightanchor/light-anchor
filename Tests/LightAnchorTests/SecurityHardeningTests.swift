@@ -98,8 +98,8 @@ final class SecurityHardeningTests: XCTestCase {
 
         let crafted: [String: Any] = [
             "lightanchor.updateManifestURL": "https://evil.example/manifest.json",
-            "lightanchor.updatePublicKeyPath": "/tmp/evil.pem",
             "lightanchor.updateChecksEnabled": true,
+            "lightanchor.updateLastCheckedAt": 1.0,
             IntelligencePreferences.storageKey: blob
         ]
         let data = try PropertyListSerialization.data(fromPropertyList: crafted, format: .xml, options: 0)
@@ -107,8 +107,8 @@ final class SecurityHardeningTests: XCTestCase {
         try LocalPreferencesArchive.restore(from: data, into: defaults)
 
         XCTAssertNil(defaults.object(forKey: "lightanchor.updateManifestURL"))
-        XCTAssertNil(defaults.object(forKey: "lightanchor.updatePublicKeyPath"))
         XCTAssertNil(defaults.object(forKey: "lightanchor.updateChecksEnabled"))
+        XCTAssertNil(defaults.object(forKey: "lightanchor.updateLastCheckedAt"))
         let restored = IntelligencePreferences.load(from: defaults)
         XCTAssertEqual(restored.engine, .onDevice)
         XCTAssertFalse(restored.saveWindowScreenshot)

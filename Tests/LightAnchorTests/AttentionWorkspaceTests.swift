@@ -697,7 +697,6 @@ final class AttentionWorkspaceTests: XCTestCase {
         let schedule = ReleaseUpdateSchedule(
             enabled: true,
             manifestURL: URL(string: "https://updates.example.com/manifest.json"),
-            publicKeyURL: URL(fileURLWithPath: "/tmp/update-key.pem"),
             lastCheckedAt: now.addingTimeInterval(-86_400),
             interval: 86_400
         )
@@ -729,31 +728,6 @@ final class AttentionWorkspaceTests: XCTestCase {
             .appendingPathComponent(UUID().uuidString)
             .appendingPathComponent("events.json")
     }
-}
-
-private extension JSONDecoder {
-    static var iso8601: JSONDecoder {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return decoder
-    }
-}
-
-private struct SharedCaptureFixture: Codable {
-    let id: UUID
-    let deviceID: String
-    let kind: String
-    let body: String
-    let sourceURL: URL?
-    let capturedAt: Date
-    let returnCue: String
-}
-
-private final class HangingURLProtocol: URLProtocol {
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() { }
-    override func stopLoading() { }
 }
 
 // MARK: - 专注时长（暂停/等待不计时）

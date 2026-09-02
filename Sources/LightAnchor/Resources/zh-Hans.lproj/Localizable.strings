@@ -430,11 +430,7 @@
 /* == 设置：更新 / 权限 / 数据 == */
 "updates" = "更新";
 "check_for_signed_updates_periodically" = "定期检查签名更新";
-"only_signed_manifests_are_accepted_you" = "只接受签名的更新清单，检查地址和公钥路径由你提供";
 "https_url_of_the_update_manifest" = "更新 manifest 的 HTTPS 地址";
-"rsa_public_key_file_path" = "RSA 公钥文件路径";
-"enter_the_update_url_and_rsa" = "请填写更新地址和 RSA 公钥路径。";
-"couldn_t_read_the_rsa_public" = "无法读取 RSA 公钥文件。";
 "invalid_update_manifest" = "更新 manifest 无效。";
 "the_update_manifest_has_no_verifiable" = "更新 manifest 没有可验证的签名。";
 "update_manifest_signature_verification_failed" = "更新 manifest 签名验证失败。";
@@ -840,9 +836,7 @@
 "update_service_returned_http" = "更新服务返回 HTTP %lld。";
 "a_result_you_were_waiting_for_arrived" = "等待结果已到达";
 "waiting_for" = "等待：%@";
-"no_detector_for_this_wait_type" = "当前等待类型没有可用的检测器。";
 "the_wait_detection_setup_is_incomplete" = "等待检测配置不完整。";
-"the_wait_passed_its_deadline" = "等待超过截止时间。";
 "key_n" = "键%lld";
 "space_key_cap" = "空格";
 "couldn_t_register_shortcut" = "无法注册 %@（系统代码 %lld）。可能与其他应用的全局快捷键冲突，换一组按键试试。";
@@ -906,7 +900,6 @@
 "couldn_t_fully_restore_the_apps_visible_state" = "无法完整恢复应用显示状态。";
 "restored_the_apps_hidden_state" = "已恢复应用隐藏状态。";
 "couldn_t_fully_restore_the_apps_hidden_state" = "无法完整恢复应用隐藏状态。";
-"restored_the_context_from_before_the_run" = "已恢复执行前的上下文。";
 "environment_undo_isn_t_supported_here" = "当前平台不支持环境撤销。";
 "link_source" = "链接来源";
 "voice_capture" = "语音捕获";
@@ -1121,7 +1114,6 @@
 "n_trace_entries" = "%lld 条过程条目";
 "n_more_entries_omitted" = "其余 %lld 条略";
 "trace_timeline" = "过程时间线";
-"not_composed_yet_open_to_compose" = "（还没生成成稿，打开详情用「AI 整理」生成。）";
 "compose_turns_the_trace_into" = "「AI 整理」把过程事实按所选风格整理成 Markdown，可继续手改。";
 "record_this_one" = "记录本次";
 "auto_record_episodes" = "跟随工作自动录制过程";
@@ -1142,3 +1134,4 @@
 "streamed_answer_exceeded_size_limit" = "回答超过 512 KB，已停止接收。";
 "only_signed_manifests_are_accepted_key_built_in" = "只接受签名的更新清单；公钥已随本版本内置，不可更改";
 "enter_the_update_url" = "请填写更新地址。";
+"this_build_has_no_update_key" = "本版本没有内置更新公钥，无法验证更新。";

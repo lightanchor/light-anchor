@@ -7,22 +7,25 @@ import XCTest
 /// 删数据把 Key 一起删」。
 final class CloudAPIKeyStoreTests: XCTestCase {
     private var store: InMemoryAPIKeyStore!
+    private var defaultStore: (any CloudAPIKeyStoring)!
 
     override func setUp() {
         super.setUp()
+        defaultStore = CloudAPIKeyStore.shared
         store = InMemoryAPIKeyStore()
         CloudAPIKeyStore.shared = store
     }
 
     override func tearDown() {
-        CloudAPIKeyStore.resetOverride()
+        CloudAPIKeyStore.shared = defaultStore
+        defaultStore = nil
         store = nil
         super.tearDown()
     }
 
     // MARK: - 存放处本身
 
-    func testInMemoryStoreSetsReadsDeletesAndListsKeys() {
+    func testInMemoryStoreSetsReadsAndDeletesKeys() {
         let a = UUID()
         let b = UUID()
 
@@ -30,26 +33,24 @@ final class CloudAPIKeyStoreTests: XCTestCase {
         store.setKey("sk-b", for: b)
         XCTAssertEqual(store.key(for: a), "sk-a")
         XCTAssertEqual(store.key(for: b), "sk-b")
-        XCTAssertEqual(Set(store.allProfileIDs()), [a, b])
 
         // 空 Key / nil 都是删除。
         store.setKey("", for: a)
         XCTAssertNil(store.key(for: a))
         store.setKey(nil, for: b)
         XCTAssertNil(store.key(for: b))
-        XCTAssertTrue(store.allProfileIDs().isEmpty)
 
         store.setKey("sk-a", for: a)
+        store.setKey("sk-b", for: b)
         store.removeAll()
         XCTAssertNil(store.key(for: a))
-        XCTAssertTrue(store.allProfileIDs().isEmpty)
+        XCTAssertNil(store.key(for: b))
     }
 
     func testSharedStoreIsInMemoryUnderXCTest() {
-        CloudAPIKeyStore.resetOverride()
         XCTAssertTrue(CloudAPIKeyStore.isRunningUnderXCTest)
         XCTAssertTrue(
-            CloudAPIKeyStore.shared is InMemoryAPIKeyStore,
+            defaultStore is InMemoryAPIKeyStore,
             "测试进程里绝不能碰真实钥匙串"
         )
     }
@@ -111,13 +112,18 @@ final class CloudAPIKeyStoreTests: XCTestCase {
         preferences.addCloudProfile(provider: .anthropic)
         preferences.activeCloudProfile.apiKey = "sk-b"
         preferences.save(to: defaults)
-        XCTAssertEqual(store.allProfileIDs().count, 2)
+        let profileIDs = preferences.cloudProfiles.map(\.id)
+        XCTAssertEqual(profileIDs.count, 2)
+        XCTAssertTrue(profileIDs.allSatisfy { store.key(for: $0) != nil })
         // 存放处里还有一把不属于任何当前方案的孤儿 Key，也要一起清。
-        store.setKey("sk-orphan", for: UUID())
+        let orphanID = UUID()
+        store.setKey("sk-orphan", for: orphanID)
 
         IntelligencePreferences.eraseCloudConfiguration(in: defaults)
 
-        XCTAssertTrue(store.allProfileIDs().isEmpty, "删除全部本地数据必须清空所有 Key")
+        for id in profileIDs + [orphanID] {
+            XCTAssertNil(store.key(for: id), "删除全部本地数据必须清空所有 Key")
+        }
         let after = IntelligencePreferences.load(from: defaults)
         XCTAssertEqual(after.cloudProfiles.count, 1)
         XCTAssertTrue(after.activeCloudProfile.apiKey.isEmpty)

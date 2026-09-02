@@ -82,13 +82,6 @@ final class FocusLedgerTests: XCTestCase {
 
     // MARK: - Helpers
 
-    @discardableResult
-    private func startWork(_ workspace: AttentionWorkspace, at date: Date) throws -> AttentionEpisode {
-        let target = try XCTUnwrap(workspace.createTarget(name: "手头的事", now: date))
-        _ = workspace.startEpisode(targetID: target.id, now: date)
-        return try XCTUnwrap(workspace.currentEpisode)
-    }
-
     /// 固定在「昨天 hour:minute」的工作区，避免跨越现在或未来。
     private func makeWorkspace(hour: Int, minute: Int = 0) -> (AttentionWorkspace, Date) {
         let workspace = AttentionWorkspace(store: LocalEventStore(fileURL: temporaryFileURL()))

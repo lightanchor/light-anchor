@@ -144,12 +144,6 @@ extension Notification.Name {
     static let requestCaptureDraftTerminationDecision = Notification.Name(
         "LightAnchor.requestCaptureDraftTerminationDecision"
     )
-    static let saveCaptureDraftForTermination = Notification.Name(
-        "LightAnchor.saveCaptureDraftForTermination"
-    )
-    static let discardCaptureDraftForTermination = Notification.Name(
-        "LightAnchor.discardCaptureDraftForTermination"
-    )
 }
 
 private struct LightAnchorCommands: Commands {

@@ -20,7 +20,6 @@ struct EnvironmentActionResult: Equatable {
 enum EnvironmentUndoOperation: Equatable {
     case unhideApplications([String])
     case hideApplications([String])
-    case restoreContext(ContextCapsule)
 }
 
 struct EnvironmentUndoStep: Equatable {
@@ -75,19 +74,10 @@ final class EnvironmentActionRunner {
         await executeSession(profile).results
     }
 
-    func executeSession(
-        _ profile: EnvironmentProfile,
-        originalContext: ContextCapsule? = nil
-    ) async -> EnvironmentExecution {
+    func executeSession(_ profile: EnvironmentProfile) async -> EnvironmentExecution {
         var results: [EnvironmentActionResult] = []
         var undoSteps: [EnvironmentUndoStep] = []
         var launchedApplications: [String] = []
-        if let originalContext {
-            undoSteps.append(EnvironmentUndoStep(
-                actionID: UUID(),
-                operation: .restoreContext(originalContext)
-            ))
-        }
         for action in profile.actions {
             if Task.isCancelled {
                 results.append(EnvironmentActionResult(
@@ -440,15 +430,6 @@ final class EnvironmentActionRunner {
                 actionID: step.actionID,
                 status: succeeded ? .succeeded : .failed,
                 message: succeeded ? tr("restored_the_apps_hidden_state") : tr("couldn_t_fully_restore_the_apps_hidden_state")
-            )
-
-        case .restoreContext(let context):
-            let report = MacContextRestorer().restore(context)
-            let details = report.failures + report.limitations
-            return EnvironmentActionResult(
-                actionID: step.actionID,
-                status: report.succeeded ? .succeeded : .failed,
-                message: details.isEmpty ? tr("restored_the_context_from_before_the_run") : details.joined(separator: " ")
             )
         }
         #else

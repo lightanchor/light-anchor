@@ -1,30 +1,18 @@
 import Foundation
 
 enum WaitingDetectionError: LocalizedError {
-    case unsupported
     case invalidConfiguration
-    case timedOut
 
     var errorDescription: String? {
         switch self {
-        case .unsupported:
-            tr("no_detector_for_this_wait_type")
         case .invalidConfiguration:
             tr("the_wait_detection_setup_is_incomplete")
-        case .timedOut:
-            tr("the_wait_passed_its_deadline")
         }
     }
 }
 
-protocol WaitingDetector: Sendable {
-    var kind: WaitingMonitorKind { get }
-    func wait(for configuration: WaitingMonitorConfiguration) async throws -> String
-}
-
-struct DateWaitingDetector: WaitingDetector {
-    let kind: WaitingMonitorKind = .date
-
+/// 定时等待：睡到约定时刻即算结果到了。手动等待没有探测器，不会被挂上监视。
+struct DateWaitingDetector: Sendable {
     func wait(for configuration: WaitingMonitorConfiguration) async throws -> String {
         guard let date = configuration.date else {
             throw WaitingDetectionError.invalidConfiguration
@@ -65,15 +53,9 @@ final class WaitingCoordinator {
         let token = UUID()
         tasks[waiting.id] = (token, Task { [weak self] in
             do {
-                let evidence = try await Self.waitForResult(
-                    monitor: monitor,
-                    timeoutAt: waiting.timeoutAt
-                )
+                let evidence = try await DateWaitingDetector().wait(for: monitor)
                 guard !Task.isCancelled else { return }
                 self?.workspace?.completeWaiting(waiting.id, evidence: evidence)
-            } catch WaitingDetectionError.timedOut {
-                guard !Task.isCancelled else { return }
-                self?.workspace?.timeoutWaiting(waiting.id)
             } catch {
                 guard !Task.isCancelled else { return }
                 self?.workspace?.cancelWaiting(
@@ -101,45 +83,5 @@ final class WaitingCoordinator {
     func cancelAllMonitoring() {
         tasks.values.forEach { $0.task.cancel() }
         tasks.removeAll()
-    }
-
-    private static func waitForResult(
-        monitor: WaitingMonitorConfiguration,
-        timeoutAt: Date?
-    ) async throws -> String {
-        try await withThrowingTaskGroup(of: String.self) { group in
-            group.addTask {
-                try await detector(for: monitor.kind).wait(for: monitor)
-            }
-            if let timeoutAt {
-                group.addTask {
-                    let interval = timeoutAt.timeIntervalSinceNow
-                    if interval > 0 {
-                        try await Task.sleep(for: .seconds(interval))
-                    }
-                    throw WaitingDetectionError.timedOut
-                }
-            }
-            guard let result = try await group.next() else {
-                throw WaitingDetectionError.unsupported
-            }
-            group.cancelAll()
-            return result
-        }
-    }
-
-    private static func detector(for kind: WaitingMonitorKind) -> any WaitingDetector {
-        switch kind {
-        case .date: DateWaitingDetector()
-        case .manual: ManualWaitingDetector()
-        }
-    }
-}
-
-private struct ManualWaitingDetector: WaitingDetector {
-    let kind: WaitingMonitorKind = .manual
-
-    func wait(for configuration: WaitingMonitorConfiguration) async throws -> String {
-        throw WaitingDetectionError.unsupported
     }
 }

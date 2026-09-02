@@ -190,11 +190,7 @@ enum AppContextSnapshotter {
 
 /// 无状态的窗口事实来源。标 Sendable 是为了让恢复器能整体交给后台任务：
 /// AX 查询会阻塞（等窗口出现要轮询），不该占着主线程。
-protocol MacWindowFactProviding: Sendable {
-    func facts(for application: NSRunningApplication) -> [ContextWindowFact]
-}
-
-struct MacAccessibilityWindowFactProvider: MacWindowFactProviding {
+struct MacAccessibilityWindowFactProvider: Sendable {
     func facts(for application: NSRunningApplication) -> [ContextWindowFact] {
         guard AXIsProcessTrusted() else { return [] }
 
@@ -278,20 +274,7 @@ struct MacTerminalSession: Equatable {
     let runningCommand: String
 }
 
-protocol MacTerminalWorkingDirectoryProviding {
-    func workingDirectories(for application: NSRunningApplication) -> [URL]
-    func sessions(for application: NSRunningApplication) -> [MacTerminalSession]
-}
-
-extension MacTerminalWorkingDirectoryProviding {
-    func sessions(for application: NSRunningApplication) -> [MacTerminalSession] {
-        workingDirectories(for: application).map {
-            MacTerminalSession(workingDirectory: $0, runningCommand: "")
-        }
-    }
-}
-
-struct MacTerminalWorkingDirectoryProvider: MacTerminalWorkingDirectoryProviding {
+struct MacTerminalWorkingDirectoryProvider {
     private struct ProcessRecord {
         let processIdentifier: Int32
         let parentProcessIdentifier: Int32
@@ -306,12 +289,6 @@ struct MacTerminalWorkingDirectoryProvider: MacTerminalWorkingDirectoryProviding
         "com.github.wez.wezterm",
         "dev.warp.Warp-Stable"
     ]
-
-    func workingDirectories(for application: NSRunningApplication) -> [URL] {
-        sessions(for: application)
-            .map(\.workingDirectory)
-            .sorted { $0.path < $1.path }
-    }
 
     /// 每个目录一条会话；shell 进程优先，命令取该 shell 最深的非 shell 后代
     /// （近似前台任务，如 `swift test`）。
@@ -513,17 +490,8 @@ struct ContextCaptureOptions {
 }
 
 final class MacContextRecorder {
-    private let windowFactProvider: MacWindowFactProviding
-    private let terminalWorkingDirectoryProvider: MacTerminalWorkingDirectoryProviding
-
-    init(
-        windowFactProvider: MacWindowFactProviding = MacAccessibilityWindowFactProvider(),
-        terminalWorkingDirectoryProvider: MacTerminalWorkingDirectoryProviding =
-            MacTerminalWorkingDirectoryProvider()
-    ) {
-        self.windowFactProvider = windowFactProvider
-        self.terminalWorkingDirectoryProvider = terminalWorkingDirectoryProvider
-    }
+    private let windowFactProvider = MacAccessibilityWindowFactProvider()
+    private let terminalWorkingDirectoryProvider = MacTerminalWorkingDirectoryProvider()
 
     func capture(note: String = "", options: ContextCaptureOptions = .default) -> ContextObservation {
         let frontmost = NSWorkspace.shared.frontmostApplication
@@ -794,11 +762,7 @@ enum AppContextRestorationSnapshotter {
 }
 
 final class MacContextRestorer: Sendable {
-    private let windowFactProvider: MacWindowFactProviding
-
-    init(windowFactProvider: MacWindowFactProviding = MacAccessibilityWindowFactProvider()) {
-        self.windowFactProvider = windowFactProvider
-    }
+    private let windowFactProvider = MacAccessibilityWindowFactProvider()
 
     /// 只把焦点还给捕获前那个应用。
     ///
@@ -1272,9 +1236,8 @@ final class CaptureContextStore: @unchecked Sendable {
     private let lock = NSLock()
     private var pending: ContextObservation?
 
-    func prepare(note: String = "") {
+    func prepare() {
         let observation = MacContextRecorder().capture(
-            note: note,
             options: ContextCaptureOptions(preferences: .load())
         )
         lock.lock()

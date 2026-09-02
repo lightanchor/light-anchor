@@ -4,15 +4,12 @@ import SwiftUI
 struct UpdateSettingsView: View {
     @AppStorage("lightanchor.updateChecksEnabled") private var updateChecksEnabled = false
     @AppStorage("lightanchor.updateManifestURL") private var updateManifestURL = ""
-    @AppStorage("lightanchor.updatePublicKeyPath") private var updatePublicKeyPath = ""
     @AppStorage("lightanchor.updateLastCheckedAt") private var updateLastCheckedAt = 0.0
     @State private var updateMessage = ""
     @State private var isCheckingUpdate = false
 
-    // 信任锚随构建内置时（正式包），公钥路径字段既不显示也不参与验证；
-    // 只有没有内置公钥的开发构建才保留路径字段作为开发者退路。
+    // 信任锚只来自随构建内置的公钥；没有内置公钥的构建不做更新检查。
     private let embeddedPublicKeyData = ReleaseTrust.embeddedPublicKeyData
-    private var usesEmbeddedPublicKey: Bool { embeddedPublicKeyData != nil }
     // 写死的正式清单地址一旦定下，就不再让用户改地址。
     private var usesDefaultManifestURL: Bool { ReleaseTrust.defaultManifestURL != nil }
 
@@ -25,9 +22,9 @@ struct UpdateSettingsView: View {
                     VStack(spacing: 0) {
                         settingsRow(
                             title: tr("check_for_signed_updates_periodically"),
-                            detail: usesEmbeddedPublicKey
+                            detail: embeddedPublicKeyData != nil
                                 ? tr("only_signed_manifests_are_accepted_key_built_in")
-                                : tr("only_signed_manifests_are_accepted_you")
+                                : tr("this_build_has_no_update_key")
                         ) {
                             Toggle("", isOn: $updateChecksEnabled)
                                 .labelsHidden()
@@ -36,19 +33,11 @@ struct UpdateSettingsView: View {
                                 .accessibilityLabel(tr("check_for_signed_updates_periodically"))
                         }
                         if updateChecksEnabled {
-                            if !usesDefaultManifestURL || !usesEmbeddedPublicKey {
-                                VStack(spacing: 8) {
-                                    if !usesDefaultManifestURL {
-                                        TextField(tr("https_url_of_the_update_manifest"), text: $updateManifestURL)
-                                            .textFieldStyle(LightAnchorTextFieldStyle())
-                                    }
-                                    if !usesEmbeddedPublicKey {
-                                        TextField(tr("rsa_public_key_file_path"), text: $updatePublicKeyPath)
-                                            .textFieldStyle(LightAnchorTextFieldStyle())
-                                    }
-                                }
-                                .padding(.horizontal, 18)
-                                .padding(.bottom, 13)
+                            if !usesDefaultManifestURL {
+                                TextField(tr("https_url_of_the_update_manifest"), text: $updateManifestURL)
+                                    .textFieldStyle(LightAnchorTextFieldStyle())
+                                    .padding(.horizontal, 18)
+                                    .padding(.bottom, 13)
                             }
                             settingsRowDivider
                             settingsRow(
@@ -78,32 +67,21 @@ struct UpdateSettingsView: View {
 
     private func checkForUpdate(force: Bool) {
         guard updateChecksEnabled else { return }
-        // 内置信任锚优先：有内置公钥时无视用户填写的路径；写死的正式地址优先于用户地址。
-        let embeddedKeyURL = ReleaseTrust.embeddedPublicKeyURL
-        let publicKeyURL = embeddedPublicKeyData != nil
-            ? embeddedKeyURL
-            : (updatePublicKeyPath.isEmpty ? nil : URL(fileURLWithPath: updatePublicKeyPath))
+        // 写死的正式地址优先于用户地址。
         let schedule = ReleaseUpdateSchedule(
             enabled: true,
             manifestURL: ReleaseTrust.defaultManifestURL ?? URL(string: updateManifestURL),
-            publicKeyURL: publicKeyURL,
             lastCheckedAt: updateLastCheckedAt == 0
                 ? nil
                 : Date(timeIntervalSince1970: updateLastCheckedAt)
         )
         guard force || schedule.shouldCheck() else { return }
-        guard let manifestURL = schedule.manifestURL,
-              let publicKeyURL = schedule.publicKeyURL
-        else {
-            updateMessage = usesEmbeddedPublicKey
-                ? tr("enter_the_update_url")
-                : tr("enter_the_update_url_and_rsa")
+        guard let publicKeyData = embeddedPublicKeyData else {
+            updateMessage = tr("this_build_has_no_update_key")
             return
         }
-        guard let publicKeyData = embeddedPublicKeyData
-            ?? (try? Data(contentsOf: publicKeyURL))
-        else {
-            updateMessage = tr("couldn_t_read_the_rsa_public")
+        guard let manifestURL = schedule.manifestURL else {
+            updateMessage = tr("enter_the_update_url")
             return
         }
 

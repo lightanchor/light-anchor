@@ -49,10 +49,10 @@ final class GlobalHotKeyPreferencesTests: XCTestCase {
         XCTAssertNil(reloaded.binding(for: .capture))
     }
 
-    func testResetToDefaultRemovesOverride() {
+    func testRecordingTheDefaultBindingRemovesOverride() {
         var preferences = GlobalHotKeyPreferences.load(defaults: defaults)
         preferences.setBinding(nil, for: .capture)
-        preferences.resetToDefault(for: .capture)
+        preferences.setBinding(GlobalHotKeyAction.capture.defaultBinding, for: .capture)
         preferences.save(defaults: defaults)
 
         let reloaded = GlobalHotKeyPreferences.load(defaults: defaults)

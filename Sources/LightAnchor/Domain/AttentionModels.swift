@@ -441,7 +441,6 @@ struct WaitingItem: Codable, Equatable, Identifiable {
     var notificationSent: Bool
     var restorePolicy: WaitingRestorePolicy
     var monitor: WaitingMonitorConfiguration?
-    var timeoutAt: Date?
     var originalContext: ContextCapsule
 
     init(
@@ -456,7 +455,6 @@ struct WaitingItem: Codable, Equatable, Identifiable {
         notificationSent: Bool = false,
         restorePolicy: WaitingRestorePolicy = .manual,
         monitor: WaitingMonitorConfiguration? = nil,
-        timeoutAt: Date? = nil,
         originalContext: ContextCapsule = ContextCapsule()
     ) {
         self.id = id
@@ -470,7 +468,6 @@ struct WaitingItem: Codable, Equatable, Identifiable {
         self.notificationSent = notificationSent
         self.restorePolicy = restorePolicy
         self.monitor = monitor
-        self.timeoutAt = timeoutAt
         self.originalContext = originalContext
     }
 

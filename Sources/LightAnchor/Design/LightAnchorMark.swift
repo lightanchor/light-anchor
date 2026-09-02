@@ -165,11 +165,9 @@ enum LightAnchorMark {
     ///
     /// 返回 template 图像：菜单栏的前景色、深色外观和高亮状态由系统反色，
     /// 我们不自己上色——菜单栏里的方墩和点都是当前菜单栏文字色。
-    static func statusItemImage(
-        _ state: LightAnchorMarkState,
-        pointSize: CGFloat = 18,
-        liveHeight: CGFloat = 14
-    ) -> NSImage {
+    static func statusItemImage(_ state: LightAnchorMarkState) -> NSImage {
+        let pointSize: CGFloat = 18
+        let liveHeight: CGFloat = 14
         let size = NSSize(width: pointSize, height: pointSize)
         let image = NSImage(size: size, flipped: false) { rect in
             guard let context = NSGraphicsContext.current?.cgContext else { return false }

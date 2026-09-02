@@ -427,11 +427,7 @@
 /* == 设置：更新 / 权限 / 数据 == */
 "updates" = "Updates";
 "check_for_signed_updates_periodically" = "Check for signed updates periodically";
-"only_signed_manifests_are_accepted_you" = "Only signed manifests are accepted; you provide the URL and public key path";
 "https_url_of_the_update_manifest" = "HTTPS URL of the update manifest";
-"rsa_public_key_file_path" = "RSA public key file path";
-"enter_the_update_url_and_rsa" = "Enter the update URL and RSA public key path.";
-"couldn_t_read_the_rsa_public" = "Couldn't read the RSA public key file.";
 "invalid_update_manifest" = "Invalid update manifest.";
 "the_update_manifest_has_no_verifiable" = "The update manifest has no verifiable signature.";
 "update_manifest_signature_verification_failed" = "Update manifest signature verification failed.";
@@ -837,9 +833,7 @@
 "update_service_returned_http" = "The update service returned HTTP %lld.";
 "a_result_you_were_waiting_for_arrived" = "A result you were waiting for arrived";
 "waiting_for" = "Waiting: %@";
-"no_detector_for_this_wait_type" = "No detector is available for this wait type.";
 "the_wait_detection_setup_is_incomplete" = "The wait detection setup is incomplete.";
-"the_wait_passed_its_deadline" = "The wait passed its deadline.";
 "key_n" = "Key %lld";
 "space_key_cap" = "Space";
 "couldn_t_register_shortcut" = "Couldn't register %@ (system code %lld). It may clash with another app's global shortcut — try a different combination.";
@@ -903,7 +897,6 @@
 "couldn_t_fully_restore_the_apps_visible_state" = "Couldn't fully restore the apps' visible state.";
 "restored_the_apps_hidden_state" = "Restored the apps' hidden state.";
 "couldn_t_fully_restore_the_apps_hidden_state" = "Couldn't fully restore the apps' hidden state.";
-"restored_the_context_from_before_the_run" = "Restored the context from before the run.";
 "environment_undo_isn_t_supported_here" = "Environment undo isn't supported on this platform.";
 "link_source" = "link source";
 "voice_capture" = "voice capture";
@@ -1118,7 +1111,6 @@
 "n_trace_entries" = "%lld trace entries";
 "n_more_entries_omitted" = "%lld more omitted";
 "trace_timeline" = "Process timeline";
-"not_composed_yet_open_to_compose" = "(Not composed yet — open the detail and use “Compose with AI”.)";
 "compose_turns_the_trace_into" = "\"Compose with AI\" turns the trace into Markdown in the chosen style; edit freely afterwards.";
 "record_this_one" = "Record this one";
 "auto_record_episodes" = "Auto-record work sessions";
@@ -1139,3 +1131,4 @@
 "streamed_answer_exceeded_size_limit" = "The answer exceeded 512 KB; stopped receiving.";
 "only_signed_manifests_are_accepted_key_built_in" = "Only signed manifests are accepted; the public key ships with this build and cannot be changed";
 "enter_the_update_url" = "Enter the update URL.";
+"this_build_has_no_update_key" = "This build carries no update key, so it can't verify updates.";

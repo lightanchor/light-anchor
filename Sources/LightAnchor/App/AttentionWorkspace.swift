@@ -250,26 +250,12 @@ final class AttentionWorkspace: ObservableObject {
         let name = (title?.isEmpty == false ? title : nil)
             ?? capture.body.split(whereSeparator: \.isNewline).first.map(String.init)
             ?? "新注意力目标"
-        guard let target = createTarget(
+        guard createTarget(
             name: String(name.prefix(60)),
             note: "从稍后处理箱整理而来。",
             now: now
-        ) else { return false }
-        _ = target
+        ) != nil else { return false }
         return archiveCapture(capture.id, now: now)
-    }
-
-    /// 「对话」页的问答检索：从事件流与快照收集带来源标注的事实行。
-    /// 纯读取，不产生事件；现场细节（剪贴板/终端命令）不进事实行。
-    /// 生产走下面的索引版；这是同一套事实拼装的同步入口，事件日志是
-    /// private 的，MemoryRecallTests 靠它验证拼装逻辑。
-    func makeMemoryQuestionContext(question: String, now: Date = Date()) -> MemoryQuestionContext {
-        MemoryRecall.questionContext(
-            question: question,
-            events: events,
-            snapshot: snapshot,
-            now: now
-        )
     }
 
     /// 「对话」页的问答检索（索引版，docs/chat-memory-design.md 一期）：
@@ -1415,7 +1401,6 @@ final class AttentionWorkspace: ObservableObject {
         completionCondition: String = "",
         restorePolicy: WaitingRestorePolicy = .manual,
         monitor: WaitingMonitorConfiguration? = nil,
-        timeoutAt: Date? = nil,
         now: Date = Date()
     ) -> WaitingItem? {
         guard var episode = snapshot.episodes[episodeID],
@@ -1433,7 +1418,6 @@ final class AttentionWorkspace: ObservableObject {
             startedAt: now,
             restorePolicy: restorePolicy,
             monitor: monitor,
-            timeoutAt: timeoutAt,
             originalContext: episode.context
         )
         guard waiting.isValid else { return nil }
@@ -1515,11 +1499,6 @@ final class AttentionWorkspace: ObservableObject {
         return commit(events)
     }
 
-    @discardableResult
-    func timeoutWaiting(_ waitingID: UUID, now: Date = Date()) -> Bool {
-        cancelWaiting(waitingID, evidence: "超过等待截止时间。", now: now)
-    }
-
     func startActiveWaitingMonitors() {
         waitingCoordinator.startMonitoringActiveWaits()
     }
@@ -1559,7 +1538,6 @@ final class AttentionWorkspace: ObservableObject {
     private func changeEpisodeState(
         _ episodeID: UUID,
         state: AttentionEpisodeState,
-        returnCue: String? = nil,
         now: Date
     ) -> Bool {
         guard var episode = snapshot.episodes[episodeID], episode.state != .ended else {
@@ -1567,9 +1545,6 @@ final class AttentionWorkspace: ObservableObject {
         }
         episode.state = state
         episode.updatedAt = now
-        if let returnCue {
-            episode.returnCue = returnCue.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
         return commit([
             .episodeChanged(episode, at: now)
         ])
@@ -1855,17 +1830,6 @@ final class AttentionWorkspace: ObservableObject {
         commit([.recordingSessionChanged(session, at: now)])
     }
 
-    #if DEBUG
-    /// 测试后门：往在录会话里塞一条事实（相邻去重逻辑的单测入口）。
-    func noteRecordingFactForTesting(
-        kind: RecordingEntryKind,
-        title: String,
-        detail: String = ""
-    ) {
-        recordingCoordinator.note(kind: kind, title: title, detail: detail)
-    }
-    #endif
-
     /// 给在录的会话记一条生命周期事实。跟随工作的会话只记自己那段 episode 的事；
     /// 主动录制的会话什么都记（它录的就是「这台机器上正在发生的过程」）。
     private func recordingNote(
@@ -2096,11 +2060,6 @@ final class AttentionWorkspace: ObservableObject {
         return commit([.sceneSnapshotChanged(sceneSnapshot, at: now)])
     }
 
-    /// 直接提交一份现场快照到事件存储（同步）。
-    @discardableResult
-    func commitSceneSnapshot(_ sceneSnapshot: SceneSnapshot, now: Date = Date()) -> Bool {
-        commit([.sceneSnapshotChanged(sceneSnapshot, at: now)])
-    }
     @discardableResult
     func updateSceneFilterMode(
         for targetID: UUID,

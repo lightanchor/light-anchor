@@ -1120,7 +1120,7 @@ struct SceneReturnPanel: View {
     private func staleWarningText(_ stale: SceneItemStaleness) -> String {
         switch stale {
         case .fresh: ""
-        case .possiblyChanged(let reason), .missing(let reason): reason
+        case .missing(let reason): reason
         }
     }
 

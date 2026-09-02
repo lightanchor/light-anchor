@@ -780,10 +780,6 @@ struct MainWorkspaceView: View {
         showingSwitchWork = true
     }
 
-    private func closeSwitchWork() {
-        showingSwitchWork = false
-    }
-
     private func toggleSwitchWork() {
         showingSwitchWork.toggle()
     }
@@ -3621,25 +3617,6 @@ struct CaptureView: View {
         ) { _ in
             showingTerminationAlert = true
         }
-        .onReceive(
-            NotificationCenter.default.publisher(
-                for: .saveCaptureDraftForTermination
-            )
-        ) { _ in
-            guard showingTerminationAlert else { return }
-            if save() {
-                AppTerminationController.shared.captureDraftDidSaveOrDiscard()
-            }
-        }
-        .onReceive(
-            NotificationCenter.default.publisher(
-                for: .discardCaptureDraftForTermination
-            )
-        ) { _ in
-            guard showingTerminationAlert else { return }
-            discardDraft()
-            AppTerminationController.shared.captureDraftDidSaveOrDiscard()
-        }
         .onChange(of: text) { _, _ in handleDraftContentChange() }
         .onChange(of: linkText) { _, _ in handleDraftContentChange() }
         .onChange(of: selectedFileURL) { _, _ in handleDraftContentChange() }
@@ -3657,7 +3634,7 @@ struct CaptureView: View {
                 if save() {
                     AppTerminationController.shared.captureDraftDidSaveOrDiscard()
                 } else {
-                    AppTerminationController.shared.resolveCaptureDraftDecision(.cancel)
+                    AppTerminationController.shared.cancelCaptureDraftTermination()
                 }
             }
             Button(tr("discard_and_close"), role: .destructive) {
@@ -3665,7 +3642,7 @@ struct CaptureView: View {
                 AppTerminationController.shared.captureDraftDidSaveOrDiscard()
             }
             Button(UserFacingCopy.cancel, role: .cancel) {
-                AppTerminationController.shared.resolveCaptureDraftDecision(.cancel)
+                AppTerminationController.shared.cancelCaptureDraftTermination()
             }
         } message: {
             Text(tr("the_capture_window_still_has_content"))
@@ -4145,7 +4122,7 @@ struct CaptureView: View {
             try? FileManager.default.removeItem(at: voiceURL)
         }
         #endif
-        CaptureDraftCoordinator.shared.discard(draftID: draftID)
+        CaptureDraftCoordinator.shared.end(draftID: draftID)
         closeCapture()
     }
 

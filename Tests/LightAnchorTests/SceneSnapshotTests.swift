@@ -16,6 +16,12 @@ final class SceneSnapshotTests: XCTestCase {
         AttentionWorkspace(store: LocalEventStore(fileURL: temporaryFileURL()))
     }
 
+    /// 生产里现场快照只由异步的 SceneSnapshotBuilder 从实时采集产出；
+    /// 需要固定夹具时直接把事件追加进事件日志，再由 workspace 重新装载。
+    private func seed(_ scenes: [SceneSnapshot], into store: LocalEventStore) throws {
+        try store.save(events: try store.load() + scenes.map { .sceneSnapshotChanged($0, at: $0.capturedAt) })
+    }
+
     private func makeCapsule() -> ContextCapsule {
         let fileURL = URL(fileURLWithPath: "/tmp/light-anchor-plan.md")
         let linkURL = URL(string: "https://developer.apple.com/documentation/foundationmodels")!
@@ -86,7 +92,7 @@ final class SceneSnapshotTests: XCTestCase {
             filterMode: .aiFiltered,
             returnCue: "继续写路线证据矩阵"
         )
-        XCTAssertTrue(workspace.commitSceneSnapshot(snapshot))
+        try seed([snapshot], into: store)
 
         let reloaded = AttentionWorkspace(store: store)
         let restored = reloaded.snapshot.sceneSnapshots[snapshot.id]
@@ -95,24 +101,20 @@ final class SceneSnapshotTests: XCTestCase {
         XCTAssertEqual(restored?.restorableItems.count, 1)
     }
 
-    func testLatestSceneSnapshotPicksNewestPerTarget() {
-        let workspace = makeWorkspace()
-        guard let targetA = workspace.createTarget(name: "目标 A"),
-              let targetB = workspace.createTarget(name: "目标 B") else {
-            XCTFail("目标创建失败")
-            return
-        }
+    func testLatestSceneSnapshotPicksNewestPerTarget() throws {
+        let store = LocalEventStore(fileURL: temporaryFileURL())
+        let workspace = AttentionWorkspace(store: store)
+        let targetA = try XCTUnwrap(workspace.createTarget(name: "目标 A"))
+        let targetB = try XCTUnwrap(workspace.createTarget(name: "目标 B"))
 
         let older = SceneSnapshot(targetID: targetA.id, capturedAt: Date(timeIntervalSinceNow: -100))
         let newer = SceneSnapshot(targetID: targetA.id, capturedAt: Date())
         let other = SceneSnapshot(targetID: targetB.id, capturedAt: Date(timeIntervalSinceNow: 100))
+        try seed([older, newer, other], into: store)
 
-        for snap in [older, newer, other] {
-            XCTAssertTrue(workspace.commitSceneSnapshot(snap))
-        }
-
-        XCTAssertEqual(workspace.snapshot.latestSceneSnapshot(for: targetA.id)?.id, newer.id)
-        XCTAssertEqual(workspace.snapshot.latestSceneSnapshot(for: targetB.id)?.id, other.id)
+        let snapshot = AttentionWorkspace(store: store).snapshot
+        XCTAssertEqual(snapshot.latestSceneSnapshot(for: targetA.id)?.id, newer.id)
+        XCTAssertEqual(snapshot.latestSceneSnapshot(for: targetB.id)?.id, other.id)
     }
 
     func testUpdateSceneFilterModePersistsPerTarget() {
@@ -130,11 +132,12 @@ final class SceneSnapshotTests: XCTestCase {
         XCTAssertEqual(reloaded.snapshot.targets[target.id]?.sceneFilterMode, .saveAll)
     }
 
-    func testToggleSceneItemRelevanceMarksManualSource() {
-        let workspace = makeWorkspace()
+    func testToggleSceneItemRelevanceMarksManualSource() throws {
+        let store = LocalEventStore(fileURL: temporaryFileURL())
         let item = SceneItem(kind: .application, title: "Music", address: "com.apple.Music", isRelevant: false)
         let snapshot = SceneSnapshot(items: [item], filterMode: .aiFiltered)
-        XCTAssertTrue(workspace.commitSceneSnapshot(snapshot))
+        try seed([snapshot], into: store)
+        let workspace = AttentionWorkspace(store: store)
 
         XCTAssertTrue(workspace.toggleSceneItemRelevance(snapshot.id, itemID: item.id))
 
@@ -142,10 +145,11 @@ final class SceneSnapshotTests: XCTestCase {
         XCTAssertEqual(updated?.items.first?.isRelevant, true)
     }
 
-    func testUpdateSceneReturnCue() {
-        let workspace = makeWorkspace()
+    func testUpdateSceneReturnCue() throws {
+        let store = LocalEventStore(fileURL: temporaryFileURL())
         let snapshot = SceneSnapshot(items: [], returnCue: "旧线索")
-        XCTAssertTrue(workspace.commitSceneSnapshot(snapshot))
+        try seed([snapshot], into: store)
+        let workspace = AttentionWorkspace(store: store)
 
         XCTAssertTrue(workspace.updateSceneReturnCue(snapshot.id, returnCue: "把验签测试跑完"))
         XCTAssertEqual(workspace.snapshot.sceneSnapshots[snapshot.id]?.returnCue, "把验签测试跑完")
@@ -280,21 +284,19 @@ final class SceneSnapshotTests: XCTestCase {
             note: "用户备注",
             capturedAt: startedAt
         )
-        let workspace = AttentionWorkspace(
-            store: store,
-            sceneCapturePreferences: SceneCapturePreferences(isAutomaticCapturePaused: true)
-        )
-        let target = try XCTUnwrap(workspace.createTarget(name: "清理测试", now: startedAt))
-        let episode = try XCTUnwrap(workspace.startEpisode(
+        let sceneCapturePreferences = SceneCapturePreferences(isAutomaticCapturePaused: true)
+        let seeding = AttentionWorkspace(store: store, sceneCapturePreferences: sceneCapturePreferences)
+        let target = try XCTUnwrap(seeding.createTarget(name: "清理测试", now: startedAt))
+        let episode = try XCTUnwrap(seeding.startEpisode(
             targetID: target.id,
             context: context,
             now: startedAt
         ))
-        XCTAssertTrue(workspace.pauseEpisode(
+        XCTAssertTrue(seeding.pauseEpisode(
             episode.id,
             now: startedAt.addingTimeInterval(10 * 60)
         ))
-        let waiting = try XCTUnwrap(workspace.beginWaiting(
+        let waiting = try XCTUnwrap(seeding.beginWaiting(
             episodeID: episode.id,
             description: "等待确认",
             now: startedAt.addingTimeInterval(11 * 60)
@@ -305,7 +307,8 @@ final class SceneSnapshotTests: XCTestCase {
             items: [SceneItem(kind: .file, title: "private.swift", address: "file:///tmp/private.swift")],
             capturedAt: startedAt.addingTimeInterval(12 * 60)
         )
-        XCTAssertTrue(workspace.commitSceneSnapshot(scene, now: scene.capturedAt))
+        try seed([scene], into: store)
+        let workspace = AttentionWorkspace(store: store, sceneCapturePreferences: sceneCapturePreferences)
 
         let result = try XCTUnwrap(workspace.clearSceneHistory(
             capturedSince: startedAt.addingTimeInterval(-1)

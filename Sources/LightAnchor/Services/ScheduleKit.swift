@@ -211,9 +211,3 @@ struct ScheduleTimeline: Equatable {
         return day.formatted(.dateTime.month().day().weekday(.abbreviated))
     }
 }
-
-extension AttentionSnapshot {
-    var scheduleTimeline: ScheduleTimeline {
-        ScheduleTimeline.make(from: self)
-    }
-}

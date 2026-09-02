@@ -145,10 +145,6 @@ struct GlobalHotKeyPreferences: Equatable {
         }
     }
 
-    mutating func resetToDefault(for action: GlobalHotKeyAction) {
-        overrides.removeValue(forKey: action)
-    }
-
     // MARK: - 持久化（UserDefaults JSON）
 
     private struct StoredBinding: Codable {

@@ -59,9 +59,8 @@ enum ReleaseUpdateError: LocalizedError {
 /// 公钥随构建打进资源 bundle：`Scripts/build-release.sh` 在拿到
 /// `LIGHTANCHOR_UPDATE_PRIVATE_KEY` 时用 `openssl rsa -pubout` 派生
 /// `Sources/LightAnchor/Resources/update-public.pem`，swift build 会把它一并
-/// 打进 `Bundle.module`。只要内置公钥存在，验证一律以它为准，用户填写的
-/// 公钥路径不再参与——否则任何能改偏好的进程都能换掉信任根。没有内置公钥
-/// 的开发构建才回退到路径字段。
+/// 打进 `Bundle.module`。验证只认这把内置公钥——信任根不接受任何来自偏好的
+/// 覆盖，否则能改偏好的进程就能换掉它。没有内置公钥的开发构建不做更新检查。
 enum ReleaseTrust {
     /// 正式更新清单地址。真实主机尚未定下来，先留 `nil`：为 `nil` 时使用用户
     /// 在设置里填写的地址。定下后写成
@@ -73,7 +72,7 @@ enum ReleaseTrust {
     static let embeddedPublicKeyResourceExtension = "pem"
 
     /// 内置公钥所在位置；开发构建没有 pem 文件时为 `nil`。
-    static var embeddedPublicKeyURL: URL? {
+    private static var embeddedPublicKeyURL: URL? {
         let name = embeddedPublicKeyResourceName
         let ext = embeddedPublicKeyResourceExtension
         return Bundle.module.url(forResource: name, withExtension: ext)
@@ -88,8 +87,6 @@ enum ReleaseTrust {
         else { return nil }
         return data
     }
-
-    static var hasEmbeddedPublicKey: Bool { embeddedPublicKeyData != nil }
 
     /// `SecKeyCreateWithData` 只认 DER（PKCS#1 或 SubjectPublicKeyInfo），
     /// 不认 PEM 文本；`openssl rsa -pubout` 默认输出 PEM，这里统一转成 DER。
@@ -274,8 +271,7 @@ struct ReleaseUpdateClient: Sendable {
 
     func fetchManifest(
         from manifestURL: URL,
-        publicKeyData: Data?,
-        signatureURL: URL? = nil
+        publicKeyData: Data
     ) throws -> ReleaseManifest {
         guard manifestURL.scheme?.lowercased() == "https",
               manifestURL.host != nil
@@ -284,10 +280,9 @@ struct ReleaseUpdateClient: Sendable {
         let manifestData = try get(manifestURL)
         let unsignedManifest = try ReleaseManifestVerifier().decode(manifestData)
         guard unsignedManifest.signed,
-              let signatureInfo = unsignedManifest.signature,
-              let publicKeyData
+              let signatureInfo = unsignedManifest.signature
         else { throw ReleaseUpdateError.signatureRequired }
-        let signaturePath = signatureURL?.absoluteString ?? signatureInfo.filename
+        let signaturePath = signatureInfo.filename
         guard !signaturePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw ReleaseUpdateError.signatureRequired
         }
@@ -423,26 +418,23 @@ struct ReleaseUpdateChecker: Sendable {
 struct ReleaseUpdateSchedule: Codable, Equatable, Sendable {
     var enabled: Bool
     var manifestURL: URL?
-    var publicKeyURL: URL?
     var lastCheckedAt: Date?
     var interval: TimeInterval
 
     init(
         enabled: Bool = false,
         manifestURL: URL? = nil,
-        publicKeyURL: URL? = nil,
         lastCheckedAt: Date? = nil,
         interval: TimeInterval = 24 * 60 * 60
     ) {
         self.enabled = enabled
         self.manifestURL = manifestURL
-        self.publicKeyURL = publicKeyURL
         self.lastCheckedAt = lastCheckedAt
         self.interval = max(interval, 60)
     }
 
     func shouldCheck(now: Date = Date()) -> Bool {
-        guard enabled, manifestURL != nil, publicKeyURL != nil else { return false }
+        guard enabled, manifestURL != nil else { return false }
         guard let lastCheckedAt else { return true }
         return now.timeIntervalSince(lastCheckedAt) >= interval
     }

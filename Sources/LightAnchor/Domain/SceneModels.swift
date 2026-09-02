@@ -137,7 +137,6 @@ struct SceneSnapshot: Codable, Equatable, Identifiable, Sendable {
 /// 单个条目的失效状态。
 enum SceneItemStaleness: Equatable, Sendable {
     case fresh
-    case possiblyChanged(reason: String)
     case missing(reason: String)
 
     var isActionable: Bool {

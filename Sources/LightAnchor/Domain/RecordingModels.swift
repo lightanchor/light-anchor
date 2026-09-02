@@ -184,11 +184,6 @@ struct RecordingSession: Codable, Equatable, Identifiable, Sendable {
         status == .recording || status == .paused
     }
 
-    /// 分享/导出的内容：成稿；没有成稿时给个明确的空说明而不是空文件。
-    var shareableMarkdown: String {
-        markdown.isEmpty ? "# \(title)\n\n\(tr("not_composed_yet_open_to_compose"))" : markdown
-    }
-
     /// 标题转文件名 slug：保留中英文与数字，其余折叠成 "-"。
     static func slug(from title: String) -> String {
         let lowered = title.lowercased()

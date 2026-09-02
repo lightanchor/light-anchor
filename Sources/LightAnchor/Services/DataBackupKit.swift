@@ -75,14 +75,13 @@ enum LocalPreferencesArchive {
         )
     }
 
-    /// 备份里有、恢复时却不写回的键：更新链的地址与公钥路径决定了「谁能告诉
-    /// 这台机器有新版本」，权限缓存是另一台机器的授权状态——都不该跟着一个
-    /// 文件走。备份仍然装着它们，方便人工核对。
+    /// 备份里有、恢复时却不写回的键：更新链的地址决定了「谁能告诉这台机器
+    /// 有新版本」，权限缓存是另一台机器的授权状态——都不该跟着一个文件走。
+    /// 备份仍然装着它们，方便人工核对。
     static var restoreExcludedKeys: Set<String> {
         Set([
             "lightanchor.updateChecksEnabled",
             "lightanchor.updateManifestURL",
-            "lightanchor.updatePublicKeyPath",
             "lightanchor.updateLastCheckedAt"
         ] + PrivacyPermissionCache.allCacheKeys)
     }

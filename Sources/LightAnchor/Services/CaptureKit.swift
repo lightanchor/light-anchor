@@ -24,11 +24,7 @@ enum CaptureServiceError: LocalizedError {
     }
 }
 
-protocol ScreenshotCapturing {
-    func captureSelection() async throws -> Data
-}
-
-struct MacScreenshotCapture: ScreenshotCapturing {
+struct MacScreenshotCapture {
     func captureSelection() async throws -> Data {
         #if os(macOS)
         // 弹窗是 UI，得回主线程发起；而且它只是把人送进系统设置，当场

@@ -1416,13 +1416,12 @@ struct LightAnchorDateField: View {
 struct LightAnchorShellModifier: ViewModifier {
     let radius: CGFloat
     let padding: CGFloat
-    let tint: LightAnchorThemeColor?
     let recessed: Bool
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         content
             .padding(padding)
-            .background(LightAnchorSurfaceFill(shape: shape, tint: tint, recessed: recessed))
+            .background(shape.fill(recessed ? LightAnchorTheme.recessed : LightAnchorTheme.surface))
             .clipShape(shape)
             .overlay {
                 shape.strokeBorder(
@@ -1437,41 +1436,17 @@ struct LightAnchorShellModifier: ViewModifier {
     }
 }
 
-private struct LightAnchorSurfaceFill<S: Shape>: View {
-    let shape: S
-    let tint: LightAnchorThemeColor?
-    let recessed: Bool
-
-    var body: some View {
-        let base = recessed ? LightAnchorTheme.recessed : LightAnchorTheme.surface
-        ZStack {
-            shape.fill(base)
-            if let tint {
-                shape.fill(tint.opacity(recessed ? 0.04 : 0.07))
-            }
-        }
-    }
-}
-
 extension View {
-    func lightAnchorShell(
-        radius: CGFloat = 16,
-        padding: CGFloat = 20,
-        tint: LightAnchorThemeColor? = nil
-    ) -> some View {
-        modifier(LightAnchorShellModifier(radius: radius, padding: padding, tint: tint, recessed: false))
+    func lightAnchorShell(radius: CGFloat, padding: CGFloat) -> some View {
+        modifier(LightAnchorShellModifier(radius: radius, padding: padding, recessed: false))
     }
 
-    func lightAnchorRecessed(radius: CGFloat = 10, padding: CGFloat = 16) -> some View {
-        modifier(LightAnchorShellModifier(radius: radius, padding: padding, tint: nil, recessed: true))
+    func lightAnchorRecessed(radius: CGFloat, padding: CGFloat) -> some View {
+        modifier(LightAnchorShellModifier(radius: radius, padding: padding, recessed: true))
     }
 
-    func lightAnchorPanel(
-        radius: CGFloat = 16,
-        recessed: Bool = false,
-        tint: LightAnchorThemeColor? = nil
-    ) -> some View {
-        modifier(LightAnchorShellModifier(radius: radius, padding: 0, tint: tint, recessed: recessed))
+    func lightAnchorPanel(radius: CGFloat) -> some View {
+        modifier(LightAnchorShellModifier(radius: radius, padding: 0, recessed: false))
     }
 }
 

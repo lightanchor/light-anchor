@@ -50,10 +50,9 @@ enum LocalDataErasure {
             AttentionWorkspace.inboxAutoArchiveDaysKey,
             // 用户手写或生成的回顾正文，属于内容。
             NarrativeStore.storageKey,
-            // 更新链配置：manifest 地址与公钥路径是用户填的，一并清。
+            // 更新链配置：manifest 地址是用户填的，一并清。
             "lightanchor.updateChecksEnabled",
             "lightanchor.updateManifestURL",
-            "lightanchor.updatePublicKeyPath",
             "lightanchor.updateLastCheckedAt"
         ] + PrivacyPermissionCache.allCacheKeys
     }

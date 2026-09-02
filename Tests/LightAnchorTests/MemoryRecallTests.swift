@@ -62,14 +62,30 @@ final class MemoryRecallTests: XCTestCase {
 
     // MARK: - 问答检索（经 workspace 组装）
 
+    /// 生产路径的同步事实拼装：事件日志从 workspace 落盘的 store 重新读回，
+    /// 快照取 workspace 当前投影（与 makeChatQuestionContext 拼装账本/目标事实同源）。
+    @MainActor
+    private func questionContext(
+        _ question: String,
+        store: LocalEventStore,
+        workspace: AttentionWorkspace
+    ) throws -> MemoryQuestionContext {
+        MemoryRecall.questionContext(
+            question: question,
+            events: try store.load(),
+            snapshot: workspace.snapshot
+        )
+    }
+
     @MainActor
     func testQuestionContextCarriesNowLedgerAndTargetHistory() throws {
-        let workspace = AttentionWorkspace(store: LocalEventStore(fileURL: temporaryFileURL()))
+        let store = LocalEventStore(fileURL: temporaryFileURL())
+        let workspace = AttentionWorkspace(store: store)
         let start = Date(timeIntervalSinceNow: -1800)
         let target = try XCTUnwrap(workspace.createTarget(name: "写周报", now: start))
         XCTAssertNotNil(workspace.startEpisode(targetID: target.id, now: start))
 
-        let context = workspace.makeMemoryQuestionContext(question: "写周报花了多久")
+        let context = try questionContext("写周报花了多久", store: store, workspace: workspace)
 
         let labels = Set(context.facts.map(\.label))
         XCTAssertTrue(labels.contains("现在"), "缺当前状态行：\(context.factLines)")
@@ -83,10 +99,11 @@ final class MemoryRecallTests: XCTestCase {
 
     @MainActor
     func testQuestionContextFindsCapturesByKeyword() throws {
-        let workspace = AttentionWorkspace(store: LocalEventStore(fileURL: temporaryFileURL()))
+        let store = LocalEventStore(fileURL: temporaryFileURL())
+        let workspace = AttentionWorkspace(store: store)
         _ = workspace.captureText("蓝点重构要先改侧栏动画", now: Date(timeIntervalSinceNow: -600))
 
-        let context = workspace.makeMemoryQuestionContext(question: "蓝点重构记过什么想法")
+        let context = try questionContext("蓝点重构记过什么想法", store: store, workspace: workspace)
         let captureFacts = context.facts.filter { $0.label == "捕获" }
         XCTAssertFalse(captureFacts.isEmpty, "关键词应命中捕获：\(context.factLines)")
         XCTAssertTrue(captureFacts.contains { $0.text.contains("蓝点重构") })
@@ -137,13 +154,14 @@ final class MemoryRecallTests: XCTestCase {
 
     @MainActor
     func testTargetHistoryDigestAccumulatesAcrossEpisodes() throws {
-        let workspace = AttentionWorkspace(store: LocalEventStore(fileURL: temporaryFileURL()))
+        let store = LocalEventStore(fileURL: temporaryFileURL())
+        let workspace = AttentionWorkspace(store: store)
         let dayAgo = Date(timeIntervalSinceNow: -86_400)
         let target = try XCTUnwrap(workspace.createTarget(name: "整理照片", now: dayAgo))
         let episode = try XCTUnwrap(workspace.startEpisode(targetID: target.id, now: dayAgo))
         XCTAssertTrue(workspace.endEpisode(episode.id, now: dayAgo.addingTimeInterval(1200)))
 
-        let context = workspace.makeMemoryQuestionContext(question: "整理照片这件事做到哪了")
+        let context = try questionContext("整理照片这件事做到哪了", store: store, workspace: workspace)
         let digest = context.facts.first { $0.label == "目标" }
         XCTAssertNotNil(digest)
         XCTAssertTrue(digest?.text.contains("累计专注") ?? false, "\(String(describing: digest))")
@@ -218,7 +236,8 @@ final class MemoryRecallTests: XCTestCase {
 
     @MainActor
     func testArchivedCapturesProjectionAndSearchability() throws {
-        let workspace = AttentionWorkspace(store: LocalEventStore(fileURL: temporaryFileURL()))
+        let store = LocalEventStore(fileURL: temporaryFileURL())
+        let workspace = AttentionWorkspace(store: store)
         let capture = try XCTUnwrap(workspace.captureText("过期的灵感碎片", now: Date(timeIntervalSinceNow: -300)))
         XCTAssertTrue(workspace.archiveCapture(capture.id))
 
@@ -226,7 +245,7 @@ final class MemoryRecallTests: XCTestCase {
         XCTAssertTrue(workspace.snapshot.inbox.isEmpty)
 
         // 归档也进问答检索（scope 全量）。
-        let context = workspace.makeMemoryQuestionContext(question: "灵感碎片去哪了")
+        let context = try questionContext("灵感碎片去哪了", store: store, workspace: workspace)
         XCTAssertTrue(
             context.facts.contains { $0.label == "捕获" && $0.text.contains("归档") },
             context.factLines.joined(separator: "\n")

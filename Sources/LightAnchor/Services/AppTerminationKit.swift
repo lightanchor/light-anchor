@@ -5,12 +5,6 @@ import Foundation
 import AppKit
 #endif
 
-enum CaptureDraftTerminationDecision {
-    case save
-    case discard
-    case cancel
-}
-
 @MainActor
 final class CaptureDraftCoordinator: ObservableObject {
     static let shared = CaptureDraftCoordinator()
@@ -36,10 +30,6 @@ final class CaptureDraftCoordinator: ObservableObject {
         guard activeDraftID == draftID else { return }
         activeDraftID = nil
         hasUnsavedContent = false
-    }
-
-    func discard(draftID: UUID) {
-        end(draftID: draftID)
     }
 }
 
@@ -84,25 +74,11 @@ final class AppTerminationController: ObservableObject {
         return .terminateNow
     }
 
-    func resolveCaptureDraftDecision(
-        _ decision: CaptureDraftTerminationDecision
-    ) {
+    /// 用户在「未保存内容」提示里选了取消（或保存失败）：撤回这次退出。
+    func cancelCaptureDraftTermination() {
         guard terminationPromptPending else { return }
-        switch decision {
-        case .save:
-            NotificationCenter.default.post(
-                name: .saveCaptureDraftForTermination,
-                object: nil
-            )
-        case .discard:
-            NotificationCenter.default.post(
-                name: .discardCaptureDraftForTermination,
-                object: nil
-            )
-        case .cancel:
-            terminationPromptPending = false
-            NSApp.reply(toApplicationShouldTerminate: false)
-        }
+        terminationPromptPending = false
+        NSApp.reply(toApplicationShouldTerminate: false)
     }
 
     func captureDraftDidSaveOrDiscard() {

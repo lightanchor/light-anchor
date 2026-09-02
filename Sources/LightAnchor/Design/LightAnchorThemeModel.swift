@@ -195,61 +195,36 @@ enum LightAnchorThemeRole: String, CaseIterable, Hashable, Sendable {
     case background
     case foreground
     case card
-    case cardForeground
     case popover
-    case popoverForeground
-    case secondary
-    case secondaryForeground
     case muted
     case mutedForeground
     case primary
     case primaryForeground
     case accent
-    case accentForeground
     case destructive
-    case destructiveForeground
     case border
-    case input
-    case ring
     case sidebar
-    case sidebarForeground
-    case sidebarPrimary
-    case sidebarPrimaryForeground
     case sidebarAccent
-    case sidebarAccentForeground
     case sidebarBorder
-    case sidebarRing
     case brand
     case highlight
     case text1
     case text2
     case text3
     case text4
-    case text5
-    case textWhite
     case textRedBold
     case textBlue
     case textBlueBold
     case border100
     case border200
-    case border300
-    case borderWhite
-    case borderGray
     case fill100
     case fill150
     case fill200
-    case fill300
-    case fill400
-    case fill500
-    case fillWhite
-    case fillWhite2
-    case bgGray
     case iconSoft400
     case iconDisabled100
     case iconDisabled300
     case iconSub600
     case iconAmber
-    case errorBase
     case errorDark
     case chart1
     case chart2
@@ -290,17 +265,7 @@ struct LightAnchorThemePalette {
     static let light = LightAnchorThemePalette(theme: .light)
 
     func token(_ name: String) -> String? {
-        if let value = tokenStrings[name] {
-            return value
-        }
-        let camelCase = name.split(separator: "-").enumerated().reduce(into: "") { result, part in
-            if part.offset == 0 {
-                result = String(part.element)
-            } else {
-                result += part.element.prefix(1).uppercased() + part.element.dropFirst()
-            }
-        }
-        return tokenStrings[camelCase]
+        tokenStrings[name]
     }
 
     func color(for role: LightAnchorThemeRole) -> Color {
@@ -311,16 +276,11 @@ struct LightAnchorThemePalette {
 
     private static func tokenName(for role: LightAnchorThemeRole) -> String {
         switch role {
-        case .cardForeground: "cardForeground"
-        case .popoverForeground: "popoverForeground"
-        case .secondaryForeground: "secondaryForeground"
-        case .destructiveForeground: "destructiveForeground"
         case .chart1: "chart-1"
         case .chart2: "chart-2"
         case .chart3: "chart-3"
         case .chart4: "chart-4"
         case .chart5: "chart-5"
-        case .clear: "clear"
         default: role.rawValue
         }
     }
@@ -337,61 +297,36 @@ struct LightAnchorThemePalette {
         "background": "#FBF8F3",
         "foreground": "#3B3644",
         "card": "#FFFFFF",
-        "cardForeground": "#3B3644",
         "popover": "#FFFFFF",
-        "popoverForeground": "#3B3644",
         "primary": "#5BA7CE",
         "primaryForeground": "#FFFFFF",
-        "secondary": "#F0EAE0",
-        "secondaryForeground": "#3B3644",
         "muted": "#F3EFE7",
         "mutedForeground": "#6E6879",
         "accent": "#5BA7CE29",
-        "accentForeground": "#2F7099",
         "destructive": "#B4524B",
-        "destructiveForeground": "#FFFFFF",
         "border": "#E7E0D4",
-        "input": "#E7E0D4",
-        "ring": "#5BA7CE",
         "sidebar": "#F5F1EA",
-        "sidebarForeground": "#3B3644",
-        "sidebarPrimary": "#5BA7CE",
-        "sidebarPrimaryForeground": "#FFFFFF",
         "sidebarAccent": "#EBE4D8",
-        "sidebarAccentForeground": "#3B3644",
         "sidebarBorder": "#EEE8DD",
-        "sidebarRing": "#5BA7CE",
         "brand": "#5BA7CE",
         "highlight": "#F6E3AE",
         "text1": "#3B3644",
         "text2": "#6E6879",
         "text3": "#6E6879",
         "text4": "#ACA6B8",
-        "text5": "#B9B3C2",
-        "textWhite": "#FFFFFF",
         "textRedBold": "#8E3A34",
         "textBlue": "#2F7099",
         "textBlueBold": "#275E80",
         "border100": "#3B364414",
         "border200": "#3B364424",
-        "border300": "#3B364442",
-        "borderWhite": "#FFFFFF",
-        "borderGray": "#E7E0D4",
         "fill100": "#3B36440A",
         "fill150": "#3B36441A",
         "fill200": "#3B364433",
-        "fill300": "#3B364466",
-        "fill400": "#3B364499",
-        "fill500": "#3B3644",
-        "fillWhite": "#FFFFFF",
-        "fillWhite2": "#FFFFFFB3",
-        "bgGray": "#F3EFE7",
         "iconSoft400": "#6E6879",
         "iconDisabled100": "#C3BECC",
         "iconDisabled300": "#9A94A6",
         "iconSub600": "#55505F",
         "iconAmber": "#F6E3AE",
-        "errorBase": "#D06A5F",
         "errorDark": "#A84A43",
         "chart-1": "#5BA7CE",
         "chart-2": "#3E9B4F",
@@ -412,61 +347,36 @@ struct LightAnchorThemePalette {
         "background": "#211E28",
         "foreground": "#ECE8F1",
         "card": "#2A2733",
-        "cardForeground": "#ECE8F1",
         "popover": "#322E3C",
-        "popoverForeground": "#ECE8F1",
         "primary": "#79C0E6",
         "primaryForeground": "#142430",
-        "secondary": "#2C2935",
-        "secondaryForeground": "#ECE8F1",
         "muted": "#262330",
         "mutedForeground": "#A49DB0",
         "accent": "#79C0E624",
-        "accentForeground": "#A8D6F2",
         "destructive": "#E08A80",
-        "destructiveForeground": "#211E28",
         "border": "#35313F",
-        "input": "#35313F",
-        "ring": "#79C0E6",
         "sidebar": "#1C1922",
-        "sidebarForeground": "#ECE8F1",
-        "sidebarPrimary": "#79C0E6",
-        "sidebarPrimaryForeground": "#142430",
         "sidebarAccent": "#322E3C",
-        "sidebarAccentForeground": "#ECE8F1",
         "sidebarBorder": "#2E2A38",
-        "sidebarRing": "#79C0E6",
         "brand": "#79C0E6",
         "highlight": "#E8C26A29",
         "text1": "#ECE8F1",
         "text2": "#A49DB0",
         "text3": "#A49DB0",
         "text4": "#746D82",
-        "text5": "#655E73",
-        "textWhite": "#ECE8F1",
         "textRedBold": "#EFA79E",
         "textBlue": "#A8D6F2",
         "textBlueBold": "#C1E2F7",
         "border100": "#ECE8F114",
         "border200": "#ECE8F124",
-        "border300": "#ECE8F142",
-        "borderWhite": "#ECE8F1",
-        "borderGray": "#35313F",
         "fill100": "#ECE8F10A",
         "fill150": "#ECE8F11A",
         "fill200": "#ECE8F133",
-        "fill300": "#ECE8F166",
-        "fill400": "#ECE8F199",
-        "fill500": "#ECE8F1",
-        "fillWhite": "#ECE8F1",
-        "fillWhite2": "#ECE8F1B3",
-        "bgGray": "#262330",
         "iconSoft400": "#A49DB0",
         "iconDisabled100": "#5B5468",
         "iconDisabled300": "#746D82",
         "iconSub600": "#BEB8CA",
         "iconAmber": "#E8C26A",
-        "errorBase": "#E08A80",
         "errorDark": "#EFA79E",
         "chart-1": "#79C0E6",
         "chart-2": "#6DBF7C",
