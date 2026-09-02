@@ -59,14 +59,12 @@ final class LocalDiagnostics: @unchecked Sendable {
     }
 
     func installUncaughtExceptionHandler() {
-        #if os(macOS)
         NSSetUncaughtExceptionHandler { exception in
             LocalDiagnostics.shared.record(
                 operation: "uncaught-exception",
                 message: "\(exception.name.rawValue): \(exception.reason ?? "unknown")"
             )
         }
-        #endif
     }
 
     func exportData(maximumEvents: Int = 200) throws -> Data {

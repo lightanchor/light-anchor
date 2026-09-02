@@ -1,8 +1,6 @@
 import Foundation
 
-#if os(macOS)
 import CoreGraphics
-#endif
 
 enum CaptureServiceError: LocalizedError {
     case unavailable
@@ -26,7 +24,6 @@ enum CaptureServiceError: LocalizedError {
 
 struct MacScreenshotCapture {
     func captureSelection() async throws -> Data {
-        #if os(macOS)
         // 弹窗是 UI，得回主线程发起；而且它只是把人送进系统设置，当场
         // 不会变成「已授权」，所以这一趟截图照样按缺权限处理。
         if !CGPreflightScreenCaptureAccess() {
@@ -65,9 +62,6 @@ struct MacScreenshotCapture {
                 }
             }
         }
-        #else
-        throw CaptureServiceError.unavailable
-        #endif
     }
 }
 

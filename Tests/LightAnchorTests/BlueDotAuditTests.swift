@@ -346,7 +346,6 @@ final class BlueDotAuditTests: XCTestCase {
         }
     }
 
-
     // MARK: - 3. 打包（与设计无关，原样保留）
 
     func testAppSmokeUsesAnIsolatedBundleIdentity() throws {

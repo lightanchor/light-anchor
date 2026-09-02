@@ -58,7 +58,6 @@ final class AttentionWorkspace: ObservableObject {
         self.assetStore = assetStore ?? LocalAssetStore()
         self.recordingTraceStore = recordingTraceStore ?? RecordingTraceStore()
         self.sceneCapturePreferences = sceneCapturePreferences ?? .load()
-        #if os(macOS)
         self.contextCapture = contextCapture ?? { intelligence, sourcePreferences in
             MacContextRecorder().capture(
                 options: ContextCaptureOptions(
@@ -67,9 +66,6 @@ final class AttentionWorkspace: ObservableObject {
                 )
             ).capsule
         }
-        #else
-        self.contextCapture = contextCapture ?? { _, _ in ContextCapsule() }
-        #endif
 
         do {
             let loadedEvents = try store.load()
@@ -112,9 +108,7 @@ final class AttentionWorkspace: ObservableObject {
 
     func runBackgroundMaintenance(now: Date = Date()) {
         _ = archiveConfiguredInbox(now: now)
-        #if os(macOS)
         backfillCaptureText()
-        #endif
         backfillInboxOrganization()
         startActiveWaitingMonitors()
         scheduledTaskCoordinator.startMonitoringScheduledTasks(now: now)
@@ -730,11 +724,9 @@ final class AttentionWorkspace: ObservableObject {
            previousEpisode.id != episode.id {
             scheduleSceneAutoCapture(for: previousEpisode.id, announcingSetAside: true)
         }
-        #if os(macOS)
         transitionNotifications.forEach {
             WaitingNotificationService().notifyIfAllowed($0, isTransition: true)
         }
-        #endif
         return episode
     }
 
@@ -1301,11 +1293,9 @@ final class AttentionWorkspace: ObservableObject {
         if shouldCapturePreviousScene, let previousEpisode {
             scheduleSceneAutoCapture(for: previousEpisode.id, announcingSetAside: true)
         }
-        #if os(macOS)
         transitionNotifications.forEach {
             WaitingNotificationService().notifyIfAllowed($0, isTransition: true)
         }
-        #endif
         return target
     }
 
@@ -1464,9 +1454,7 @@ final class AttentionWorkspace: ObservableObject {
         let committed = commit([
             .waitingChanged(waiting, at: now)
         ])
-        #if os(macOS)
         if committed { WaitingNotificationService().notifyIfAllowed(waiting) }
-        #endif
         if committed {
             recordingNote(
                 kind: .waiting,
@@ -1665,9 +1653,7 @@ final class AttentionWorkspace: ObservableObject {
             .scheduledTaskChanged(rolled, at: now),
             .scheduledFireChanged(fire, at: now)
         ]) else { return }
-        #if os(macOS)
         ScheduledTaskNotificationService().notifyFired(rolled, firedAt: now)
-        #endif
         if let persisted = snapshot.scheduledTasks[taskID], persisted.status == .scheduled {
             scheduledTaskCoordinator.startMonitoring(persisted)
         }
@@ -1966,7 +1952,6 @@ final class AttentionWorkspace: ObservableObject {
         )
         sceneSnapshot.episodeID = episode.id
 
-        #if os(macOS)
         // 「保存窗口截图」：切走瞬间存一张全桌面截图进现场舱。
         // 每个目标只留最新一张，换新时删旧文件。
         let previousScreenshotURL = snapshot
@@ -1979,20 +1964,15 @@ final class AttentionWorkspace: ObservableObject {
            let storedURL = try? assetStore.save(data: imageData, fileExtension: "jpg") {
             sceneSnapshot.screenshotAssetURL = storedURL
         }
-        #endif
 
         guard commit([.sceneSnapshotChanged(sceneSnapshot, at: now)]) else {
-            #if os(macOS)
             assetStore.removeIfPresent(at: sceneSnapshot.screenshotAssetURL)
-            #endif
             return sceneSnapshot
         }
-        #if os(macOS)
         if let previousScreenshotURL,
            previousScreenshotURL != sceneSnapshot.screenshotAssetURL {
             assetStore.removeIfPresent(at: previousScreenshotURL)
         }
-        #endif
         return sceneSnapshot
     }
 
@@ -2283,7 +2263,6 @@ final class AttentionWorkspace: ObservableObject {
             _ = resumeWaitingEpisode(waitingID, now: now)
         }
 
-        #if os(macOS)
         let restorer = MacContextRestorer()
         var capsule = ContextCapsule(capturedAt: sceneSnapshot.capturedAt)
         capsule.note = sceneSnapshot.returnCue
@@ -2311,9 +2290,6 @@ final class AttentionWorkspace: ObservableObject {
             }
         }
         return restorer.restore(capsule)
-        #else
-        return ContextRestoreReport()
-        #endif
     }
 
     private func commit(_ newEvents: [AttentionEvent]) -> Bool {

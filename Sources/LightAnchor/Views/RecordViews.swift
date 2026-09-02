@@ -1,7 +1,5 @@
 import SwiftUI
-#if os(macOS)
 import AppKit
-#endif
 
 // MARK: - 过程记录（回顾页区块 + 详情）
 //
@@ -359,21 +357,17 @@ struct RecordingDetailView: View {
 enum RecordingExport {
     @MainActor
     static func copy(markdown: String) {
-        #if os(macOS)
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(markdown, forType: .string)
-        #endif
     }
 
     @MainActor
     static func saveToFile(markdown: String, fileName: String) {
-        #if os(macOS)
         let panel = NSSavePanel()
         panel.nameFieldStringValue = fileName
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
         try? markdown.data(using: .utf8)?.write(to: url, options: .atomic)
-        #endif
     }
 }

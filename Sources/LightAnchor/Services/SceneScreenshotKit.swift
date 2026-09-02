@@ -1,6 +1,5 @@
 import Foundation
 
-#if os(macOS)
 import AppKit
 import CoreGraphics
 
@@ -98,4 +97,3 @@ enum SceneScreenshotRecorder {
 
     private static let minimumWindowDimension: CGFloat = 16
 }
-#endif

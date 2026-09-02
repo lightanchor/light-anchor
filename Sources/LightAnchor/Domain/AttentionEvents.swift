@@ -249,7 +249,6 @@ struct AttentionSnapshot: Codable, Equatable {
     var episodeFocusSince: [UUID: Date] = [:]
     var currentEpisodeID: UUID?
 
-
     static func replay(_ events: [AttentionEvent]) -> Self {
         var snapshot = Self()
         events.forEach { snapshot.apply($0) }

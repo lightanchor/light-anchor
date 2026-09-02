@@ -1,7 +1,5 @@
 import Foundation
-#if os(macOS)
 import AppKit
-#endif
 
 /// 界面文案的本地化入口。key 是稳定的英文标识符（如 "save"、"cloud_configuration_ready"），
 /// 不再用中文原文当 key。简体中文是开发语言：zh-Hans 表是唯一事实源，
@@ -92,7 +90,6 @@ enum AppLanguage: String, CaseIterable, Identifiable {
         return language != previous
     }
 
-    #if os(macOS)
     /// 重启应用让语言生效：先起一个新实例，再退出当前实例。
     /// NSApp / NSWorkspace 都是主线程独占的（macOS 15 SDK 起编译器会强制），
     /// 所以整个函数挂在主 actor 上——调用点本来就在 SwiftUI 的按钮动作里。
@@ -111,5 +108,4 @@ enum AppLanguage: String, CaseIterable, Identifiable {
             Task { @MainActor in NSApp.terminate(nil) }
         }
     }
-    #endif
 }

@@ -1,8 +1,6 @@
 import SwiftUI
 
-#if os(macOS)
 import AppKit
-#endif
 
 // MARK: - 现场清单卡片
 //
@@ -406,12 +404,10 @@ struct SceneClipboardRow: View {
             }
             Spacer(minLength: 10)
             Button(justCopied ? tr("put_back") : tr("put_back_on_clipboard")) {
-                #if os(macOS)
                 let pasteboard = NSPasteboard.general
                 pasteboard.clearContents()
                 pasteboard.setString(text, forType: .string)
                 justCopied = true
-                #endif
             }
             .buttonStyle(LightAnchorQuietButtonStyle(compact: true))
             .disabled(justCopied)
@@ -434,7 +430,6 @@ struct SceneScreenshotRow: View {
     }
 
     var body: some View {
-        #if os(macOS)
         if let url = availableURL, let image = NSImage(contentsOf: url) {
             Button {
                 NSWorkspace.shared.open(url)
@@ -467,7 +462,6 @@ struct SceneScreenshotRow: View {
             .background(LightAnchorTheme.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .accessibilityLabel(tr("view_the_desktop_screenshot_from_when"))
         }
-        #endif
     }
 }
 
@@ -693,7 +687,6 @@ private struct SceneItemIconView: View {
     var isTucked: Bool = false
 
     var body: some View {
-        #if os(macOS)
         if let image = SceneItemIconResolver.icon(for: item) {
             // 17pt：应用图标自带内边距，画到 17 视觉上才和瓦片同一量级。
             Image(nsImage: image)
@@ -706,13 +699,9 @@ private struct SceneItemIconView: View {
         } else {
             SceneGlyphTile(name: item.kind.iconName, dimmed: isTucked)
         }
-        #else
-        SceneGlyphTile(name: item.kind.iconName, dimmed: isTucked)
-        #endif
     }
 }
 
-#if os(macOS)
 /// 只在主线程的视图渲染路径里被调用，缓存也就锚在 MainActor 上。
 @MainActor
 enum SceneItemIconResolver {
@@ -788,7 +777,6 @@ enum SceneItemIconResolver {
         return nil
     }
 }
-#endif
 
 // MARK: - 筛选模式切换
 

@@ -1,9 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-#if os(macOS)
 import AppKit
-#endif
 
 struct MainWorkspaceView: View {
     @EnvironmentObject private var workspace: AttentionWorkspace
@@ -1466,7 +1464,6 @@ struct MainWorkspaceView: View {
     }
 
     private func restore(_ context: ContextCapsule) {
-        #if os(macOS)
         // AX 查询会阻塞（等窗口出现要轮询），所以恢复放后台跑；结果回主线程再报。
         // 原先是 DispatchQueue.main.async 里直接摸 @MainActor 的 workspace——
         // 那次递手编译器管不到，写成结构化并发才由它检查。
@@ -1478,17 +1475,13 @@ struct MainWorkspaceView: View {
                 report.hasIssues ? UserFacingCopy.limitation(report.summary) : report.summary
             )
         }
-        #endif
     }
 
     private func openCaptureWindow() {
-        #if os(macOS)
         CaptureContextStore.shared.prepare()
-        #endif
         openWindow(id: "capture")
     }
 
-    #if os(macOS)
     /// 调试后门（截图/验收用）：菜单栏浮窗内容装进浮动面板——
     /// 真状态项可能被菜单栏溢出折叠，自动化点不到。
     private func openMenuBarPreviewPanel() {
@@ -1514,7 +1507,6 @@ struct MainWorkspaceView: View {
         panel.setFrameOrigin(NSPoint(x: 240, y: 420))
         panel.orderFrontRegardless()
     }
-    #endif
 
     private func showWaitingEditor() {
         guard let episode = workspace.currentEpisode else {
@@ -1732,7 +1724,6 @@ private struct NowSpaceView: View {
             }
         }
     }
-
 
     private var emptyState: some View {
         VStack(spacing: 0) {
@@ -2561,7 +2552,6 @@ private struct CaptureAttachmentRow: View {
     }
 
     var body: some View {
-        #if os(macOS)
         if let url = availableURL {
             Button {
                 NSWorkspace.shared.open(url)
@@ -2597,7 +2587,6 @@ private struct CaptureAttachmentRow: View {
             .help(tr("open_the_attachment_with_the_system"))
             .accessibilityLabel(attachmentLabel)
         }
-        #endif
     }
 
     private var attachmentLabel: String {
@@ -3298,7 +3287,6 @@ private struct WorkDetailsView: View {
     }
 }
 
-
 private struct CaptureTargetEditorView: View {
     @EnvironmentObject private var workspace: AttentionWorkspace
     @Environment(\.dismiss) private var dismiss
@@ -3450,7 +3438,6 @@ private struct CaptureWaitingEditorView: View {
         .foregroundStyle(LightAnchorTheme.ink)
     }
 }
-
 
 struct WaitingEditorView: View {
     @EnvironmentObject private var workspace: AttentionWorkspace
@@ -3912,7 +3899,6 @@ struct CaptureView: View {
             }
 
         case .voice:
-            #if os(macOS)
             VStack(alignment: .leading, spacing: 8) {
                 Button {
                     if isRecordingVoice {
@@ -3935,9 +3921,6 @@ struct CaptureView: View {
                         .foregroundStyle(LightAnchorTheme.mutedInk)
                 }
             }
-            #else
-            EmptyView()
-            #endif
         }
     }
 
@@ -3980,7 +3963,6 @@ struct CaptureView: View {
         }
     }
 
-    #if os(macOS)
     private func startVoiceCapture() {
         errorMessage = nil
         Task {
@@ -4016,7 +3998,6 @@ struct CaptureView: View {
             }
         }
     }
-    #endif
 
     @discardableResult
     private func save() -> Bool {
@@ -4097,31 +4078,25 @@ struct CaptureView: View {
         if !selectedTags.isEmpty {
             _ = workspace.setCaptureTags(capture.id, tags: selectedTags)
         }
-        #if os(macOS)
         if let voiceURL = voiceResult?.audioURL {
             try? FileManager.default.removeItem(at: voiceURL)
         }
-        #endif
         CaptureDraftCoordinator.shared.end(draftID: draftID)
         closeCapture()
-        #if os(macOS)
         // 「保存后回到原上下文」由设置页开关控制（样机 setrow，默认开）。
         if UserDefaults.standard.object(
             forKey: LightAnchorCaptureReturnPreference.storageKey
         ) as? Bool ?? true {
             returnFocusToSourceApplication()
         }
-        #endif
         return true
     }
 
     private func discardDraft() {
-        #if os(macOS)
         voiceSession?.cancel()
         if let voiceURL = voiceResult?.audioURL {
             try? FileManager.default.removeItem(at: voiceURL)
         }
-        #endif
         CaptureDraftCoordinator.shared.end(draftID: draftID)
         closeCapture()
     }
@@ -4157,7 +4132,6 @@ struct CaptureView: View {
         sourceContext
     }
 
-    #if os(macOS)
     /// 把焦点还给捕获前那个应用。捕获窗刚关，等一帧再激活，否则窗口关闭本身
     /// 会把焦点再抢回来。失败只记诊断、不弹提示：这时用户已经在别的应用里干活，
     /// 一条回不到工作区的提示只会晚点冒出来打断人。
@@ -4178,10 +4152,8 @@ struct CaptureView: View {
             )
         }
     }
-    #endif
 
     private func loadSourceContext() {
-        #if os(macOS)
         if let observation = CaptureContextStore.shared.consume() {
             sourceContext = observation.capsule
             sourceApplicationBundleIdentifier = observation.sourceApplicationBundleIdentifier
@@ -4195,9 +4167,6 @@ struct CaptureView: View {
         sourceContext = observation.capsule
         sourceApplicationBundleIdentifier = observation.sourceApplicationBundleIdentifier
         sourceProcessIdentifier = observation.sourceProcessIdentifier
-        #else
-        sourceContext = ContextCapsule()
-        #endif
     }
 }
 
@@ -4402,9 +4371,7 @@ struct MenuBarView: View {
     }
 
     private func openCaptureWindow() {
-        #if os(macOS)
         CaptureContextStore.shared.prepare()
-        #endif
         openWindow(id: "capture")
     }
 }

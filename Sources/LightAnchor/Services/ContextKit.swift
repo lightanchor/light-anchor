@@ -101,7 +101,6 @@ enum RestoreItemPolicy {
     }
 }
 
-#if os(macOS)
 import ApplicationServices
 import AppKit
 
@@ -1253,4 +1252,3 @@ final class CaptureContextStore: @unchecked Sendable {
         return observation
     }
 }
-#endif

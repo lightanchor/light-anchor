@@ -1,6 +1,5 @@
 import Foundation
 
-#if os(macOS)
 import EventKit
 
 // MARK: - 日历读取（EventKit）
@@ -66,4 +65,3 @@ final class CalendarEventReader {
             .map { $0 }
     }
 }
-#endif

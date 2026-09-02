@@ -206,11 +206,9 @@ struct IntelligenceView: View {
 
     /// 截图开关的文案随权限状态变化：没权限时说清打开后会发生什么。
     private var screenshotToggleDetail: String {
-        #if os(macOS)
         if !SceneScreenshotRecorder.hasPermission {
             return tr("saves_one_desktop_screenshot_with_the_2")
         }
-        #endif
         return tr("saves_one_desktop_screenshot_with_the")
     }
 
@@ -220,11 +218,9 @@ struct IntelligenceView: View {
             get: { preferences.saveWindowScreenshot },
             set: { enabled in
                 preferences.saveWindowScreenshot = enabled
-                #if os(macOS)
                 if enabled, !SceneScreenshotRecorder.hasPermission {
                     Task { await SceneScreenshotRecorder.requestPermission() }
                 }
-                #endif
             }
         )
     }

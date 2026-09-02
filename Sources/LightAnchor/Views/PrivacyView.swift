@@ -1,9 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-#if os(macOS)
 import AppKit
-#endif
 
 struct PrivacyView: View {
     @EnvironmentObject private var workspace: AttentionWorkspace
@@ -39,7 +37,6 @@ struct PrivacyView: View {
                                     }
                                     .buttonStyle(LightAnchorPrimaryButtonStyle(compact: true))
                                 }
-                                #if os(macOS)
                                 if let settingsURL = capability.systemSettingsURL,
                                    shouldShowSettings(for: statuses[capability]) {
                                     Button(tr("open_system_settings")) {
@@ -47,7 +44,6 @@ struct PrivacyView: View {
                                     }
                                     .buttonStyle(LightAnchorQuietButtonStyle(compact: true))
                                 }
-                                #endif
                             }
                             if capability != PrivacyCapability.allCases.last {
                                 settingsRowDivider
@@ -238,7 +234,6 @@ struct PrivacyView: View {
 
     private var listedApplications: [ListedApplication] {
         capturePreferences.applicationBundleIdentifiers.sorted().map { bundleID in
-            #if os(macOS)
             if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
                 return ListedApplication(
                     id: bundleID,
@@ -247,7 +242,6 @@ struct PrivacyView: View {
                     isInstalled: true
                 )
             }
-            #endif
             // 已卸载的应用没有图标和名字，如实标出来而不是悄悄丢掉规则。
             return ListedApplication(id: bundleID, name: bundleID, icon: nil, isInstalled: false)
         }
@@ -256,7 +250,6 @@ struct PrivacyView: View {
     /// 「添加应用」菜单的主菜品：正在运行的普通应用（这正是用户此刻
     /// 想排除的那个），已在清单里的不再重复出现。
     private var runningApplicationCandidates: [RunningApplicationCandidate] {
-        #if os(macOS)
         let listed = capturePreferences.applicationBundleIdentifiers
         var seen: Set<String> = []
         return NSWorkspace.shared.runningApplications
@@ -274,9 +267,6 @@ struct PrivacyView: View {
                 )
             }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        #else
-        return []
-        #endif
     }
 
     private var applicationListRow: some View {
@@ -369,7 +359,6 @@ struct PrivacyView: View {
     }
 
     private func applicationDisplayName(at url: URL) -> String {
-        #if os(macOS)
         if let displayName = Bundle(url: url)?.object(
             forInfoDictionaryKey: "CFBundleDisplayName"
         ) as? String,
@@ -382,7 +371,6 @@ struct PrivacyView: View {
                 ? String(fileDisplayName.dropLast(4))
                 : fileDisplayName
         }
-        #endif
         return url.deletingPathExtension().lastPathComponent
     }
 
@@ -397,7 +385,6 @@ struct PrivacyView: View {
     }
 
     private func chooseApplicationsFromFinder() {
-        #if os(macOS)
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
         panel.canChooseFiles = true
@@ -408,7 +395,6 @@ struct PrivacyView: View {
         guard !bundleIDs.isEmpty else { return }
         capturePreferences.applicationBundleIdentifiers.formUnion(bundleIDs)
         saveCapturePreferences()
-        #endif
     }
 
     // MARK: - 网站清单
@@ -568,13 +554,11 @@ struct PrivacyView: View {
         if capability.requiresRelaunchAfterGrant {
             lines.append(tr("this_one_takes_effect_after_you_relaunch"))
         }
-        #if os(macOS)
         // ad-hoc / 裸可执行文件每次重新构建签名都变，系统设置里那条旧授权
         // 会留着却对不上新包：不说清楚，用户会以为是应用坏了。
         if capability == .accessibility, AppSignatureFacts.grantsMayNotStick {
             lines.append(tr("this_build_is_ad_hoc_signed_remove_and_re_add"))
         }
-        #endif
         return lines.joined(separator: "\n")
     }
 

@@ -78,8 +78,6 @@ final class FocusLedgerTests: XCTestCase {
         XCTAssertEqual(durations[calendar.startOfDay(for: t0)].map { Int($0 / 60) }, 25)
     }
 
-
-
     // MARK: - Helpers
 
     /// 固定在「昨天 hour:minute」的工作区，避免跨越现在或未来。

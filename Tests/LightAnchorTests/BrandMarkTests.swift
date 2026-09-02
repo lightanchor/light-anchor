@@ -37,7 +37,6 @@ final class BrandMarkTests: XCTestCase {
 
     // MARK: - 菜单栏
 
-
     @MainActor
     func testStatusItemImageIsATemplateSizedForTheMenuBar() {
         for state in LightAnchorMarkState.allCases {

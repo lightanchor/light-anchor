@@ -1,8 +1,6 @@
 import Foundation
 
-#if os(macOS)
 import Vision
-#endif
 
 /// 截图文字提取：本机 Vision OCR（中英），让截图变得可检索。
 /// 完全离线，不产生网络流量；识别不出内容时返回 nil。
@@ -10,16 +8,11 @@ enum CaptureTextExtractor {
     static let maximumCharacters = 4_000
 
     static func extractText(from fileURL: URL) async -> String? {
-        #if os(macOS)
         await Task.detached(priority: .utility) {
             recognizeText(at: fileURL)
         }.value
-        #else
-        nil
-        #endif
     }
 
-    #if os(macOS)
     private static func recognizeText(at fileURL: URL) -> String? {
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
@@ -37,5 +30,4 @@ enum CaptureTextExtractor {
         guard !text.isEmpty else { return nil }
         return String(text.prefix(maximumCharacters))
     }
-    #endif
 }

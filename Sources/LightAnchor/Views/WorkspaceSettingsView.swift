@@ -242,9 +242,7 @@ private struct AppearanceSettingsPane: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .alert(Text(tr("reopen_the_app")), isPresented: $showingRelaunchPrompt) {
             Button(tr("reopen_now")) {
-                #if os(macOS)
                 AppLanguage.relaunchApp()
-                #endif
             }
             Button(tr("later"), role: .cancel) {}
         } message: {

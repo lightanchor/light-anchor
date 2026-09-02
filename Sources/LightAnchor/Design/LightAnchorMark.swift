@@ -49,7 +49,6 @@ enum LightAnchorMark {
         red: 0x5B / 255, green: 0xA7 / 255, blue: 0xCE / 255, alpha: 1
     )
 
-
     /// 标记的外接框，用于等比适配到目标矩形。
     static var bounds: CGRect {
         squareRect.union(CGRect(

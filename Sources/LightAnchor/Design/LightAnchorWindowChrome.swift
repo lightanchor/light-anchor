@@ -1,4 +1,3 @@
-#if os(macOS)
 import AppKit
 import SwiftUI
 
@@ -174,4 +173,3 @@ final class LightAnchorWindowProbe: NSView {
         }
     }
 }
-#endif

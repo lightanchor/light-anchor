@@ -1,9 +1,7 @@
 import CryptoKit
 import Foundation
 
-#if os(macOS)
 import Security
-#endif
 
 struct ReleaseArtifact: Codable, Equatable, Sendable {
     let filename: String
@@ -130,7 +128,6 @@ struct ReleaseManifestVerifier {
             throw ReleaseUpdateError.invalidSignature
         }
 
-        #if os(macOS)
         let attributes: [String: Any] = [
             kSecAttrKeyType as String: kSecAttrKeyTypeRSA,
             kSecAttrKeyClass as String: kSecAttrKeyClassPublic
@@ -159,9 +156,6 @@ struct ReleaseManifestVerifier {
             throw ReleaseUpdateError.invalidSignature
         }
         return manifest
-        #else
-        throw ReleaseUpdateError.invalidSignature
-        #endif
     }
 
     func decode(_ data: Data) throws -> ReleaseManifest {

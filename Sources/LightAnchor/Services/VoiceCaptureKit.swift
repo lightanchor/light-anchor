@@ -1,6 +1,5 @@
 import Foundation
 
-#if os(macOS)
 import AVFoundation
 import Speech
 
@@ -186,4 +185,3 @@ private final class TranscriptionState: @unchecked Sendable {
         pending?.resume(throwing: CancellationError())
     }
 }
-#endif

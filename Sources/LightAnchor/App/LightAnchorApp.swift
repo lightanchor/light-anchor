@@ -2,10 +2,8 @@ import SwiftUI
 
 @main
 struct LightAnchorApp: App {
-    #if os(macOS)
     @NSApplicationDelegateAdaptor(LightAnchorApplicationDelegate.self)
     private var applicationDelegate
-    #endif
 
     @StateObject private var workspace: AttentionWorkspace
     @StateObject private var themeController: LightAnchorThemeController
@@ -32,9 +30,7 @@ struct LightAnchorApp: App {
             case .capture:
                 // 必须在按键这一刻同步采：通知是异步投递的，而激活轻锚会把
                 // 「刚才在用哪个应用」这个事实抹掉。
-                #if os(macOS)
                 CaptureContextStore.shared.prepare()
-                #endif
                 NotificationCenter.default.post(name: .openCaptureWindow, object: nil)
             case .openMainWindow:
                 NotificationCenter.default.post(name: .openMainWindow, object: nil)
@@ -170,9 +166,7 @@ private struct LightAnchorCommands: Commands {
 
         CommandMenu(tr("workspace")) {
             Button(tr("capture_a_thought")) {
-                #if os(macOS)
                 CaptureContextStore.shared.prepare()
-                #endif
                 openWindow(id: "capture")
             }
             .keyboardShortcut("n", modifiers: [.option, .command])

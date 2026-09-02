@@ -1,8 +1,6 @@
 import Foundation
 
-#if os(macOS)
 import Darwin
-#endif
 
 enum ProcessExecutionError: LocalizedError {
     case failed(String)
@@ -50,11 +48,9 @@ private final class CancellableProcessHandle: @unchecked Sendable {
     static func stop(_ process: Process?) {
         guard let process, process.isRunning else { return }
         process.terminate()
-        #if os(macOS)
         if process.processIdentifier > 0 {
             _ = kill(-process.processIdentifier, SIGTERM)
         }
-        #endif
     }
 
     var isCancelled: Bool {
@@ -155,9 +151,7 @@ enum ProcessExecutionSupport {
 
                     do {
                         try process.run()
-                        #if os(macOS)
                         _ = setpgid(process.processIdentifier, process.processIdentifier)
-                        #endif
                         if !handle.markLaunched() {
                             CancellableProcessHandle.stop(process)
                         }

@@ -10,7 +10,6 @@
 // 处理器只认编译期抽取，所以这个文件里的 title / description / phrases 必须是
 // 字面量，不能经 tr() 之类的函数算出来。
 
-#if os(macOS)
 import AppIntents
 
 /// 工作区拒绝动作时抛给「快捷指令」，让它把原因原样显示出来，而不是默默报成功。
@@ -112,4 +111,3 @@ struct LightAnchorAppShortcuts: AppShortcutsProvider {
         )
     }
 }
-#endif

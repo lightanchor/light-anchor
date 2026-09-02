@@ -1,9 +1,7 @@
 import Foundation
 import XCTest
 @testable import LightAnchor
-#if os(macOS)
 import CoreGraphics
-#endif
 
 /// 采集与恢复两端的隐私 / 安全护栏：终端命令与剪贴板脱敏、链接去 token、
 /// 恢复端白名单、截图排除规则、快捷指令参数、端侧语音识别错误。
@@ -20,7 +18,6 @@ final class CapturePrivacyTests: XCTestCase {
         try? FileManager.default.removeItem(at: temporaryDirectory)
     }
 
-    #if os(macOS)
     // MARK: - 终端命令
 
     func testTerminalCommandIsRedactedBeforeTruncation() {
@@ -84,7 +81,6 @@ final class CapturePrivacyTests: XCTestCase {
         XCTAssertFalse(MacContextRecorder.isClipboardSensitiveApplication("com.apple.Safari"))
         XCTAssertFalse(MacContextRecorder.isClipboardSensitiveApplication(""))
     }
-    #endif
 
     // MARK: - 链接清洗
 
@@ -190,7 +186,6 @@ final class CapturePrivacyTests: XCTestCase {
         ))
     }
 
-    #if os(macOS)
     func testRestorerRecordsFailureForUnsafeItems() throws {
         var report = ContextRestoreReport()
         let commandFile = temporaryDirectory.appendingPathComponent("evil.command")
@@ -330,5 +325,4 @@ final class CapturePrivacyTests: XCTestCase {
         XCTAssertEqual(error.errorDescription, tr("on_device_speech_recognition_unavailable"))
         XCTAssertFalse(error.localizedDescription.isEmpty)
     }
-    #endif
 }

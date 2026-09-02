@@ -1,9 +1,7 @@
 import Combine
 import Foundation
 
-#if os(macOS)
 import AppKit
-#endif
 
 @MainActor
 final class CaptureDraftCoordinator: ObservableObject {
@@ -48,13 +46,10 @@ final class AppTerminationController: ObservableObject {
     }
 
     func requestQuit() {
-        #if os(macOS)
         guard !isTerminating, !terminationPromptPending else { return }
         NSApp.terminate(nil)
-        #endif
     }
 
-    #if os(macOS)
     func applicationShouldTerminate(
         _ application: NSApplication
     ) -> NSApplication.TerminateReply {
@@ -92,5 +87,4 @@ final class AppTerminationController: ObservableObject {
         terminationPromptPending = false
         runtime?.stop()
     }
-    #endif
 }

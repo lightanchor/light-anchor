@@ -1,8 +1,6 @@
 import Foundation
 
-#if os(macOS)
 @preconcurrency import UserNotifications
-#endif
 
 // MARK: - 定时任务调度
 //
@@ -73,7 +71,6 @@ final class ScheduledTaskCoordinator {
     }
 }
 
-#if os(macOS)
 struct ScheduledTaskNotificationService {
     /// 到点通知：不弹窗不抢前台，与等待通知同一姿态。
     /// 附带现场的任务在正文里说一句，点开应用即可一键恢复。
@@ -105,7 +102,6 @@ struct ScheduledTaskNotificationService {
         }
     }
 }
-#endif
 
 // MARK: - 定时任务时间线投影（纯函数，无 UI）
 

@@ -697,10 +697,8 @@ struct MemoryChatView: View {
     }
 
     private func copyToPasteboard(_ text: String) {
-        #if os(macOS)
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
-        #endif
     }
 }

@@ -1,8 +1,6 @@
 import Foundation
 
-#if os(macOS)
 import AppKit
-#endif
 
 // MARK: - 过程记录：trace 存储 + 采样 + 协调
 //
@@ -81,9 +79,7 @@ final class RecordingCoordinator {
     private var seenCommands: Set<String> = []
 
     private var periodicTask: Task<Void, Never>?
-    #if os(macOS)
     private var activationObserver: NSObjectProtocol?
-    #endif
 
     /// 周期兜底间隔：应用内切窗口/换文件不触发激活通知，靠它补。
     static let samplingInterval: TimeInterval = 30
@@ -319,7 +315,6 @@ final class RecordingCoordinator {
     }
 
     private func startSampling() {
-        #if os(macOS)
         if activationObserver == nil {
             activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
                 forName: NSWorkspace.didActivateApplicationNotification,
@@ -333,7 +328,6 @@ final class RecordingCoordinator {
                 }
             }
         }
-        #endif
         guard periodicTask == nil else { return }
         periodicTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
@@ -347,11 +341,9 @@ final class RecordingCoordinator {
     private func stopSampling() {
         periodicTask?.cancel()
         periodicTask = nil
-        #if os(macOS)
         if let activationObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(activationObserver)
             self.activationObserver = nil
         }
-        #endif
     }
 }

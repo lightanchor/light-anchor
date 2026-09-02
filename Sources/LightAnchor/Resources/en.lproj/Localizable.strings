@@ -876,7 +876,6 @@
 "open_file_named" = "Open “%@”";
 "run_shortcut_named" = "Run shortcut “%@”";
 "run_a_command_in_zsh" = "Run a command in zsh";
-"environment_actions_aren_t_supported_here" = "environment actions aren't supported on this platform";
 "asked_the_apps_opened_this_run_to_quit" = "Asked the apps opened this run to quit.";
 "couldn_t_ask_the_apps_to_quit" = "Couldn't ask the apps opened this run to quit.";
 "the_action_is_off" = "The action is off.";
@@ -888,7 +887,6 @@
 "couldn_t_open_the_file" = "Couldn't open the file.";
 "hid_the_app" = "Hid the app.";
 "couldn_t_hide_the_app" = "Couldn't hide the app.";
-"environment_actions_aren_t_supported_here_2" = "Environment actions aren't supported on this platform.";
 "the_app_action_has_no_valid_bundle_id" = "The app action has no valid bundle ID, so it was blocked.";
 "the_app_isn_t_in_this_environment_s_allow_list" = "The app isn't in this environment's allow list, so it was skipped.";
 "the_command_finished" = "The command finished.";
@@ -897,7 +895,6 @@
 "couldn_t_fully_restore_the_apps_visible_state" = "Couldn't fully restore the apps' visible state.";
 "restored_the_apps_hidden_state" = "Restored the apps' hidden state.";
 "couldn_t_fully_restore_the_apps_hidden_state" = "Couldn't fully restore the apps' hidden state.";
-"environment_undo_isn_t_supported_here" = "Environment undo isn't supported on this platform.";
 "link_source" = "link source";
 "voice_capture" = "voice capture";
 "from_source_app" = "from %@";

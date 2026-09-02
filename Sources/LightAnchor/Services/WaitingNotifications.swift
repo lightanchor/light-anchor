@@ -1,6 +1,5 @@
 import Foundation
 
-#if os(macOS)
 @preconcurrency import UserNotifications
 
 struct WaitingNotificationService {
@@ -31,4 +30,3 @@ struct WaitingNotificationService {
         }
     }
 }
-#endif

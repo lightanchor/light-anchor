@@ -1,8 +1,6 @@
 import Foundation
 
-#if os(macOS)
 import AppKit
-#endif
 
 private struct AppLaunchMarker: Codable {
     let schemaVersion: Int
@@ -87,7 +85,6 @@ final class AppLifecycleTracker: @unchecked Sendable {
     }
 }
 
-#if os(macOS)
 final class LightAnchorApplicationDelegate: NSObject, NSApplicationDelegate {
     private var contextObservation: ContextObservation?
 
@@ -173,4 +170,3 @@ final class LightAnchorApplicationDelegate: NSObject, NSApplicationDelegate {
         AppLifecycleTracker.shared.markCleanExit()
     }
 }
-#endif

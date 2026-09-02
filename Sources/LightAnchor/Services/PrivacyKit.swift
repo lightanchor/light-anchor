@@ -1,6 +1,5 @@
 import Foundation
 
-#if os(macOS)
 import AVFoundation
 import AppKit
 import ApplicationServices
@@ -9,7 +8,6 @@ import EventKit
 import Security
 import Speech
 import UserNotifications
-#endif
 
 enum SceneSourceRuleMode: String, Codable, CaseIterable, Identifiable, Sendable {
     case excludeListed
@@ -171,7 +169,6 @@ enum PrivacyCapability: String, CaseIterable, Identifiable, Codable, Sendable {
         self == .screenRecording
     }
 
-    #if os(macOS)
     var systemSettingsURL: URL? {
         // 面板 id 用 macOS 13 起的 ExtensionKit 扩展标识（旧的
         // com.apple.preference.security 只靠系统的兼容映射还活着）。
@@ -192,7 +189,6 @@ enum PrivacyCapability: String, CaseIterable, Identifiable, Codable, Sendable {
             string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?\(anchor)"
         )
     }
-    #endif
 }
 
 enum PrivacyPermissionStatus: String, Equatable {
@@ -368,7 +364,6 @@ enum PrivacyPermissionCache {
     }
 }
 
-#if os(macOS)
 /// 本机代码签名事实。TCC 把授权钉在应用的签名上：ad-hoc 包每次重新签名
 /// CDHash 都变，旧授权那一条会留在系统设置列表里却对不上新包——看起来
 /// 「已打开」，`AXIsProcessTrusted()` 仍然是 false。裸可执行文件
@@ -398,11 +393,9 @@ enum AppSignatureFacts {
         return flags & adhocSignatureFlag != 0
     }
 }
-#endif
 
 struct PrivacyPermissionService: Sendable {
     func status(for capability: PrivacyCapability) -> PrivacyPermissionStatus {
-        #if os(macOS)
         switch capability {
         case .microphone:
             return mapAVAuthorization(AVCaptureDevice.authorizationStatus(for: .audio))
@@ -418,13 +411,9 @@ struct PrivacyPermissionService: Sendable {
         case .calendar:
             return mapCalendarAuthorization(EKEventStore.authorizationStatus(for: .event))
         }
-        #else
-        return .unavailable
-        #endif
     }
 
     func statusAsync(for capability: PrivacyCapability) async -> PrivacyPermissionStatus {
-        #if os(macOS)
         guard capability == .notifications else { return status(for: capability) }
         let settings = await UNUserNotificationCenter.current().notificationSettings()
         let result: PrivacyPermissionStatus
@@ -436,13 +425,9 @@ struct PrivacyPermissionService: Sendable {
         }
         PrivacyPermissionCache.store(result, for: capability)
         return result
-        #else
-        return .unavailable
-        #endif
     }
 
     func request(_ capability: PrivacyCapability) async -> PrivacyPermissionStatus {
-        #if os(macOS)
         // 「之前问过没有」必须在 markRequested 之前读：系统只在应用还没进 TCC
         // 列表时弹一次窗，第二次点授权得靠我们把人送进系统设置。
         let hadAskedBefore = PrivacyPermissionCache.wasRequested(capability)
@@ -494,12 +479,8 @@ struct PrivacyPermissionService: Sendable {
             PrivacyPermissionCache.store(result, for: capability)
             return result
         }
-        #else
-        return .unavailable
-        #endif
     }
 
-    #if os(macOS)
     /// 辅助功能 / 屏幕录制的读数。授权到手时顺手把「问过」标记清掉，
     /// 这样用户之后在系统设置里关掉，状态会回到「尚未授权」而不是卡在等待。
     private func systemSettingsStatus(
@@ -569,5 +550,4 @@ struct PrivacyPermissionService: Sendable {
         }
     }
 
-    #endif
 }

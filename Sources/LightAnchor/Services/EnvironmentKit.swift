@@ -1,8 +1,6 @@
 import Foundation
 
-#if os(macOS)
 import AppKit
-#endif
 
 enum EnvironmentActionStatus: String, Equatable {
     case succeeded
@@ -134,7 +132,6 @@ final class EnvironmentActionRunner {
             return make(action.kind.title, status: .blocked(tr("nothing_filled_in_yet")))
         }
 
-        #if os(macOS)
         switch action.kind {
         case .openApplication, .hideApplication:
             let verb = action.kind == .openApplication ? tr("open_app") : tr("hide_app")
@@ -193,9 +190,6 @@ final class EnvironmentActionRunner {
         case .runCommand:
             return make(tr("run_a_command_in_zsh"), detail: action.value)
         }
-        #else
-        return make(action.kind.title, detail: action.value, status: .blocked(tr("environment_actions_aren_t_supported_here")))
-        #endif
     }
 
     /// 收场：按相反顺序还原显示状态；可选把本次新打开的应用一并退出（温和 terminate）。
@@ -205,7 +199,6 @@ final class EnvironmentActionRunner {
     ) async -> [EnvironmentActionResult] {
         var results = await undo(execution)
         guard quitLaunchedApplications else { return results }
-        #if os(macOS)
         for bundleIdentifier in execution.launchedApplicationBundleIdentifiers {
             let applications = NSRunningApplication.runningApplications(
                 withBundleIdentifier: bundleIdentifier
@@ -220,7 +213,6 @@ final class EnvironmentActionRunner {
                     : tr("couldn_t_ask_the_apps_to_quit")
             ))
         }
-        #endif
         return results
     }
 
@@ -249,7 +241,6 @@ final class EnvironmentActionRunner {
             return authorizationFailure
         }
 
-        #if os(macOS)
         switch action.kind {
         case .openApplication:
             let opened: Bool
@@ -322,13 +313,6 @@ final class EnvironmentActionRunner {
             let hidden = applications.allSatisfy { $0.hide() }
             return result(for: action, succeeded: hidden, success: tr("hid_the_app"), failure: tr("couldn_t_hide_the_app"))
         }
-        #else
-        return EnvironmentActionResult(
-            actionID: action.id,
-            status: .failed,
-            message: tr("environment_actions_aren_t_supported_here_2")
-        )
-        #endif
     }
 
     private func authorizationFailure(
@@ -408,7 +392,6 @@ final class EnvironmentActionRunner {
     }
 
     private func undo(_ step: EnvironmentUndoStep) async -> EnvironmentActionResult {
-        #if os(macOS)
         switch step.operation {
         case .unhideApplications(let bundleIdentifiers):
             let applications = bundleIdentifiers.flatMap {
@@ -432,13 +415,6 @@ final class EnvironmentActionRunner {
                 message: succeeded ? tr("restored_the_apps_hidden_state") : tr("couldn_t_fully_restore_the_apps_hidden_state")
             )
         }
-        #else
-        return EnvironmentActionResult(
-            actionID: step.actionID,
-            status: .failed,
-            message: tr("environment_undo_isn_t_supported_here")
-        )
-        #endif
     }
 
     private struct ApplicationState {
@@ -449,7 +425,6 @@ final class EnvironmentActionRunner {
     }
 
     private func applicationState(for action: EnvironmentAction) -> ApplicationState? {
-        #if os(macOS)
         guard action.kind == .openApplication || action.kind == .hideApplication,
               let bundleIdentifier = applicationBundleIdentifier(for: action.value)
         else { return nil }
@@ -468,9 +443,6 @@ final class EnvironmentActionRunner {
             visibleBefore: applications.contains { !$0.isHidden },
             hiddenBefore: applications.contains(where: \.isHidden)
         )
-        #else
-        return nil
-        #endif
     }
 
     private func makeUndoStep(
@@ -504,16 +476,10 @@ final class EnvironmentActionRunner {
         return trimmed
     }
 
-    #if os(macOS)
     private func applicationBundleIdentifier(for value: String) -> String? {
         if value.hasPrefix("/") {
             return Bundle(url: URL(fileURLWithPath: value))?.bundleIdentifier
         }
         return value.isEmpty ? nil : value
     }
-    #else
-    private func applicationBundleIdentifier(for value: String) -> String? {
-        nil
-    }
-    #endif
 }

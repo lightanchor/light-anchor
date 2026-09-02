@@ -1,9 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-#if os(macOS)
 import AppKit
-#endif
 
 struct EnvironmentProfilesView: View {
     @EnvironmentObject private var workspace: AttentionWorkspace
@@ -30,11 +28,9 @@ struct EnvironmentProfilesView: View {
                     if !sortedProfiles.isEmpty {
                         LightAnchorReadoutCount(sortedProfiles.count)
                     }
-                    #if os(macOS)
                     Button(tr("save_current_scene")) { snapshotCurrentScene() }
                         .buttonStyle(LightAnchorQuietButtonStyle(compact: true))
                         .help(tr("save_the_apps_files_and_pages"))
-                    #endif
                     Button(tr("new_environment")) {
                         editingProfile = nil
                         snapshotDraft = nil
@@ -141,7 +137,6 @@ struct EnvironmentProfilesView: View {
 
     /// 样机 .row：标题 13.5/550 + 灰元信息（「N 个动作 · 动作种类」），
     /// 右侧 .btn.sm 操作组，无行首图标、无 chevron。
-    #if os(macOS)
     /// 环境逆向生成：把 ContextKit 当前采集到的桌面事实变成一份环境草稿,
     /// 打开编辑器让用户修剪后保存。配置成本从"逐项添加"变成"一次快照"。
     private func snapshotCurrentScene() {
@@ -158,7 +153,6 @@ struct EnvironmentProfilesView: View {
         snapshotLimitations = observation.limitations
         showingEditor = true
     }
-    #endif
 
     private func environmentRow(_ profile: EnvironmentProfile) -> some View {
         HStack(alignment: .center, spacing: 12) {
@@ -676,7 +670,6 @@ struct EnvironmentEditorView: View {
     }
 
     private func applicationDisplayName(for value: String) -> String? {
-        #if os(macOS)
         let applicationURL: URL?
         if value.hasPrefix("/") {
             applicationURL = URL(fileURLWithPath: value)
@@ -699,9 +692,6 @@ struct EnvironmentEditorView: View {
                 : fileDisplayName
         }
         return applicationURL.deletingPathExtension().lastPathComponent
-        #else
-        return nil
-        #endif
     }
 
     private func fallbackApplicationName(for value: String) -> String {
@@ -788,7 +778,6 @@ struct EnvironmentEditorView: View {
     }
 
     private func chooseAllowedApplications() {
-        #if os(macOS)
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
         panel.canChooseFiles = true
@@ -799,11 +788,9 @@ struct EnvironmentEditorView: View {
         allowedApplicationIDsText = Set(allowedApplicationIDs + bundleIDs)
             .sorted()
             .joined(separator: ", ")
-        #endif
     }
 
     private func chooseApplication(for actionID: UUID) {
-        #if os(macOS)
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = false
         panel.canChooseFiles = true
@@ -811,7 +798,6 @@ struct EnvironmentEditorView: View {
         panel.allowedContentTypes = [.application]
         guard panel.runModal() == .OK, let url = panel.url else { return }
         actionValueBinding(actionID).wrappedValue = Bundle(url: url)?.bundleIdentifier ?? url.path
-        #endif
     }
 
     private func save() {

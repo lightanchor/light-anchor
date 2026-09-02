@@ -1,9 +1,7 @@
 import Foundation
 import SwiftUI
 
-#if os(macOS)
 import AppKit
-#endif
 
 /// 应用级事件的常驻接线员。
 ///
@@ -40,7 +38,6 @@ final class AppEventCoordinator {
     /// 「再开一个」而不是「聚焦已有」，所以主窗开着时直接把它带到最前，
     /// 只有全关了才用 openWindow 重建。
     func openMainWindow() {
-        #if os(macOS)
         activateApp()
         if let window = NSApp.windows.first(where: {
             $0.identifier?.rawValue.hasPrefix("main") == true
@@ -51,7 +48,6 @@ final class AppEventCoordinator {
             window.makeKeyAndOrderFront(nil)
             return
         }
-        #endif
         openWindowAction?(id: "main")
     }
 
@@ -59,12 +55,10 @@ final class AppEventCoordinator {
     /// 的应用和窗口」，激活轻锚之后再采就只会采到轻锚自己。采集留在按键那一刻
     /// 同步做（见 `LightAnchorApp` 里的 `hotKey.onPress`）。
     func openCaptureWindow() {
-        #if os(macOS)
         // 全局快捷键从别的应用里按下时轻锚不是前台应用。捕获窗虽然是
         // floating 层会浮在最上面，但不激活应用就拿不到键盘焦点，闪烁的
         // 光标下面打不进字。
         activateApp()
-        #endif
         openWindowAction?(id: "capture")
     }
 
@@ -83,12 +77,10 @@ final class AppEventCoordinator {
         }
     }
 
-    #if os(macOS)
     private func activateApp() {
         // 权限/上下文探针会把激活策略设成 .prohibited（无 UI 跑批），
         // 那种进程里不该抢焦点。
         guard NSApp.activationPolicy() == .regular else { return }
         NSApp.activate()
     }
-    #endif
 }
