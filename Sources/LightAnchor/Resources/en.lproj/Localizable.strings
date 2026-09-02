@@ -1164,3 +1164,5 @@
 "cloud_endpoint_requires_https_for_api_key" = "API keys are only sent over https. %@ is a plain http address; switch to https, or use http only for a local service (localhost).";
 "http_endpoint_to_remote_host_warning" = "This is a plain http address to a remote host: requests carrying an API key will be blocked, not sent.";
 "streamed_answer_exceeded_size_limit" = "The answer exceeded 512 KB; stopped receiving.";
+"only_signed_manifests_are_accepted_key_built_in" = "Only signed manifests are accepted; the public key ships with this build and cannot be changed";
+"enter_the_update_url" = "Enter the update URL.";

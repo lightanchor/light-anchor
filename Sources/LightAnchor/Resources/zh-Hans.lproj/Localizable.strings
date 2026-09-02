@@ -1167,3 +1167,5 @@
 "cloud_endpoint_requires_https_for_api_key" = "API Key 只能通过 https 发送。%@ 是明文 http 地址，请改用 https，或只对本机服务（localhost）使用 http。";
 "http_endpoint_to_remote_host_warning" = "这是发往非本机的明文 http 地址：带 API Key 的请求会被拦下，不会发出。";
 "streamed_answer_exceeded_size_limit" = "回答超过 512 KB，已停止接收。";
+"only_signed_manifests_are_accepted_key_built_in" = "只接受签名的更新清单；公钥已随本版本内置，不可更改";
+"enter_the_update_url" = "请填写更新地址。";

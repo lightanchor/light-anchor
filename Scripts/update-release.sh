@@ -20,8 +20,10 @@ Options:
   -h, --help           Show this help
 
 The updater verifies the manifest signature, artifact size and SHA-256, extracts a
-single product app, verifies its bundle identifier and code signature, then uses
-Scripts/install-release.sh for staging installation.
+single product app, verifies its bundle identifier, main-binary SHA-256 and code
+signature, then uses Scripts/install-release.sh for staging installation.
+install-release.sh pins the signing identity (LIGHTANCHOR_TEAM_ID) and requires
+notarization unless LIGHTANCHOR_REQUIRE_NOTARIZATION=0.
 EOF
 }
 
@@ -221,6 +223,20 @@ BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" \
     || fail "Unexpected extracted bundle identifier: $BUNDLE_ID"
 codesign --verify --deep --strict --verbose "$APP_PATH" >/dev/null \
     || fail "Extracted app has an invalid or missing code signature."
+
+# The archive checksum covers the zip; binarySHA256 pins the main executable
+# itself, so a tampered archive whose manifest was re-signed for a different
+# build, or an extraction that substituted the binary, is caught here too.
+EXPECTED_BINARY_SHA256=$(json_value binarySHA256) \
+    || fail "Manifest is missing binarySHA256."
+[[ "$EXPECTED_BINARY_SHA256" =~ '^[A-Fa-f0-9]{64}$' ]] \
+    || fail "Manifest binarySHA256 is invalid."
+BINARY_PATH="$APP_PATH/Contents/MacOS/$PRODUCT"
+[[ -f "$BINARY_PATH" && ! -L "$BINARY_PATH" ]] \
+    || fail "Extracted app is missing its main executable: Contents/MacOS/$PRODUCT"
+ACTUAL_BINARY_SHA256=$(shasum -a 256 "$BINARY_PATH" | awk '{print tolower($1)}')
+[[ "$ACTUAL_BINARY_SHA256" == "${EXPECTED_BINARY_SHA256:l}" ]] \
+    || fail "Extracted binary SHA-256 does not match the manifest binarySHA256."
 
 MANIFEST_BUILD=$(json_value build) || fail "Manifest is missing build."
 ARTIFACT_BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" \

@@ -13,7 +13,9 @@
 #   LIGHTANCHOR_EVENT_BIN            事件发布器路径（默认从 PATH 里找）
 #
 # 隐私边界：只发送命令行文本（标题）、用时、退出码和工作目录；
-# 不发送命令输出。事件写入轻锚本地事件收件箱。
+# 不发送命令输出。命令行文本在发出前会先遮掉常见的密钥写法
+# （Bearer 令牌、-p/--password、*TOKEN*=/*SECRET*=/*PASSWORD*=/*API_KEY*=
+# 之类的赋值），值替换成 <REDACTED>。事件写入轻锚本地事件收件箱。
 
 (( ${+LIGHTANCHOR_SHELL_WAIT_DISABLE} )) && return 0
 [[ -o interactive ]] || return 0
@@ -24,11 +26,93 @@ autoload -Uz add-zsh-hook
 typeset -g _lightanchor_threshold=${LIGHTANCHOR_SHELL_WAIT_SECONDS:-30}
 # 交互式/长驻命令不是「等待」：编辑器、分页器、远程会话、REPL、监视器、Agent CLI。
 typeset -g _lightanchor_exclude="vim nvim vi nano emacs hx less more man ssh mosh et tmux screen zellij top htop btop k9s fzf watch tail journalctl claude codex aider python python3 ipython node irb pry psql mysql sqlite3 ${LIGHTANCHOR_SHELL_WAIT_EXCLUDE:-}"
-typeset -g _lightanchor_dir=${TMPDIR:-/tmp}/lightanchor-shell-$$
+# 每个 shell 一个私有标记目录，用 mktemp 建（不可预测、0700），shell 退出时删掉。
+typeset -g _lightanchor_dir=""
 typeset -g _lightanchor_serial=0
 typeset -g _lightanchor_cmd=""
 typeset -g _lightanchor_started_at=0
 typeset -g _lightanchor_correlation=""
+
+# 只建一次；mktemp 失败才退回可预测路径，且不用 mkdir -p 去「接管」已存在的目录。
+_lightanchor_ensure_dir() {
+    [[ -n $_lightanchor_dir && -d $_lightanchor_dir && ! -L $_lightanchor_dir ]] && return 0
+    _lightanchor_dir=$(mktemp -d "${TMPDIR:-/tmp}/lightanchor-shell.XXXXXX" 2>/dev/null) && return 0
+    _lightanchor_dir=${TMPDIR:-/tmp}/lightanchor-shell-$$
+    mkdir -m 0700 "$_lightanchor_dir" 2>/dev/null && return 0
+    _lightanchor_dir=""
+    return 1
+}
+_lightanchor_ensure_dir || return 0
+
+# 发出去之前把命令行里的密钥遮掉。按 zsh 词法切词（尊重引号），逐词处理：
+#   Bearer <token>                      -> Bearer <REDACTED>
+#   -p<value>                           -> -p<REDACTED>
+#   --password[= ]value（及 --passwd/--token/--secret/--api-key 等）
+#   NAME=value（NAME 含 TOKEN/SECRET/PASSWORD/PASSWD/API_KEY/APIKEY/ACCESS_KEY/CREDENTIAL，不分大小写）
+# 只处理标题文本，宁可多遮不可漏遮。
+typeset -g _lightanchor_redact_next=0
+# 处理期间用不含 shell 元字符的占位符，免得 (z) 切词把 <REDACTED> 当成重定向拆开；输出前再换回。
+typeset -g _lightanchor_redact_mark="__LIGHTANCHOR_REDACTED__"
+# 处理单个词：结果放进 REPLY；若该词是取值在下一个词里的选项，置 _lightanchor_redact_next。
+_lightanchor_redact_token() {
+    setopt localoptions extendedglob
+    local word=$1 lower
+    REPLY=$word
+    if (( _lightanchor_redact_next )); then
+        REPLY=$_lightanchor_redact_mark
+        _lightanchor_redact_next=0
+        return 0
+    fi
+    lower=${(L)word}
+    case $lower in
+        --password|--passwd|--token|--secret|--api-key|--apikey|--access-key|--credential|--credentials)
+            _lightanchor_redact_next=1
+            return 0
+            ;;
+        --password=*|--passwd=*|--token=*|--secret=*|--api-key=*|--apikey=*|--access-key=*|--credential=*|--credentials=*)
+            REPLY="${word%%=*}=$_lightanchor_redact_mark"
+            return 0
+            ;;
+    esac
+    case $word in
+        -p?*)
+            REPLY="-p$_lightanchor_redact_mark"
+            return 0
+            ;;
+    esac
+    if [[ $word == [\"\']#[[:alnum:]_]#(#i)(token|secret|password|passwd|api_key|apikey|access_key|credential)[[:alnum:]_]#=* ]]; then
+        REPLY="${word%%=*}=$_lightanchor_redact_mark"
+    fi
+    return 0
+}
+
+_lightanchor_redact() {
+    setopt localoptions extendedglob
+    local text=$1
+    # Bearer 常出现在引号里或用反斜杠转义空格的 header 中，先在整段文本上替换。
+    text=${text//(#i)bearer[\\[:space:]]##[^[:space:]\"\']##/Bearer $_lightanchor_redact_mark}
+    local -a words=(${(z)text})
+    local -a out=() parts=()
+    local word part
+    _lightanchor_redact_next=0
+    for word in "${words[@]}"; do
+        if [[ $word == *[[:space:]]* && $word != \"*\" && $word != \'*\' ]]; then
+            # 带空白且引号没闭合的残段（如 "quote TOKEN=x）：再按空白拆一层逐个处理，
+            # 免得赋值整段漏出去。闭合引号的词保持整体，由单词规则处理。
+            parts=()
+            for part in ${=word}; do
+                _lightanchor_redact_token "$part"
+                parts+=("$REPLY")
+            done
+            out+=("${(j: :)parts}")
+            continue
+        fi
+        _lightanchor_redact_token "$word"
+        out+=("$REPLY")
+    done
+    text="${(j: :)out}"
+    print -r -- "${text//$_lightanchor_redact_mark/<REDACTED>}"
+}
 
 _lightanchor_resolve_publisher() {
     if [[ -n "${LIGHTANCHOR_EVENT_BIN:-}" && -x "${LIGHTANCHOR_EVENT_BIN}" ]]; then
@@ -103,15 +187,20 @@ _lightanchor_preexec() {
     _lightanchor_started_at=$EPOCHSECONDS
     _lightanchor_correlation="sh-$$-$_lightanchor_serial"
 
-    mkdir -p "$_lightanchor_dir" 2>/dev/null || return 0
+    _lightanchor_ensure_dir || return 0
     local marker=$_lightanchor_dir/$_lightanchor_serial.running
-    : >| "$marker"
+    # 普通 `>`（不是 `>|`）：目录是私有的，标记不该已存在；开了 noclobber 时
+    # 已存在就失败，此时放弃本次跟踪而不是覆盖别人的文件。
+    : > "$marker" 2>/dev/null || return 0
+    local title
+    title=$(_lightanchor_redact "$cmd")
+    title=${title[1,120]}
     # 延迟探针：阈值之后命令还在跑，才宣布 started——短命令零事件。
     (
         sleep "$_lightanchor_threshold"
         [[ -e $marker ]] || exit 0
-        : >| "$_lightanchor_dir/$_lightanchor_serial.announced"
-        _lightanchor_publish started "${cmd[1,120]}" "已运行超过 $_lightanchor_threshold 秒" \
+        : > "$_lightanchor_dir/$_lightanchor_serial.announced" 2>/dev/null
+        _lightanchor_publish started "$title" "已运行超过 $_lightanchor_threshold 秒" \
             "$_lightanchor_correlation" "$PWD"
     ) &!
 }
@@ -130,19 +219,22 @@ _lightanchor_precmd() {
     local elapsed=$(( EPOCHSECONDS - _lightanchor_started_at ))
     if [[ -e $announced ]] || (( elapsed >= _lightanchor_threshold )); then
         rm -f "$announced" 2>/dev/null
-        local label
+        local label title
         label=$(_lightanchor_elapsed_label $elapsed)
+        title=$(_lightanchor_redact "$cmd")
+        title=${title[1,120]}
         if (( exit_status == 0 )); then
-            _lightanchor_publish completed "${cmd[1,120]}" "用时 ${label}，退出码 0" \
+            _lightanchor_publish completed "$title" "用时 ${label}，退出码 0" \
                 "$correlation" "$PWD"
         else
-            _lightanchor_publish failed "${cmd[1,120]}" "用时 ${label}，退出码 ${exit_status}" \
+            _lightanchor_publish failed "$title" "用时 ${label}，退出码 ${exit_status}" \
                 "$correlation" "$PWD"
         fi
     fi
 }
 
 _lightanchor_zshexit() {
+    [[ -n $_lightanchor_dir && -d $_lightanchor_dir && ! -L $_lightanchor_dir ]] || return 0
     rm -rf "$_lightanchor_dir" 2>/dev/null
 }
 

@@ -29,8 +29,6 @@
 	<string>1</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>15.0</string>
-	<key>NSAppleEventsUsageDescription</key>
-	<string>轻锚只在你明确确认环境动作时运行自动化。</string>
 	<key>NSCalendarsUsageDescription</key>
 	<string>轻锚只读取你授权的会议时间和链接，用于智能等待。</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>

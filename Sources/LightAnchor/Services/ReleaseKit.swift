@@ -55,6 +55,70 @@ enum ReleaseUpdateError: LocalizedError {
     }
 }
 
+/// 应用内更新的信任锚。
+///
+/// 公钥随构建打进资源 bundle：`Scripts/build-release.sh` 在拿到
+/// `LIGHTANCHOR_UPDATE_PRIVATE_KEY` 时用 `openssl rsa -pubout` 派生
+/// `Sources/LightAnchor/Resources/update-public.pem`，swift build 会把它一并
+/// 打进 `Bundle.module`。只要内置公钥存在，验证一律以它为准，用户填写的
+/// 公钥路径不再参与——否则任何能改偏好的进程都能换掉信任根。没有内置公钥
+/// 的开发构建才回退到路径字段。
+enum ReleaseTrust {
+    /// 正式更新清单地址。真实主机尚未定下来，先留 `nil`：为 `nil` 时使用用户
+    /// 在设置里填写的地址。定下后写成
+    /// `URL(string: "https://<host>/releases/LightAnchor-release-manifest.json")`，
+    /// 必须是 https。
+    static let defaultManifestURL: URL? = nil
+
+    static let embeddedPublicKeyResourceName = "update-public"
+    static let embeddedPublicKeyResourceExtension = "pem"
+
+    /// 内置公钥所在位置；开发构建没有 pem 文件时为 `nil`。
+    static var embeddedPublicKeyURL: URL? {
+        let name = embeddedPublicKeyResourceName
+        let ext = embeddedPublicKeyResourceExtension
+        return Bundle.module.url(forResource: name, withExtension: ext)
+            ?? Bundle.main.url(forResource: name, withExtension: ext)
+    }
+
+    /// 内置公钥（PEM 或 DER 原始字节）。读不到或文件为空视为不存在。
+    static var embeddedPublicKeyData: Data? {
+        guard let url = embeddedPublicKeyURL,
+              let data = try? Data(contentsOf: url),
+              publicKeyDER(from: data) != nil
+        else { return nil }
+        return data
+    }
+
+    static var hasEmbeddedPublicKey: Bool { embeddedPublicKeyData != nil }
+
+    /// `SecKeyCreateWithData` 只认 DER（PKCS#1 或 SubjectPublicKeyInfo），
+    /// 不认 PEM 文本；`openssl rsa -pubout` 默认输出 PEM，这里统一转成 DER。
+    /// 已经是 DER 的数据（以 SEQUENCE 0x30 开头）原样返回。
+    static func publicKeyDER(from data: Data) -> Data? {
+        guard !data.isEmpty else { return nil }
+        if data.first == 0x30 { return data }
+        guard let text = String(data: data, encoding: .utf8) else { return nil }
+        var base64Lines: [Substring] = []
+        var inside = false
+        for rawLine in text.split(whereSeparator: \.isNewline) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("-----BEGIN ") {
+                guard line.hasSuffix("PUBLIC KEY-----") else { return nil }
+                inside = true
+                continue
+            }
+            if line.hasPrefix("-----END ") { break }
+            if inside, !line.isEmpty { base64Lines.append(Substring(line)) }
+        }
+        guard inside, !base64Lines.isEmpty,
+              let der = Data(base64Encoded: base64Lines.joined()),
+              der.first == 0x30
+        else { return nil }
+        return der
+    }
+}
+
 struct ReleaseManifestVerifier {
     func verify(
         manifestData: Data,
@@ -66,6 +130,9 @@ struct ReleaseManifestVerifier {
         guard algorithm.lowercased() == "rsa-sha256" else {
             throw ReleaseUpdateError.unsupportedSignatureAlgorithm(algorithm)
         }
+        guard let publicKeyDER = ReleaseTrust.publicKeyDER(from: publicKeyData) else {
+            throw ReleaseUpdateError.invalidSignature
+        }
 
         #if os(macOS)
         let attributes: [String: Any] = [
@@ -73,7 +140,7 @@ struct ReleaseManifestVerifier {
             kSecAttrKeyClass as String: kSecAttrKeyClassPublic
         ]
         guard let publicKey = SecKeyCreateWithData(
-            publicKeyData as CFData,
+            publicKeyDER as CFData,
             attributes as CFDictionary,
             nil
         ) else {

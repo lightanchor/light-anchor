@@ -19,6 +19,53 @@ ARCHIVE="$DIST_DIR/$ARCHIVE_NAME"
 # （通常还要 SDKROOT 钉到带宏插件的 SDK；Xcode / CI 上留空即可。）
 SWIFT_BUILD_FLAGS=(${=LIGHTANCHOR_SWIFT_BUILD_FLAGS:-})
 
+# jq 是硬依赖：manifest 用 jq 生成（不再 printf 拼 JSON），verify-release.sh 也要它。
+if ! command -v jq >/dev/null 2>&1; then
+    printf '%s\n' "jq is required to build the release manifest (brew install jq)." >&2
+    exit 1
+fi
+
+# 更新信任锚随构建内置：有更新私钥时先派生公钥放进 Resources，swift build 会把它
+# 打进资源 bundle，应用内 ReleaseTrust 只认这把内置公钥。派生出来的 pem 是构建产物，
+# 结束时清掉，免得烟测的一次性密钥留在源码树里被下一次开发构建带走。
+EMBEDDED_PUBLIC_KEY="$ROOT_DIR/Sources/LightAnchor/Resources/update-public.pem"
+EMBEDDED_PUBLIC_KEY_CREATED=0
+NOTARY_DIR=""
+cleanup() {
+    if [[ -n "$NOTARY_DIR" && -d "$NOTARY_DIR" ]]; then
+        rm -rf "$NOTARY_DIR"
+    fi
+    if (( EMBEDDED_PUBLIC_KEY_CREATED )); then
+        rm -f "$EMBEDDED_PUBLIC_KEY"
+    fi
+}
+trap cleanup EXIT
+if [[ -n ${LIGHTANCHOR_UPDATE_PRIVATE_KEY:-} ]]; then
+    if [[ ! -f "$LIGHTANCHOR_UPDATE_PRIVATE_KEY" ]]; then
+        printf '%s\n' "Update signing key not found: $LIGHTANCHOR_UPDATE_PRIVATE_KEY" >&2
+        exit 1
+    fi
+    DERIVED_PUBLIC_KEY=$(openssl rsa -in "$LIGHTANCHOR_UPDATE_PRIVATE_KEY" -pubout 2>/dev/null) || {
+        printf '%s\n' "Could not derive the update public key from LIGHTANCHOR_UPDATE_PRIVATE_KEY." >&2
+        exit 1
+    }
+    if [[ -e "$EMBEDDED_PUBLIC_KEY" ]]; then
+        # 源码树里已有一把公钥却和签名私钥不配，说明是别的密钥留下的；宁可停下。
+        if [[ "$(cat "$EMBEDDED_PUBLIC_KEY")" != "$DERIVED_PUBLIC_KEY" ]]; then
+            printf '%s\n' \
+                "Existing $EMBEDDED_PUBLIC_KEY does not match LIGHTANCHOR_UPDATE_PRIVATE_KEY." \
+                "Remove the stale file before building a signed release." >&2
+            exit 1
+        fi
+    else
+        printf '%s\n' "$DERIVED_PUBLIC_KEY" > "$EMBEDDED_PUBLIC_KEY"
+        EMBEDDED_PUBLIC_KEY_CREATED=1
+    fi
+    printf '%s\n' "Embedding update public key into the app bundle."
+elif [[ -e "$EMBEDDED_PUBLIC_KEY" ]]; then
+    printf '%s\n' "Note: bundling the existing $EMBEDDED_PUBLIC_KEY as the update trust anchor."
+fi
+
 swift build -c release --product "$PRODUCT" $SWIFT_BUILD_FLAGS
 swift build -c release --product LightAnchorEvent $SWIFT_BUILD_FLAGS
 BIN_DIR=$(swift build -c release --show-bin-path $SWIFT_BUILD_FLAGS)
@@ -86,7 +133,6 @@ if [[ -n "$NOTARY_PROFILE" ]]; then
     # first would ship without the ticket and its checksum would not match the
     # one recorded in the manifest below.
     NOTARY_DIR=$(mktemp -d "${TMPDIR:-/tmp}/lightanchor-notary.XXXXXX")
-    trap 'rm -rf "$NOTARY_DIR"' EXIT
     ditto -c -k --sequesterRsrc --keepParent "$APP" "$NOTARY_DIR/submission.zip"
     xcrun notarytool submit "$NOTARY_DIR/submission.zip" \
         --keychain-profile "$NOTARY_PROFILE" --wait
@@ -127,30 +173,51 @@ if [[ -n "$ARTIFACT_URL" ]]; then
     ARTIFACT_URL="${ARTIFACT_URL%/}/$ARCHIVE_NAME"
 fi
 MANIFEST_SIGNED=false
-SIGNATURE_JSON=null
 if [[ -n ${LIGHTANCHOR_UPDATE_PRIVATE_KEY:-} ]]; then
     MANIFEST_SIGNED=true
-    SIGNATURE_JSON="{\"algorithm\":\"rsa-sha256\",\"filename\":\"$SIGNATURE_FILENAME\"}"
 fi
-printf '%s\n' \
-    '{' \
-    "  \"manifestVersion\": $MANIFEST_SCHEMA," \
-    "  \"product\": \"$PRODUCT\"," \
-    "  \"version\": \"$VERSION\"," \
-    "  \"build\": \"$BUILD_NUMBER\"," \
-    "  \"eventSchemaVersion\": $EVENT_SCHEMA," \
-    "  \"syncEnvelopeVersion\": $SYNC_SCHEMA," \
-    "  \"binarySHA256\": \"$SHA256\"," \
-    "  \"artifact\": {\"filename\": \"$ARCHIVE_NAME\", \"url\": \"$ARTIFACT_URL\", \"sha256\": \"$ARCHIVE_SHA256\", \"size\": $ARCHIVE_SIZE}," \
-    "  \"minimumOS\": \"15.0\"," \
-    "  \"channel\": \"${LIGHTANCHOR_RELEASE_CHANNEL:-stable}\"," \
-    "  \"signed\": $MANIFEST_SIGNED," \
-    "  \"signature\": $SIGNATURE_JSON" \
-    '}' > "$MANIFEST"
-
-if command -v jq >/dev/null 2>&1; then
-    jq empty "$MANIFEST"
+if [[ ! "$ARCHIVE_SIZE" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "Could not read the archive size for $ARCHIVE." >&2
+    exit 1
 fi
+# 所有值都经 --arg/--argjson 传入，由 jq 负责转义；字段名和顺序与
+# ReleaseManifestVerifier.decode 的白名单一致。
+jq -n \
+    --argjson manifestVersion "$MANIFEST_SCHEMA" \
+    --arg product "$PRODUCT" \
+    --arg version "$VERSION" \
+    --arg build "$BUILD_NUMBER" \
+    --argjson eventSchemaVersion "$EVENT_SCHEMA" \
+    --argjson syncEnvelopeVersion "$SYNC_SCHEMA" \
+    --arg binarySHA256 "$SHA256" \
+    --arg artifactFilename "$ARCHIVE_NAME" \
+    --arg artifactURL "$ARTIFACT_URL" \
+    --arg artifactSHA256 "$ARCHIVE_SHA256" \
+    --argjson artifactSize "$ARCHIVE_SIZE" \
+    --arg minimumOS "15.0" \
+    --arg channel "${LIGHTANCHOR_RELEASE_CHANNEL:-stable}" \
+    --argjson signed "$MANIFEST_SIGNED" \
+    --arg signatureFilename "$SIGNATURE_FILENAME" \
+    '{
+        manifestVersion: $manifestVersion,
+        product: $product,
+        version: $version,
+        build: $build,
+        eventSchemaVersion: $eventSchemaVersion,
+        syncEnvelopeVersion: $syncEnvelopeVersion,
+        binarySHA256: $binarySHA256,
+        artifact: {
+            filename: $artifactFilename,
+            url: $artifactURL,
+            sha256: $artifactSHA256,
+            size: $artifactSize
+        },
+        minimumOS: $minimumOS,
+        channel: $channel,
+        signed: $signed,
+        signature: (if $signed then {algorithm: "rsa-sha256", filename: $signatureFilename} else null end)
+    }' > "$MANIFEST"
+jq empty "$MANIFEST"
 
 rm -f "$SIGNATURE_FILE"
 if [[ -n ${LIGHTANCHOR_UPDATE_PRIVATE_KEY:-} ]]; then

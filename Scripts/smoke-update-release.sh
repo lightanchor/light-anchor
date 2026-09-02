@@ -123,21 +123,26 @@ done
 curl --fail --silent --show-error --cacert "$CERT_FILE" \
     "https://127.0.0.1:$PORT/LightAnchor-release-manifest.json" >/dev/null
 
-# This smoke builds with an ad-hoc identity, which install-release.sh refuses by
-# default; opt in explicitly rather than weakening the production gate.
+# This smoke builds with an ad-hoc identity that is neither Developer ID signed
+# nor notarized, which install-release.sh refuses by default; opt out of both
+# gates explicitly here rather than weakening the production defaults.
 CURL_CA_BUNDLE="$CERT_FILE" \
 LIGHTANCHOR_ALLOW_ADHOC_SIGNATURE=1 \
+LIGHTANCHOR_REQUIRE_NOTARIZATION=0 \
     "$SCRIPT_DIR/update-release.sh" \
     --manifest-url "https://127.0.0.1:$PORT/LightAnchor-release-manifest.json" \
     --public-key "$UPDATE_PUBLIC_KEY" \
     --destination "$DESTINATION_APP" >/dev/null
 
 LIGHTANCHOR_ALLOW_ADHOC_SIGNATURE=1 \
+LIGHTANCHOR_REQUIRE_NOTARIZATION=0 \
     "$SCRIPT_DIR/install-release.sh" \
     "$ROOT_DIR/dist/LightAnchor.app" \
     "$DESTINATION_APP" >/dev/null
 
-BACKUP_COUNT=$(find "$DESTINATION_PARENT" -maxdepth 1 -name '.LightAnchor.previous.*.app' -type d | wc -l | tr -d '[:space:]')
+# install-release.sh keeps the superseded app inside an unpredictable
+# `.LightAnchor.previous.XXXXXX/` slot created with mktemp.
+BACKUP_COUNT=$(find "$DESTINATION_PARENT" -maxdepth 2 -path '*/.LightAnchor.previous.*/LightAnchor.app' -type d | wc -l | tr -d '[:space:]')
 [[ "$BACKUP_COUNT" -ge 1 ]] || {
     print -u2 -- "Update smoke did not retain the previous installed app."
     exit 1

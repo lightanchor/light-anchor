@@ -29,4 +29,10 @@ export LIGHTANCHOR_SHELL_WAIT_DISABLE=1           # 整体停用
   才发布 `started`——所以短命令完全零事件。
 - `precmd` 在命令结束时按退出码发布 `completed` / `failed`，带用时。
 - 只发送命令行文本、用时、退出码和工作目录；不发送命令输出。
-- 事件由 `lightanchor-event` 写入本地事件收件箱。
+- 命令行文本发出前先遮密：`Bearer <令牌>`、`-p<值>`、`--password[= ]值`
+  （及 `--token`/`--secret`/`--api-key` 等）、名字里含 TOKEN / SECRET /
+  PASSWORD / PASSWD / API_KEY / APIKEY / ACCESS_KEY / CREDENTIAL 的
+  `NAME=值` 赋值，值一律替换成 `<REDACTED>`。标题最多 120 字符。
+- 探针标记放在每个 shell 私有的 `mktemp -d` 目录里（0700），shell 退出时删除。
+- 事件由 `lightanchor-event` 写入本地事件收件箱；它不在时退回深链
+  `lightanchor://event?…`（标题同样是遮密后的文本）。

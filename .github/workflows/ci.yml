@@ -15,7 +15,7 @@ jobs:
     name: Build and test
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Show toolchain
         run: swift --version
@@ -30,7 +30,7 @@ jobs:
     name: Scripts and boundaries
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       # Declared here because several scripts refuse to run without them rather
       # than silently reporting a skipped check as passed.
