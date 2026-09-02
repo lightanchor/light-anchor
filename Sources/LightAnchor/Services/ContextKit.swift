@@ -1,5 +1,106 @@
 import Foundation
 
+/// 采集入口的 URL 清洗：http/https 链接落盘前去掉凭据、fragment 和 token 形态的
+/// 查询参数；`file://` 等其他 scheme 原样保留（路径就是恢复所需的全部信息）。
+enum ContextURLSanitizer {
+    static func isWebURL(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased() else { return false }
+        return scheme == "http" || scheme == "https"
+    }
+
+    static func sanitized(_ url: URL) -> URL {
+        guard isWebURL(url) else { return url }
+        return SecretRedactor.stripSensitiveComponents(from: url)
+    }
+
+    static func sanitized(_ url: URL?) -> URL? {
+        url.map(sanitized)
+    }
+}
+
+/// 恢复现场 / 执行环境动作时允许「打开」的条目白名单。这些值来自持久化数据
+/// （现场快照、备份、环境配置），不能假定是采集时的原样，所以恢复端自己把关：
+/// 链接只放 http/https；文件只放普通文档——不碰应用、脚本、安装包、可执行文件、
+/// 符号链接和目录（bundle 也是目录）。
+enum RestoreItemPolicy {
+    enum Rejection: Equatable {
+        case unsupportedScheme
+        case missing
+        case notARegularFile
+        case symbolicLink
+        case executable
+        case blockedExtension(String)
+    }
+
+    /// 双击即执行、或由系统当作程序/安装包处理的扩展名（小写）。
+    static let blockedFileExtensions: Set<String> = [
+        "app", "command", "tool", "terminal", "scpt", "scptd", "applescript",
+        "workflow", "action", "pkg", "mpkg", "dmg", "sh", "zsh", "bash", "fish",
+        "py", "rb", "pl", "jar", "webloc", "inetloc", "fileloc", "url",
+        "prefpane", "saver", "plugin", "bundle", "framework", "kext",
+        "xpc", "appex", "qlgenerator", "mdimporter", "service", "wdgt", "osax",
+    ]
+
+    static func allowsLink(_ url: URL) -> Bool {
+        ContextURLSanitizer.isWebURL(url)
+    }
+
+    /// 只信任文件系统的实际状态，不信任路径长相。
+    static func fileRejection(
+        _ url: URL,
+        fileManager: FileManager = .default
+    ) -> Rejection? {
+        guard url.isFileURL else { return .unsupportedScheme }
+        let path = url.path
+        guard !path.isEmpty, path.hasPrefix("/") else { return .unsupportedScheme }
+
+        let attributes = try? fileManager.attributesOfItem(atPath: path)
+        guard let attributes else { return .missing }
+        if let type = attributes[.type] as? FileAttributeType {
+            if type == .typeSymbolicLink { return .symbolicLink }
+            if type != .typeRegular { return .notARegularFile }
+        }
+
+        let values = try? url.resourceValues(forKeys: [
+            .isRegularFileKey, .isSymbolicLinkKey, .isDirectoryKey, .isPackageKey,
+            .isExecutableKey, .isApplicationKey,
+        ])
+        if values?.isSymbolicLink == true { return .symbolicLink }
+        if values?.isDirectory == true || values?.isPackage == true
+            || values?.isApplication == true || values?.isRegularFile == false {
+            return .notARegularFile
+        }
+        if values?.isExecutable == true { return .executable }
+
+        let ext = url.pathExtension.lowercased()
+        if !ext.isEmpty, blockedFileExtensions.contains(ext) {
+            return .blockedExtension(ext)
+        }
+        return nil
+    }
+
+    static func allowsFile(_ url: URL, fileManager: FileManager = .default) -> Bool {
+        fileRejection(url, fileManager: fileManager) == nil
+    }
+
+    /// 终端工作目录：必须是真实存在的目录本体，不接受符号链接。
+    static func allowsTerminalDirectory(
+        _ url: URL,
+        fileManager: FileManager = .default
+    ) -> Bool {
+        guard url.isFileURL, url.path.hasPrefix("/") else { return false }
+        guard let attributes = try? fileManager.attributesOfItem(atPath: url.path),
+              let type = attributes[.type] as? FileAttributeType,
+              type == .typeDirectory
+        else { return false }
+        guard let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
+              values.isDirectory == true,
+              values.isSymbolicLink != true
+        else { return false }
+        return true
+    }
+}
+
 #if os(macOS)
 import ApplicationServices
 import AppKit
@@ -141,7 +242,8 @@ struct MacAccessibilityWindowFactProvider: MacWindowFactProviding {
         let value: String? = copyAttribute(kAXDocumentAttribute, from: window)
         guard let value, !value.isEmpty else { return nil }
         if let url = URL(string: value), url.scheme != nil {
-            return url
+            // 网页地址在这里就去掉凭据 / fragment / token 参数，落盘的永远是干净的。
+            return ContextURLSanitizer.sanitized(url)
         }
         return URL(fileURLWithPath: value)
     }
@@ -272,7 +374,13 @@ struct MacTerminalWorkingDirectoryProvider: MacTerminalWorkingDirectoryProviding
             .first
             .map(String.init)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return String(command.prefix(120))
+        return Self.sanitizedCommand(command)
+    }
+
+    /// 命令行常带 token（`curl -H "Authorization: …"`、`-p密码`）。先脱敏再截断，
+    /// 免得截断把一个 token 切成一半留下来。
+    static func sanitizedCommand(_ command: String, limit: Int = 120) -> String {
+        String(SecretRedactor.redact(command).prefix(limit))
     }
 
     static func isTerminalApplication(_ bundleIdentifier: String) -> Bool {
@@ -464,12 +572,30 @@ final class MacContextRecorder {
             seenTerminalDirectories.insert($0.workingDirectory).inserted
         }
 
+        // 事实来源可注入（测试 / 其他 provider），这里再清洗一遍链接，不依赖上游。
+        windowFacts = windowFacts.map { fact in
+            guard let documentURL = fact.documentURL else { return fact }
+            let sanitized = ContextURLSanitizer.sanitized(documentURL)
+            guard sanitized != documentURL else { return fact }
+            // 稳定标识里也拼了地址，同步替换，别让 token 从这条缝里漏出去。
+            return ContextWindowFact(
+                stableIdentifier: fact.stableIdentifier.replacingOccurrences(
+                    of: documentURL.absoluteString,
+                    with: sanitized.absoluteString
+                ),
+                applicationBundleIdentifier: fact.applicationBundleIdentifier,
+                title: fact.title,
+                role: fact.role,
+                subrole: fact.subrole,
+                documentURL: sanitized,
+                isMain: fact.isMain,
+                isFocused: fact.isFocused,
+                focusedElement: fact.focusedElement
+            )
+        }
         let documentURLs = windowFacts.compactMap(\.documentURL)
         let files = documentURLs.filter(\.isFileURL)
-        let links = documentURLs.filter {
-            guard let scheme = $0.scheme?.lowercased() else { return false }
-            return scheme == "http" || scheme == "https"
-        }
+        let links = documentURLs.filter(ContextURLSanitizer.isWebURL)
         var limitations: [String] = []
 
         if frontmost == nil {
@@ -497,7 +623,12 @@ final class MacContextRecorder {
                 links: links,
                 terminalWorkingDirectories: terminalSessions.map(\.workingDirectory),
                 terminalCommands: terminalSessions.map(\.runningCommand),
-                clipboardText: options.includeClipboard ? Self.clipboardText(limit: options.clipboardCharacterLimit) : "",
+                clipboardText: options.includeClipboard
+                    ? Self.clipboardText(
+                        limit: options.clipboardCharacterLimit,
+                        frontmostBundleIdentifier: frontmost?.bundleIdentifier
+                    )
+                    : "",
                 note: note
             ),
             sourceApplicationBundleIdentifier: frontmost?.bundleIdentifier,
@@ -507,8 +638,14 @@ final class MacContextRecorder {
         )
     }
 
-    /// 读剪贴板文字。密码管理器等标记为机密/瞬态的内容一律不读。
-    private static func clipboardText(limit: Int) -> String {
+    /// 读剪贴板文字。密码管理器等标记为机密/瞬态的内容一律不读；前台是终端或
+    /// 密码管理器时整段跳过（剪贴板里大概率是刚复制的命令或口令）；剩下的文字
+    /// 也先脱敏再截断。
+    private static func clipboardText(limit: Int, frontmostBundleIdentifier: String?) -> String {
+        if let frontmostBundleIdentifier,
+           isClipboardSensitiveApplication(frontmostBundleIdentifier) {
+            return ""
+        }
         let pasteboard = NSPasteboard.general
         let sensitiveTypes = [
             NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"),
@@ -518,8 +655,29 @@ final class MacContextRecorder {
         let types = pasteboard.types ?? []
         guard !types.contains(where: sensitiveTypes.contains) else { return "" }
         guard let text = pasteboard.string(forType: .string) else { return "" }
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return sanitizedClipboardText(text, limit: limit)
+    }
+
+    /// 脱敏在截断之前，避免截断把 token 切一半留下。
+    static func sanitizedClipboardText(_ text: String, limit: Int) -> String {
+        let trimmed = SecretRedactor.redact(text).trimmingCharacters(in: .whitespacesAndNewlines)
         return String(trimmed.prefix(limit))
+    }
+
+    /// 密码管理器的 bundle ID 片段（小写匹配），加上所有受支持的终端。
+    static let passwordManagerBundleIdentifierFragments: [String] = [
+        "1password", "bitwarden", "keepass", "lastpass", "dashlane",
+        "com.apple.passwords", "com.apple.keychainaccess",
+        "enpass", "nordpass", "protonpass", "roboform", "strongbox",
+    ]
+
+    static func isClipboardSensitiveApplication(_ bundleIdentifier: String) -> Bool {
+        let normalized = bundleIdentifier.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return false }
+        if MacTerminalWorkingDirectoryProvider.isTerminalApplication(bundleIdentifier) {
+            return true
+        }
+        return passwordManagerBundleIdentifierFragments.contains { normalized.contains($0) }
     }
 }
 
@@ -717,6 +875,7 @@ final class MacContextRestorer: Sendable {
 
         let windowDocumentURLs = Set(context.windowFacts.compactMap(\.documentURL))
         for fileURL in context.files where !windowDocumentURLs.contains(fileURL) {
+            guard Self.allowsOpening(fileURL, report: &report) else { continue }
             if NSWorkspace.shared.open(fileURL) {
                 report.openedFiles.append(fileURL)
             } else {
@@ -725,6 +884,7 @@ final class MacContextRestorer: Sendable {
         }
 
         for link in context.links where !windowDocumentURLs.contains(link) {
+            guard Self.allowsOpening(link, report: &report) else { continue }
             if NSWorkspace.shared.open(link) {
                 report.openedLinks.append(link)
             } else {
@@ -734,6 +894,27 @@ final class MacContextRestorer: Sendable {
 
         restoreTerminalWorkingDirectories(context, report: &report)
         return report
+    }
+
+    /// 恢复端的白名单门：只放普通文档文件和 http/https 链接，其余记入失败并跳过。
+    /// 这些 URL 来自持久化数据（快照、备份），不能假定就是当时采集到的东西。
+    static func allowsOpening(_ url: URL, report: inout ContextRestoreReport) -> Bool {
+        if url.isFileURL {
+            guard RestoreItemPolicy.allowsFile(url) else {
+                report.failures.append(
+                    String(format: tr("skipped_unsafe_item_on_restore"), url.path)
+                )
+                return false
+            }
+            return true
+        }
+        guard RestoreItemPolicy.allowsLink(url) else {
+            report.failures.append(
+                String(format: tr("skipped_unsafe_item_on_restore"), url.absoluteString)
+            )
+            return false
+        }
+        return true
     }
 
     private func restoreTerminalWorkingDirectories(
@@ -757,22 +938,60 @@ final class MacContextRestorer: Sendable {
                 )
                 continue
             }
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-            process.arguments = ["-a", terminalURL.path, directory.path]
-            process.standardOutput = FileHandle.nullDevice
-            process.standardError = FileHandle.nullDevice
-            do {
-                try process.run()
-                process.waitUntilExit()
-                if process.terminationStatus == 0 {
-                    report.openedTerminalWorkingDirectories.append(directory)
-                } else {
-                    report.failures.append(String(format: tr("couldn_t_open_terminal_directory"), directory.path))
-                }
-            } catch {
-                report.failures.append(String(format: tr("couldn_t_open_terminal_directory"), directory.path))
+            // 只把真实存在的目录本体交给终端：文件、符号链接、bundle 都不算，
+            // 否则 `open -a Terminal <path>` 会把它当脚本/文档去执行或打开。
+            guard RestoreItemPolicy.allowsTerminalDirectory(directory) else {
+                report.failures.append(
+                    String(format: tr("skipped_unsafe_item_on_restore"), directory.path)
+                )
+                continue
             }
+            // 用 NSWorkspace 而不是再起一个 `/usr/bin/open` 子进程：目录 URL 直接
+            // 交给终端应用，不经过命令行参数解析。
+            if Self.openDirectory(directory, withApplicationAt: terminalURL) {
+                report.openedTerminalWorkingDirectories.append(directory)
+            } else {
+                report.failures.append(
+                    String(format: tr("couldn_t_open_terminal_directory"), directory.path)
+                )
+            }
+        }
+    }
+
+    /// 同步等待 NSWorkspace 的打开结果。恢复器本身就在后台线程阻塞轮询 AX，
+    /// 这里再等一个回调不改变它的线程模型；回调在系统的并发队列上派发，
+    /// 不会与等待方互锁。超时按失败处理，不让恢复卡死。
+    private static func openDirectory(_ directory: URL, withApplicationAt applicationURL: URL) -> Bool {
+        let outcome = OpenOutcome()
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.promptsUserIfNeeded = false
+        NSWorkspace.shared.open(
+            [directory],
+            withApplicationAt: applicationURL,
+            configuration: configuration
+        ) { _, error in
+            outcome.finish(succeeded: error == nil)
+        }
+        return outcome.wait(timeout: .now() + .seconds(10))
+    }
+
+    private final class OpenOutcome: @unchecked Sendable {
+        private let lock = NSLock()
+        private let semaphore = DispatchSemaphore(value: 0)
+        private var succeeded = false
+
+        func finish(succeeded: Bool) {
+            lock.lock()
+            self.succeeded = succeeded
+            lock.unlock()
+            semaphore.signal()
+        }
+
+        func wait(timeout: DispatchTime) -> Bool {
+            guard semaphore.wait(timeout: timeout) == .success else { return false }
+            lock.lock()
+            defer { lock.unlock() }
+            return succeeded
         }
     }
 
@@ -899,6 +1118,7 @@ final class MacContextRestorer: Sendable {
     }
 
     private func openDocument(_ url: URL, report: inout ContextRestoreReport) {
+        guard Self.allowsOpening(url, report: &report) else { return }
         if NSWorkspace.shared.open(url) {
             if url.isFileURL {
                 report.openedFiles.append(url)
@@ -952,7 +1172,8 @@ final class MacContextRestorer: Sendable {
         let value: String? = copyAttribute(kAXDocumentAttribute, from: window)
         guard let value, !value.isEmpty else { return nil }
         if let url = URL(string: value), url.scheme != nil {
-            return url
+            // 与采集侧同样清洗，否则带 token 的实时地址永远匹配不上存下来的干净地址。
+            return ContextURLSanitizer.sanitized(url)
         }
         return URL(fileURLWithPath: value)
     }

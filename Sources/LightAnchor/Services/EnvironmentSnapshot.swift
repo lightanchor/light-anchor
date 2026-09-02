@@ -26,11 +26,9 @@ enum EnvironmentSnapshotBuilder {
             guard !path.isEmpty, seen.insert("file:\(path)").inserted else { continue }
             actions.append(EnvironmentAction(kind: .openFile, value: path))
         }
-        for link in capsule.links {
-            guard let scheme = link.scheme?.lowercased(),
-                  scheme == "http" || scheme == "https"
-            else { continue }
-            let value = link.absoluteString
+        for link in capsule.links where ContextURLSanitizer.isWebURL(link) {
+            // 环境配置会持久化并随备份走，链接里的凭据 / token 参数在这里就去掉。
+            let value = ContextURLSanitizer.sanitized(link).absoluteString
             guard seen.insert("link:\(value)").inserted else { continue }
             actions.append(EnvironmentAction(kind: .openURL, value: value))
         }
@@ -65,7 +63,7 @@ enum EnvironmentSnapshotBuilder {
                 }
             case .link:
                 if let url = URL(string: item.address) {
-                    capsule.links.append(url)
+                    capsule.links.append(ContextURLSanitizer.sanitized(url))
                 }
             case .terminal:
                 continue

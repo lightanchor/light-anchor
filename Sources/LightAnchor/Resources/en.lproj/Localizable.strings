@@ -1154,3 +1154,10 @@
 "record_a_process" = "Record a process";
 "stop_process_recording" = "Stop recording";
 "recording_for_duration" = "Recording · %@";
+
+// 安全加固（2026-09）
+"skipped_unsafe_item_on_restore" = "Skipped an unsafe item: %@";
+"only_http_links_can_be_opened" = "Only http/https links can be opened";
+"file_isn_t_a_plain_document" = "Only plain documents are opened, not apps, scripts, installers, or executables";
+"shortcut_name_can_t_start_with_a_dash" = "Shortcut names can't start with a dash";
+"on_device_speech_recognition_unavailable" = "On-device speech recognition isn't available for this language on this Mac; the recording wasn't transcribed so no audio is uploaded";

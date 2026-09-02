@@ -10,16 +10,20 @@ struct VoiceCaptureResult: Equatable, Sendable {
     let duration: TimeInterval
 }
 
-enum VoiceCaptureError: LocalizedError {
+enum VoiceCaptureError: LocalizedError, Equatable {
     case unavailable
     case notRecording
     case noTranscript
+    /// 该语言的识别器不支持端侧识别。隐私说明承诺「在本机转成文字」，
+    /// 所以宁可不转写，也不把录音送去 Apple 服务器。
+    case onDeviceRecognitionUnavailable
 
     var errorDescription: String? {
         switch self {
         case .unavailable: tr("voice_capture_is_unavailable_right_now")
         case .notRecording: tr("no_recording_in_progress")
         case .noTranscript: tr("recording_finished_but_no_usable_transcript")
+        case .onDeviceRecognitionUnavailable: tr("on_device_speech_recognition_unavailable")
         }
     }
 }
@@ -71,8 +75,14 @@ final class MacVoiceCaptureSession {
         guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "zh-CN")),
               recognizer.isAvailable
         else { throw VoiceCaptureError.unavailable }
+        // 只做端侧识别。识别器不支持时直接报错，而不是悄悄退回服务器识别——
+        // 设置里的隐私说明写的是「在本机转成文字」，这里必须兑现。
+        guard recognizer.supportsOnDeviceRecognition else {
+            throw VoiceCaptureError.onDeviceRecognitionUnavailable
+        }
 
         let request = SFSpeechURLRecognitionRequest(url: audioURL)
+        request.requiresOnDeviceRecognition = true
         let state = TranscriptionState()
         return try await withTaskCancellationHandler(operation: {
             try await withCheckedThrowingContinuation { continuation in
@@ -92,9 +102,10 @@ final class MacVoiceCaptureSession {
                     }
                 }
                 state.attach(task)
-                // Recognition runs on Apple's servers and can stop calling back
-                // without ever reporting a final result or an error, which would
-                // leave the capture hanging with no way out.
+                // Recognition is forced on-device (`requiresOnDeviceRecognition`),
+                // so no audio leaves this Mac; the on-device recogniser can still
+                // stop calling back without ever reporting a final result or an
+                // error, which would leave the capture hanging with no way out.
                 DispatchQueue.global().asyncAfter(deadline: .now() + transcriptionTimeout) {
                     state.finish(throwing: VoiceCaptureError.noTranscript)
                 }

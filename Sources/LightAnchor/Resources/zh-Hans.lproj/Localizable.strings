@@ -1157,3 +1157,10 @@
 "record_a_process" = "录制过程";
 "stop_process_recording" = "停止录制";
 "recording_for_duration" = "录制中 · %@";
+
+// 安全加固（2026-09）
+"skipped_unsafe_item_on_restore" = "已跳过不安全的条目：%@";
+"only_http_links_can_be_opened" = "只会打开 http/https 链接";
+"file_isn_t_a_plain_document" = "只会打开普通文档，不打开应用、脚本、安装包或可执行文件";
+"shortcut_name_can_t_start_with_a_dash" = "快捷指令名称不能以「-」开头";
+"on_device_speech_recognition_unavailable" = "这台 Mac 暂不支持该语言的本机语音识别；为了不上传录音，没有进行转写";

@@ -180,16 +180,25 @@ final class EnvironmentActionRunner {
             guard let url = URL(string: action.value), url.scheme != nil else {
                 return make(tr("open_link"), detail: action.value, status: .blocked(tr("invalid_link")))
             }
+            guard RestoreItemPolicy.allowsLink(url) else {
+                return make(tr("open_link"), detail: url.absoluteString, status: .blocked(tr("only_http_links_can_be_opened")))
+            }
             return make(tr("open_link"), detail: url.absoluteString)
 
         case .openFile:
             guard FileManager.default.fileExists(atPath: action.value) else {
                 return make(tr("open_file"), detail: action.value, status: .blocked(tr("the_file_doesn_t_exist")))
             }
+            guard RestoreItemPolicy.allowsFile(URL(fileURLWithPath: action.value)) else {
+                return make(tr("open_file"), detail: action.value, status: .blocked(tr("file_isn_t_a_plain_document")))
+            }
             return make(String(format: tr("open_file_named"), (action.value as NSString).lastPathComponent), detail: action.value)
 
         case .runShortcut:
-            return make(String(format: tr("run_shortcut_named"), action.value))
+            guard let shortcutName = Self.shortcutName(from: action.value) else {
+                return make(tr("run_shortcut"), detail: action.value, status: .blocked(tr("shortcut_name_can_t_start_with_a_dash")))
+            }
+            return make(String(format: tr("run_shortcut_named"), shortcutName))
 
         case .runCommand:
             return make(tr("run_a_command_in_zsh"), detail: action.value)
@@ -266,19 +275,47 @@ final class EnvironmentActionRunner {
             return result(for: action, succeeded: opened, success: tr("opened_the_app"), failure: tr("couldn_t_open_the_app"))
 
         case .openURL:
-            let url = URL(string: action.value)
-            let opened = url.map { NSWorkspace.shared.open($0) } ?? false
+            // 值来自持久化配置（可从备份恢复），只放 http/https：不让 file:// /
+            // 自定义 scheme 借「打开链接」启动别的东西。
+            guard let url = URL(string: action.value), RestoreItemPolicy.allowsLink(url) else {
+                return EnvironmentActionResult(
+                    actionID: action.id,
+                    status: .failed,
+                    message: tr("only_http_links_can_be_opened")
+                )
+            }
+            let opened = NSWorkspace.shared.open(url)
             return result(for: action, succeeded: opened, success: tr("opened_the_link"), failure: tr("the_link_is_invalid_or_wouldn_t_open"))
 
         case .openFile:
-            let opened = NSWorkspace.shared.open(URL(fileURLWithPath: action.value))
+            // 只打开普通文档；应用、脚本、安装包、可执行文件走「打开应用」或
+            // 「运行命令」那种明确的动作，不该藏在「打开文件」里。
+            let fileURL = URL(fileURLWithPath: action.value)
+            guard RestoreItemPolicy.allowsFile(fileURL) else {
+                return EnvironmentActionResult(
+                    actionID: action.id,
+                    status: .failed,
+                    message: FileManager.default.fileExists(atPath: action.value)
+                        ? tr("file_isn_t_a_plain_document")
+                        : tr("couldn_t_open_the_file")
+                )
+            }
+            let opened = NSWorkspace.shared.open(fileURL)
             return result(for: action, succeeded: opened, success: tr("opened_the_file"), failure: tr("couldn_t_open_the_file"))
 
         case .runShortcut:
+            // 以 - 开头的名字会被 `shortcuts` 当成选项解析。
+            guard let shortcutName = Self.shortcutName(from: action.value) else {
+                return EnvironmentActionResult(
+                    actionID: action.id,
+                    status: .failed,
+                    message: tr("shortcut_name_can_t_start_with_a_dash")
+                )
+            }
             return await runProcess(
                 action,
                 executableURL: URL(fileURLWithPath: "/usr/bin/shortcuts"),
-                arguments: ["run", action.value]
+                arguments: ["run", shortcutName]
             )
 
         case .runCommand:
@@ -476,6 +513,14 @@ final class EnvironmentActionRunner {
         case .openURL, .openFile, .runShortcut, .runCommand:
             return nil
         }
+    }
+
+    /// 传给 `shortcuts run` 的名字：去掉首尾空白；以 `-` 开头（会被当成选项）或
+    /// 为空的一律拒绝，返回 nil。
+    static func shortcutName(from value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.hasPrefix("-") else { return nil }
+        return trimmed
     }
 
     #if os(macOS)
