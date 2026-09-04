@@ -53,4 +53,10 @@ enum LightAnchorStorage {
     static func recordingsURL(fileManager: FileManager = .default) -> URL {
         rootURL(fileManager: fileManager).appendingPathComponent("recordings", isDirectory: true)
     }
+
+    /// 跟随事情的剪贴板历史目录（每段工作一个 <episodeID>.json）。
+    /// 与 trace 同理单独落盘：一段事里复制几十上百次，进事件日志会放大每次提交。
+    static func clipboardHistoryURL(fileManager: FileManager = .default) -> URL {
+        rootURL(fileManager: fileManager).appendingPathComponent("clipboard", isDirectory: true)
+    }
 }

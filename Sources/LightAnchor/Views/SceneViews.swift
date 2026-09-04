@@ -123,9 +123,7 @@ struct SceneCardView: View {
             }
 
             // 采集瞬间的剪贴板与桌面截图（对应开关开启时才有）
-            if !snapshot.clipboardText.isEmpty {
-                SceneClipboardRow(text: snapshot.clipboardText)
-            }
+            SceneClipboardStrips(snapshot: snapshot)
             SceneScreenshotRow(assetURL: snapshot.screenshotAssetURL)
 
             // 重新记录后的结果反馈：成功时条目自己会刷新，空/失败必须说清楚。
@@ -378,43 +376,274 @@ struct SceneCardView: View {
     }
 }
 
-// MARK: - 剪贴板与截图行（现场卡片和重返面板共用）
+// MARK: - 剪贴板复写条与截图行（现场卡片和重返面板共用）
 
-/// 采集瞬间的剪贴板内容：与条目行同一副行体——图标瓦片垂直居中、
-/// 内容做主行、「当时的剪贴板」做出处小字，混在同一列里不另起一套构图。
-/// 全文进 tooltip，一键放回系统剪贴板。
-struct SceneClipboardRow: View {
-    let text: String
-    @State private var justCopied = false
+/// 剪贴板 · 复写条（设计稿 docs/design/clipboard-history-row-2026-09-03.html 丁案）。
+/// 这段事里复制过的文字按「连续做事的一段」一张纸，放下再回来是新的一张，纸与纸
+/// 之间真的撕开（半圆齿边），撕口一句放下了多久。等宽字，命令 / 路径 / 代码最好读。
+/// 头一张的第一行就是放下那一刻手上的那条，放回常显；其余行 hover 现身。
+/// 放下那一刻没读到剪贴板、这段事也没复制过时整块不出现。
+struct SceneClipboardStrips: View {
+    let snapshot: SceneSnapshot
+    @EnvironmentObject private var workspace: AttentionWorkspace
+    @State private var strips: [ClipboardStrip] = []
+    @State private var isExpanded = false
+
+    /// 收起时只露头一张纸的前几行；再多就折成「再看 N 行」。
+    private static let collapsedLineLimit = 4
+
+    private struct RefreshKey: Equatable {
+        let snapshotID: UUID
+        let clipboardText: String
+        let revision: Int
+    }
 
     var body: some View {
-        HStack(spacing: 10) {
-            SceneGlyphTile(name: "clipboard")
-                .frame(width: 20)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(text)
-                    .font(LightAnchorTheme.bodyFont(size: 13, weight: .medium))
-                    .foregroundStyle(LightAnchorTheme.ink)
-                    .lineLimit(1)
-                    .help(text)
-                    .textSelection(.enabled)
-                Text(tr("clipboard_at_the_time"))
+        if workspace.hasClipboardContent(snapshot) {
+            content
+                .task(id: RefreshKey(
+                    snapshotID: snapshot.id,
+                    clipboardText: snapshot.clipboardText,
+                    revision: workspace.clipboardHistoryRevision
+                )) {
+                    strips = workspace.clipboardStrips(for: snapshot)
+                }
+        }
+    }
+
+    private var lineCount: Int { strips.reduce(0) { $0 + $1.entries.count } }
+
+    /// 收起：头一张纸截到上限，其余纸不画。展开：全画。
+    private var visibleStrips: [ClipboardStrip] {
+        guard !isExpanded, lineCount > Self.collapsedLineLimit, let head = strips.first else {
+            return strips
+        }
+        return [ClipboardStrip(
+            entries: Array(head.entries.prefix(Self.collapsedLineLimit)),
+            pauseAfter: nil
+        )]
+    }
+
+    private var hiddenLineCount: Int {
+        lineCount - visibleStrips.reduce(0) { $0 + $1.entries.count }
+    }
+
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(tr("clipboard_strip_title"))
+                    .font(LightAnchorTheme.supportingFont(size: 11))
+                    .foregroundStyle(LightAnchorTheme.mutedInk)
+                Spacer(minLength: 8)
+                Text(String(format: tr("clipboard_strip_lines"), lineCount))
                     .font(LightAnchorTheme.supportingFont(size: 11))
                     .foregroundStyle(LightAnchorTheme.faintInk)
+                    .monospacedDigit()
             }
-            Spacer(minLength: 10)
-            Button(justCopied ? tr("put_back") : tr("put_back_on_clipboard")) {
+
+            ForEach(Array(visibleStrips.enumerated()), id: \.element.id) { index, strip in
+                if index > 0, let pause = strip.pauseAfter {
+                    tearLabel(pause: pause)
+                }
+                ClipboardStripView(
+                    strip: strip,
+                    isHead: index == 0,
+                    tornTop: index > 0,
+                    tornBottom: index < visibleStrips.count - 1
+                )
+            }
+
+            if hiddenLineCount > 0 || isExpanded, lineCount > Self.collapsedLineLimit {
+                Button {
+                    withAnimation(.easeOut(duration: 0.18)) { isExpanded.toggle() }
+                } label: {
+                    Text(isExpanded
+                        ? tr("clipboard_strip_collapse")
+                        : String(format: tr("clipboard_strip_show_more"), hiddenLineCount))
+                        .font(LightAnchorTheme.supportingFont(size: 11))
+                        .foregroundStyle(LightAnchorTheme.faintInk)
+                        .padding(.leading, 14)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    /// 撕口之间的一句：两侧虚线夹着「放下了 42 分钟」。
+    private func tearLabel(pause: TimeInterval) -> some View {
+        let minutes = Int(pause / 60)
+        let duration = minutes < 1 ? tr("under_a_minute") : UserFacingCopy.focusDuration(minutes)
+        return HStack(spacing: 10) {
+            tearDash
+            Text(String(format: tr("clipboard_strip_set_down_for"), duration))
+                .font(LightAnchorTheme.supportingFont(size: 11))
+                .foregroundStyle(LightAnchorTheme.faintInk)
+                .fixedSize()
+            tearDash
+        }
+        .padding(.horizontal, 14)
+    }
+
+    private var tearDash: some View {
+        Rectangle()
+            .fill(.clear)
+            .frame(height: 1)
+            .overlay {
+                Path { path in
+                    path.move(to: .zero)
+                    path.addLine(to: CGPoint(x: 10_000, y: 0))
+                }
+                .stroke(LightAnchorTheme.hairlineBorder, style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                .frame(height: 1)
+                .clipped()
+            }
+    }
+}
+
+/// 一张复写纸：左缘一道竹签（头一张是蓝点的蓝；设计层禁阴影，稿里的蓝影不落地），
+/// 行是 时刻 · 文字 · 来源 · 放回。
+struct ClipboardStripView: View {
+    let strip: ClipboardStrip
+    let isHead: Bool
+    let tornTop: Bool
+    let tornBottom: Bool
+
+    @State private var hoveredID: UUID?
+    @State private var copiedID: UUID?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(strip.entries.enumerated()), id: \.element.id) { index, entry in
+                line(entry, isCurrent: isHead && index == 0)
+            }
+        }
+        .padding(.leading, 14)
+        .padding(.trailing, 10)
+        .padding(.top, tornTop ? 12 : (isHead ? 10 : 8))
+        .padding(.bottom, tornBottom ? 12 : 8)
+        .overlay(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 1, style: .continuous)
+                .fill(isHead ? AnyShapeStyle(LightAnchorTheme.primary) : AnyShapeStyle(LightAnchorTheme.faintInk.opacity(0.6)))
+                .frame(width: 2)
+                .padding(.vertical, 8)
+        }
+        .background {
+            TornStripShape(tornTop: tornTop, tornBottom: tornBottom)
+                .stroke(LightAnchorTheme.hairlineBorder, lineWidth: 1)
+        }
+    }
+
+    private func line(_ entry: ClipboardHistoryEntry, isCurrent: Bool) -> some View {
+        let isCopied = copiedID == entry.id
+        let showsPutBack = isCurrent || hoveredID == entry.id || isCopied
+        return HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(entry.at.formatted(date: .omitted, time: .shortened))
+                .font(LightAnchorTheme.monoFont(size: 10.5))
+                .foregroundStyle(LightAnchorTheme.faintInk)
+                .monospacedDigit()
+                .frame(width: 40, alignment: .leading)
+            Text(entry.text)
+                .font(LightAnchorTheme.monoFont(size: isCurrent ? 13 : 12))
+                .foregroundStyle(LightAnchorTheme.ink)
+                .lineLimit(isCurrent ? 3 : 1)
+                .truncationMode(.tail)
+                .help(entry.text)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if !isCurrent, !entry.sourceApplication.isEmpty {
+                Text(entry.sourceApplication)
+                    .font(LightAnchorTheme.supportingFont(size: 10.5))
+                    .foregroundStyle(LightAnchorTheme.faintInk)
+                    .lineLimit(1)
+            }
+            Button {
                 let pasteboard = NSPasteboard.general
                 pasteboard.clearContents()
-                pasteboard.setString(text, forType: .string)
-                justCopied = true
+                pasteboard.setString(entry.text, forType: .string)
+                copiedID = entry.id
+            } label: {
+                Text(isCopied ? tr("put_back") : tr("put_back_short"))
+                    .font(LightAnchorTheme.controlFont(size: 11, weight: .medium))
+                    .foregroundStyle(LightAnchorTheme.accentInk)
             }
-            .buttonStyle(LightAnchorQuietButtonStyle(compact: true))
-            .disabled(justCopied)
+            .buttonStyle(.plain)
+            .disabled(isCopied)
+            .opacity(showsPutBack ? 1 : 0)
+            .accessibilityLabel(tr("put_back_on_clipboard"))
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(LightAnchorTheme.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .padding(.vertical, isCurrent ? 3 : 2)
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            hoveredID = hovering ? entry.id : (hoveredID == entry.id ? nil : hoveredID)
+        }
+    }
+}
+
+/// 复写纸的边：直角圆 3；被撕开的那一边是一排半圆齿（间距 12，齿半径 4.5）。
+/// 半圆用三次贝塞尔近似，绕开 addArc 在翻转坐标系里的方向歧义。
+struct TornStripShape: Shape {
+    var tornTop: Bool
+    var tornBottom: Bool
+
+    private static let cornerRadius: CGFloat = 3
+    private static let pitch: CGFloat = 12
+    private static let notchRadius: CGFloat = 4.5
+    /// 半圆的贝塞尔控制点伸出量（≈ 4/3 · r）。
+    private static let bulge: CGFloat = 6
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let r = Self.cornerRadius
+        let notchCount = max(0, Int(rect.width / Self.pitch))
+        let inset = (rect.width - CGFloat(notchCount) * Self.pitch) / 2
+        func notchCenterX(_ index: Int) -> CGFloat {
+            rect.minX + inset + Self.pitch / 2 + CGFloat(index) * Self.pitch
+        }
+
+        // 上边：从左到右。
+        if tornTop {
+            path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+            for index in 0..<notchCount {
+                let cx = notchCenterX(index)
+                path.addLine(to: CGPoint(x: cx - Self.notchRadius, y: rect.minY))
+                path.addCurve(
+                    to: CGPoint(x: cx + Self.notchRadius, y: rect.minY),
+                    control1: CGPoint(x: cx - Self.notchRadius, y: rect.minY + Self.bulge),
+                    control2: CGPoint(x: cx + Self.notchRadius, y: rect.minY + Self.bulge)
+                )
+            }
+            path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        } else {
+            path.move(to: CGPoint(x: rect.minX, y: rect.minY + r))
+            path.addQuadCurve(to: CGPoint(x: rect.minX + r, y: rect.minY), control: CGPoint(x: rect.minX, y: rect.minY))
+            path.addLine(to: CGPoint(x: rect.maxX - r, y: rect.minY))
+            path.addQuadCurve(to: CGPoint(x: rect.maxX, y: rect.minY + r), control: CGPoint(x: rect.maxX, y: rect.minY))
+        }
+
+        // 右边。
+        path.addLine(to: CGPoint(x: rect.maxX, y: tornBottom ? rect.maxY : rect.maxY - r))
+
+        // 下边：从右到左。
+        if tornBottom {
+            for index in stride(from: notchCount - 1, through: 0, by: -1) {
+                let cx = notchCenterX(index)
+                path.addLine(to: CGPoint(x: cx + Self.notchRadius, y: rect.maxY))
+                path.addCurve(
+                    to: CGPoint(x: cx - Self.notchRadius, y: rect.maxY),
+                    control1: CGPoint(x: cx + Self.notchRadius, y: rect.maxY - Self.bulge),
+                    control2: CGPoint(x: cx - Self.notchRadius, y: rect.maxY - Self.bulge)
+                )
+            }
+            path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        } else {
+            path.addQuadCurve(to: CGPoint(x: rect.maxX - r, y: rect.maxY), control: CGPoint(x: rect.maxX, y: rect.maxY))
+            path.addLine(to: CGPoint(x: rect.minX + r, y: rect.maxY))
+            path.addQuadCurve(to: CGPoint(x: rect.minX, y: rect.maxY - r), control: CGPoint(x: rect.minX, y: rect.maxY))
+        }
+
+        // 左边回到起点。
+        path.closeSubpath()
+        return path
     }
 }
 
@@ -602,9 +831,7 @@ struct RecentSetAsideSheet: View {
                                     _ = workspace.removeSceneItem(snapshot.id, itemID: item.id)
                                 })
                             }
-                            if !snapshot.clipboardText.isEmpty {
-                                SceneClipboardRow(text: snapshot.clipboardText)
-                            }
+                            SceneClipboardStrips(snapshot: snapshot)
                         }
                         .lightAnchorRecessed(radius: 14, padding: 13)
                         .padding(.vertical, 1)
@@ -923,9 +1150,7 @@ struct SceneReturnPanel: View {
                         kindSection(kind: kind, items: items)
                     }
 
-                    if !snapshot.clipboardText.isEmpty {
-                        SceneClipboardRow(text: snapshot.clipboardText)
-                    }
+                    SceneClipboardStrips(snapshot: snapshot)
                     SceneScreenshotRow(assetURL: snapshot.screenshotAssetURL)
 
                     if staleness.values.contains(where: { $0.isActionable }) {

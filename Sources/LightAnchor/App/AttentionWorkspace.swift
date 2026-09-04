@@ -44,6 +44,30 @@ final class AttentionWorkspace: ObservableObject {
         }
     )
     private let contextCapture: (IntelligencePreferences, SceneCapturePreferences) -> ContextCapsule
+    private let clipboardHistoryStore: ClipboardHistoryStore
+    /// 测试注入的剪贴板读取；为 nil 时读系统剪贴板。
+    private let injectedClipboardSample: (() -> ClipboardSample)?
+    /// 跟随事情的剪贴板历史：谁在专注就记谁的，放下 / 等待 / 结束即停。
+    /// 开关与现场那一次读取同一个（「保存剪贴板内容」），自动记录暂停时也停。
+    private lazy var clipboardHistoryCoordinator = ClipboardHistoryCoordinator(
+        store: clipboardHistoryStore,
+        sample: { [weak self] in
+            if let injected = self?.injectedClipboardSample { return injected() }
+            guard let self else { return ClipboardSample(changeCount: 0, text: "", sourceApplication: "") }
+            return MacClipboardSampler.sample(
+                characterLimit: ContextCaptureOptions.default.clipboardCharacterLimit,
+                sourcePreferences: self.sceneCapturePreferences
+            )
+        },
+        isEnabled: { [weak self] in
+            guard let self else { return false }
+            return self.intelligencePreferences.saveClipboardContent
+                && !self.sceneCapturePreferences.isAutomaticCapturePaused
+        },
+        onChange: { [weak self] in self?.clipboardHistoryRevision &+= 1 }
+    )
+    /// 每记下一条剪贴板 +1：正在跟随那段事的现场卡据此重算复写条。
+    @Published private(set) var clipboardHistoryRevision = 0
 
     @Published private(set) var sceneCapturePreferences: SceneCapturePreferences = .load()
 
@@ -52,11 +76,15 @@ final class AttentionWorkspace: ObservableObject {
         assetStore: LocalAssetStore? = nil,
         sceneCapturePreferences: SceneCapturePreferences? = nil,
         recordingTraceStore: RecordingTraceStore? = nil,
+        clipboardHistoryStore: ClipboardHistoryStore? = nil,
+        clipboardSample: (() -> ClipboardSample)? = nil,
         contextCapture: ((IntelligencePreferences, SceneCapturePreferences) -> ContextCapsule)? = nil
     ) {
         self.store = store
         self.assetStore = assetStore ?? LocalAssetStore()
         self.recordingTraceStore = recordingTraceStore ?? RecordingTraceStore()
+        self.clipboardHistoryStore = clipboardHistoryStore ?? ClipboardHistoryStore()
+        self.injectedClipboardSample = clipboardSample
         self.sceneCapturePreferences = sceneCapturePreferences ?? .load()
         self.contextCapture = contextCapture ?? { intelligence, sourcePreferences in
             MacContextRecorder().capture(
@@ -113,6 +141,71 @@ final class AttentionWorkspace: ObservableObject {
         startActiveWaitingMonitors()
         scheduledTaskCoordinator.startMonitoringScheduledTasks(now: now)
         recordingCoordinator.finalizeOrphanedSessions(now: now)
+        // 重新打开应用时手上那件事还在专注，剪贴板历史接着往它的文件里写。
+        syncClipboardHistory(now: now)
+    }
+
+    // MARK: - 剪贴板历史
+
+    /// 让剪贴板历史跟上 episode 状态：占着「现在」且在专注（进行中 / 回场）的那段
+    /// 在跟随；放下、等待、结束或没有事在做就停。每次提交里有 episode 变化都会
+    /// 来一趟，所以不必在每个状态迁移入口各挂一次钩子。
+    private func syncClipboardHistory(now: Date) {
+        if let episode = currentEpisode,
+           episode.state == .active || episode.state == .returning {
+            clipboardHistoryCoordinator.follow(episode.id, now: now)
+        } else {
+            clipboardHistoryCoordinator.stopFollowing()
+        }
+    }
+
+    /// 某段工作期间复制过的文字，最早的在前。开关关着或那段事没复制过时为空。
+    func clipboardHistory(for episodeID: UUID) -> [ClipboardHistoryEntry] {
+        clipboardHistoryCoordinator.entries(for: episodeID)
+    }
+
+    /// 立刻看一次剪贴板（测试用；正常由轮询驱动）。
+    func sampleClipboardNow(at now: Date = Date()) {
+        clipboardHistoryCoordinator.sampleNow(at: now)
+    }
+
+    /// 某段工作的专注区间（进行中 / 回场），按时间先后；午夜切开的接回一段。
+    func focusIntervals(for episodeID: UUID, now: Date = Date()) -> [DateInterval] {
+        var intervals: [DateInterval] = []
+        for segment in FocusLedger.segments(events: events, now: now)
+        where segment.episodeID == episodeID {
+            if let last = intervals.last, last.end >= segment.start {
+                intervals[intervals.count - 1] = DateInterval(
+                    start: last.start,
+                    end: max(last.end, segment.end)
+                )
+            } else {
+                intervals.append(DateInterval(start: segment.start, end: segment.end))
+            }
+        }
+        return intervals
+    }
+
+    /// 一份现场的复写条：这段事期间复制过的文字按专注区间分纸，放下那一刻手上
+    /// 的那条（现场里的 clipboardText）若没在历史里就补成最新的一条。
+    func clipboardStrips(for sceneSnapshot: SceneSnapshot, now: Date = Date()) -> [ClipboardStrip] {
+        var entries = sceneSnapshot.episodeID.map { clipboardHistory(for: $0) } ?? []
+        if !sceneSnapshot.clipboardText.isEmpty,
+           entries.last?.text != sceneSnapshot.clipboardText {
+            entries.append(ClipboardHistoryEntry(
+                at: sceneSnapshot.capturedAt,
+                text: sceneSnapshot.clipboardText
+            ))
+        }
+        guard !entries.isEmpty else { return [] }
+        let intervals = sceneSnapshot.episodeID.map { focusIntervals(for: $0, now: now) } ?? []
+        return ClipboardStrip.build(entries: entries, focusIntervals: intervals)
+    }
+
+    /// 现场卡要不要画复写条：放下那一刻有剪贴板，或这段事里复制过东西。
+    func hasClipboardContent(_ sceneSnapshot: SceneSnapshot) -> Bool {
+        !sceneSnapshot.clipboardText.isEmpty
+            || sceneSnapshot.episodeID.map { !clipboardHistory(for: $0).isEmpty } ?? false
     }
 
     // MARK: - 时间账本
@@ -199,6 +292,7 @@ final class AttentionWorkspace: ObservableObject {
     /// 清理台提示里的「最近在做的事」。
     var recentTargetNames: [String] {
         snapshot.targets.values
+            .filter { $0.retiredAt == nil }
             .sorted { $0.updatedAt > $1.updatedAt }
             .prefix(6)
             .map(\.name)
@@ -431,6 +525,7 @@ final class AttentionWorkspace: ObservableObject {
         scheduledTaskCoordinator.cancelAllMonitoring()
         // 应用要退出了：在录的过程记录就地收尾，别留一份「还在录」的孤儿。
         _ = recordingCoordinator.stop()
+        clipboardHistoryCoordinator.stopFollowing()
     }
 
     /// - Parameter quarantiningRestoredAutomation: 从备份恢复后为 true。备份是外部
@@ -445,6 +540,7 @@ final class AttentionWorkspace: ObservableObject {
             snapshot = AttentionSnapshot.replay(loadedEvents)
             lastError = nil
             isEventLogReadable = true
+            syncClipboardHistory(now: now)
             if quarantiningRestoredAutomation {
                 quarantineAutomation(now: now)
             }
@@ -522,6 +618,8 @@ final class AttentionWorkspace: ObservableObject {
             if let activeRecordingID = recordingCoordinator.activeSessionID {
                 recordingCoordinator.discard(activeRecordingID)
             }
+            // 同理：先丢内存里的剪贴板历史，免得停跟随时再把文件写回刚删的目录。
+            clipboardHistoryCoordinator.discardAll()
             if FileManager.default.fileExists(atPath: store.fileURL.path) {
                 try FileManager.default.removeItem(at: store.fileURL)
             }
@@ -585,17 +683,54 @@ final class AttentionWorkspace: ObservableObject {
         environmentProfileID: UUID?,
         now: Date = Date()
     ) -> Bool {
-        guard let target = snapshot.targets[targetID] else { return false }
-        let updatedTarget = AttentionTarget(
-            id: target.id,
+        // 改字段而不是重建：目标身上还有别的记忆（现场筛选偏好、步骤归属、
+        // 收起墓碑），重建会把没列出来的字段悄悄抹掉。
+        guard var target = snapshot.targets[targetID] else { return false }
+        target.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        target.note = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        target.environmentProfileID = environmentProfileID
+        target.updatedAt = now
+        guard target.isValid else { return false }
+        return commit([.targetChanged(target, at: now)])
+    }
+
+    // MARK: - 步骤（大任务里的小步骤）
+
+    /// 给一件大任务加一个步骤：步骤是完整的目标（自己的段/现场/计时），
+    /// 只允许一层——步骤不能再拆步骤。
+    @discardableResult
+    func addStep(named name: String, to parentID: UUID, now: Date = Date()) -> AttentionTarget? {
+        guard let parent = snapshot.targets[parentID], parent.parentTargetID == nil else { return nil }
+        let step = AttentionTarget(
             name: name,
-            note: note,
-            createdAt: target.createdAt,
+            createdAt: now,
             updatedAt: now,
-            environmentProfileID: environmentProfileID
+            parentTargetID: parentID
         )
-        guard updatedTarget.isValid else { return false }
-        return commit([.targetChanged(updatedTarget, at: now)])
+        guard step.isValid else { return nil }
+        guard commit([.targetChanged(step, at: now)]) else { return nil }
+        return step
+    }
+
+    /// 完成一件大任务并连带收起没做完的步骤（UI 在按下前负责提醒确认）：
+    /// 步骤还开着的段按「放弃」收束（等待一并关掉），再盖上 retiredAt 墓碑——
+    /// 从此不进任何清单；事件日志保留全部历史。
+    @discardableResult
+    func endEpisodeCollapsingSteps(_ episodeID: UUID, now: Date = Date()) -> Bool {
+        guard let episode = snapshot.episodes[episodeID] else { return false }
+        let parentID = episode.targetID
+        guard endEpisode(episodeID, now: now) else { return false }
+        var retireEvents: [AttentionEvent] = []
+        for step in snapshot.unfinishedSteps(of: parentID) {
+            if let open = snapshot.latestEpisode(of: step.id), open.state != .ended {
+                _ = abandonEpisode(open.id, now: now)
+            }
+            guard var retired = snapshot.targets[step.id] else { continue }
+            retired.retiredAt = now
+            retired.updatedAt = now
+            retireEvents.append(.targetChanged(retired, at: now))
+        }
+        return retireEvents.isEmpty || commit(retireEvents)
     }
 
     @discardableResult
@@ -1987,6 +2122,7 @@ final class AttentionWorkspace: ObservableObject {
         guard !sceneCapturePreferences.isAutomaticCapturePaused,
               snapshot.episodes[episodeID]?.context.hasSceneContent == true
         else { return }
+        let announcingSetAside = announcingSetAside && !isSwitchingQuietly
         Task { [weak self] in
             guard let self else { return }
             let captured = await self.captureSceneSnapshot(for: episodeID)
@@ -2008,6 +2144,77 @@ final class AttentionWorkspace: ObservableObject {
     /// 用户看过「已放下」确认卡后收起它。
     func dismissRecentSetAside() {
         recentSetAside = nil
+    }
+
+    // MARK: - 「换一件事」
+
+    /// 换一件事时，手上这件怎么放：暂时放下 / 转成等待（在等什么）/ 做完了。
+    enum SetAsideMode: Equatable {
+        case pause
+        case wait(String)
+        case done
+    }
+
+    /// 手上现场的实时预览（不落盘）。「换一件事」卡上的「现场 N 样」和现场页
+    /// 用它：放下的那份快照要到切换之后才异步生成，但用户在切换前就要看见、
+    /// 并能逐条划掉。划掉的条目由 `setAsideCurrent` 从上下文里剔除后再放下。
+    struct ScenePreview: Equatable {
+        var context: ContextCapsule
+        var items: [SceneItem]
+    }
+
+    func previewCurrentScene() -> ScenePreview? {
+        guard let episode = currentEpisode else { return nil }
+        var capsule = episode.context
+        if !sceneCapturePreferences.isAutomaticCapturePaused {
+            let fresh = contextCapture(intelligencePreferences, sceneCapturePreferences)
+            if fresh.hasSceneContent {
+                capsule = fresh
+                capsule.note = episode.context.note
+            }
+        }
+        return ScenePreview(context: capsule, items: SceneSnapshotBuilder.items(from: capsule))
+    }
+
+    /// 放下手上这件：`keeping` 是用户划掉之后剩下的现场（nil = 不改现场）。
+    /// 上下文的采集时间对齐到 `now`，`boundaryContext` 便会沿用它而不再读一遍桌面
+    /// ——否则用户刚划掉的东西会被切换瞬间的重新采集原样捞回来。
+    @discardableResult
+    func setAsideCurrent(
+        _ mode: SetAsideMode,
+        keeping kept: ContextCapsule? = nil,
+        returnCue: String,
+        now: Date = Date()
+    ) -> Bool {
+        guard let episode = currentEpisode, episode.state != .ended else { return false }
+        var context = kept ?? episode.context
+        context.capturedAt = now
+        guard updateContext(for: episode.id, context: context, returnCue: returnCue, now: now) else {
+            return false
+        }
+        switch mode {
+        case .pause:
+            return pauseEpisode(episode.id, now: now)
+        case .wait(let description):
+            let trimmed = description.trimmingCharacters(in: .whitespacesAndNewlines)
+            return beginWaiting(
+                episodeID: episode.id,
+                description: trimmed.isEmpty ? tr("waiting_for_something") : trimmed,
+                now: now
+            ) != nil
+        case .done:
+            return endEpisode(episode.id, now: now)
+        }
+    }
+
+    /// 「换一件事」卡已经让用户写了回来先看、逐条剔了现场，随后不必再弹
+    /// 「已放下」确认卡。`body` 里发生的放下都静默存现场。
+    private var isSwitchingQuietly = false
+
+    func performQuietSwitch<T>(_ body: () -> T) -> T {
+        isSwitchingQuietly = true
+        defer { isSwitchingQuietly = false }
+        return body()
     }
 
     #if DEBUG
@@ -2241,6 +2448,7 @@ final class AttentionWorkspace: ObservableObject {
     func restoreScene(
         _ snapshotID: UUID,
         selectedKinds: Set<SceneItemKind>? = nil,
+        selectedItemIDs: Set<UUID>? = nil,
         resolvingWaitingID: UUID? = nil,
         now: Date = Date()
     ) -> ContextRestoreReport {
@@ -2251,11 +2459,13 @@ final class AttentionWorkspace: ObservableObject {
         if recentSetAside?.snapshotID == snapshotID {
             recentSetAside = nil
         }
-        let items: [SceneItem]
+        var items = sceneSnapshot.restorableItems
         if let selectedKinds {
-            items = sceneSnapshot.restorableItems.filter { selectedKinds.contains($0.kind) }
-        } else {
-            items = sceneSnapshot.restorableItems
+            items = items.filter { selectedKinds.contains($0.kind) }
+        }
+        // 「换一件事」现场页里逐条划掉的不开。
+        if let selectedItemIDs {
+            items = items.filter { selectedItemIDs.contains($0.id) }
         }
 
         // 先完成等待/episode 状态流转，再执行恢复动作
@@ -2306,6 +2516,9 @@ final class AttentionWorkspace: ObservableObject {
             events = persistedEvents
             snapshot = AttentionSnapshot.replay(persistedEvents)
             lastError = nil
+            if newEvents.contains(where: { $0.kind == .episodeChanged }) {
+                syncClipboardHistory(now: newEvents.last?.occurredAt ?? Date())
+            }
             return true
         } catch {
             lastError = error.localizedDescription

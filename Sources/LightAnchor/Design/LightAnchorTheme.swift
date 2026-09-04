@@ -14,6 +14,16 @@ enum LightAnchorTheme {
 
     static let windowBackground = LightAnchorThemeColor(.background)
     static let sidebarBackground = LightAnchorThemeColor(.sidebar)
+    // r23「换一件事」舞台面板专属色（docs/switch-work-redesign-r23-2026-09-04.html）。
+    static let stagePanel = LightAnchorThemeColor(.stagePanel)
+    static let stageSidebar = LightAnchorThemeColor(.stageSidebar)
+    static let stageLine = LightAnchorThemeColor(.stageLine)
+    static let stageLineSoft = LightAnchorThemeColor(.stageLineSoft)
+    static let stageRowHover = LightAnchorThemeColor(.stageRowHover)
+    static let stageMutedInk = LightAnchorThemeColor(.stageMuted)
+    static let stageFaintInk = LightAnchorThemeColor(.stageFaint)
+    static let stageAccentSoft = LightAnchorThemeColor(.stageAccentSoft)
+    static let stageWash = LightAnchorThemeColor(.stageWash)
     static let sidebarSelection = LightAnchorThemeColor(.sidebarAccent)
     static let sidebarHairline = LightAnchorThemeColor(.sidebarBorder)
     static let contentBackground = LightAnchorThemeColor(.background)
@@ -482,7 +492,32 @@ struct LightAnchorHoverFillModifier: ViewModifier {
     }
 }
 
+/// r23 舞台面板投影的冷灰紫底色（--shadow 与 .stamp 里的 rgba(30,28,50,…)）。
+private let lightAnchorStageShadowTint = Color(red: 30 / 255, green: 28 / 255, blue: 50 / 255)
+
 extension View {
+    /// r23 舞台面板与其浮层的投影（--shadow：0 1px 2px rgba(30,28,50,.04)、
+    /// 0 16px 44px rgba(30,28,50,.10)；CSS 的 blur 直径 ≈ SwiftUI radius 的两倍）。
+    func lightAnchorStagePanelShadow() -> some View {
+        self
+            .shadow(color: lightAnchorStageShadowTint.opacity(0.04), radius: 1, y: 1)
+            .shadow(color: lightAnchorStageShadowTint.opacity(0.10), radius: 22, y: 16)
+    }
+
+    /// 邮票的投影（设计 drop-shadow：0 1px 1.5px .22 + 0 6px 14px .10）：
+    /// 贴在纸上的一张小票——一层紧贴的暗边 + 一层扩散。
+    /// 必须画在 mask 之外的一层，否则齿边会连着投影一起被剪掉。
+    func lightAnchorStampShadow() -> some View {
+        self
+            .shadow(color: lightAnchorStageShadowTint.opacity(0.22), radius: 0.75, y: 1)
+            .shadow(color: lightAnchorStageShadowTint.opacity(0.10), radius: 7, y: 6)
+    }
+
+    /// 样机相纸 / 便笺纸边那种很浅的一层投影。
+    func lightAnchorPaperEdgeShadow(radius: CGFloat = 2, y: CGFloat = 1) -> some View {
+        shadow(color: .black.opacity(0.12), radius: radius, y: y)
+    }
+
     func lightAnchorHoverFill(cornerRadius: CGFloat, isActive: Bool = true) -> some View {
         modifier(LightAnchorHoverFillModifier(cornerRadius: cornerRadius, isActive: isActive))
     }
@@ -1474,5 +1509,23 @@ extension Color {
         self.init(nsColor: NSColor(name: nil) { appearance in
             appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
         })
+    }
+}
+
+/// 舞台压暗层（样机 .stage .dim）：整窗压暗，让面板成为唯一焦点。
+/// r22 的卡是 600×480 的小纸，.12 就够；r23 的面板 1020×560 几乎占满窗口，
+/// 压暗太弱时主窗口的计时大字与侧栏会从面板四周透出来抢焦点——加深到 .32 / .62。
+struct LightAnchorStageDim: View {
+    let colorScheme: ColorScheme
+
+    var body: some View {
+        Rectangle()
+            .fill(
+                colorScheme == .dark
+                    ? Color.black.opacity(0.62)
+                    : Color(red: 59 / 255, green: 54 / 255, blue: 68 / 255).opacity(0.32)
+            )
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
     }
 }

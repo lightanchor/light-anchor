@@ -13,7 +13,14 @@ func tr(_ key: String) -> String {
 
 enum LocalizationTable {
     /// 单测进程固定读 zh-Hans：让测试里的中文断言与跑测试机器的系统语言无关。
-    static let pinToChinese = NSClassFromString("XCTestCase") != nil
+    static let pinToChinese: Bool = {
+        if NSClassFromString("XCTestCase") != nil { return true }
+        #if DEBUG
+        // 调试后门：裸可执行文件不认 -AppleLanguages，验收截图用它强制中文。
+        if ProcessInfo.processInfo.environment["LIGHTANCHOR_DEBUG_LANGUAGE"] == "zh-Hans" { return true }
+        #endif
+        return false
+    }()
 
     /// 查不到时 localizedString 会原样回吐 value，用不可能出现在文案里的哨兵区分。
     private static let missing = "\u{1}?"

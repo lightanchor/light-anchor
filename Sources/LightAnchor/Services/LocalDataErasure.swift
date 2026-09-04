@@ -27,7 +27,9 @@ enum LocalDataErasure {
             // 检索索引是缓存，但里面装着捕获与问答的全文，删数据必须一并清。
             LightAnchorStorage.memoryIndexURL(),
             // 过程记录的 trace 目录（整个目录一起移除）。
-            LightAnchorStorage.recordingsURL()
+            LightAnchorStorage.recordingsURL(),
+            // 跟随事情的剪贴板历史目录：里面是用户复制过的原文，必须一并清。
+            LightAnchorStorage.clipboardHistoryURL()
         ].map(\.lastPathComponent)
     }
 

@@ -179,6 +179,12 @@ struct AttentionTarget: Codable, Equatable, Identifiable {
     var environmentProfileID: UUID?
     /// 该目标的现场筛选偏好（按目标记忆）。nil 表示跟随全局默认。
     var sceneFilterMode: SceneFilterMode?
+    /// 属于哪件大任务：非空表示这是它的一个**步骤**（只有一层，步骤不能再拆步骤）。
+    /// 步骤是完整的目标——自己的段、自己的现场、自己的计时，切换走换一件事仪式。
+    var parentTargetID: UUID?
+    /// 连带收起的墓碑：大任务完成时没做完的步骤盖上这个时刻，
+    /// 从此不再出现在任何清单里（事件日志保留全部历史）。
+    var retiredAt: Date?
 
     init(
         id: UUID = UUID(),
@@ -187,7 +193,9 @@ struct AttentionTarget: Codable, Equatable, Identifiable {
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
         environmentProfileID: UUID? = nil,
-        sceneFilterMode: SceneFilterMode? = nil
+        sceneFilterMode: SceneFilterMode? = nil,
+        parentTargetID: UUID? = nil,
+        retiredAt: Date? = nil
     ) {
         self.id = id
         self.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -196,6 +204,8 @@ struct AttentionTarget: Codable, Equatable, Identifiable {
         self.updatedAt = updatedAt
         self.environmentProfileID = environmentProfileID
         self.sceneFilterMode = sceneFilterMode
+        self.parentTargetID = parentTargetID
+        self.retiredAt = retiredAt
     }
 
     var isValid: Bool {

@@ -206,6 +206,16 @@ enum LightAnchorThemeRole: String, CaseIterable, Hashable, Sendable {
     case sidebar
     case sidebarAccent
     case sidebarBorder
+    // r23「换一件事」舞台面板（docs/switch-work-redesign-r23-2026-09-04.html 定稿）专属色。
+    case stagePanel
+    case stageSidebar
+    case stageLine
+    case stageLineSoft
+    case stageRowHover
+    case stageMuted
+    case stageFaint
+    case stageAccentSoft
+    case stageWash
     case brand
     case highlight
     case text1
@@ -308,6 +318,17 @@ struct LightAnchorThemePalette {
         "sidebar": "#F5F1EA",
         "sidebarAccent": "#EBE4D8",
         "sidebarBorder": "#EEE8DD",
+        // r23「换一件事」舞台面板：定稿 HTML :root 里的 --panel / --sb-bg / --line /
+        // --line-soft / --row-hover / --muted / --faint / --accent-soft / --wash。
+        "stagePanel": "#FDFCFA",
+        "stageSidebar": "#F4F2ED",
+        "stageLine": "#E7E4DD",
+        "stageLineSoft": "#EFECE5",
+        "stageRowHover": "#EDEAE3",
+        "stageMuted": "#8B889C",
+        "stageFaint": "#B6B3C2",
+        "stageAccentSoft": "#8FC4DD",
+        "stageWash": "#EAF3F8",
         "brand": "#5BA7CE",
         "highlight": "#F6E3AE",
         "text1": "#3B3644",
@@ -358,6 +379,16 @@ struct LightAnchorThemePalette {
         "sidebar": "#1C1922",
         "sidebarAccent": "#322E3C",
         "sidebarBorder": "#2E2A38",
+        // r23 舞台面板（body.dark）。--wash 在深色下本来就是半透明的 rgba(121,192,230,.14)。
+        "stagePanel": "#211F28",
+        "stageSidebar": "#1B1A21",
+        "stageLine": "#302E3A",
+        "stageLineSoft": "#2A2833",
+        "stageRowHover": "#282631",
+        "stageMuted": "#A5A2B4",
+        "stageFaint": "#6F6C80",
+        "stageAccentSoft": "#5A9CC0",
+        "stageWash": "#79C0E624",
         "brand": "#79C0E6",
         "highlight": "#E8C26A29",
         "text1": "#ECE8F1",

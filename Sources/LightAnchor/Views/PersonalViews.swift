@@ -814,9 +814,7 @@ private struct RecentWorkSceneSheet: View {
                             isTucked: snapshot.filterMode == .aiFiltered && !item.isRelevant
                         )
                     }
-                    if !snapshot.clipboardText.isEmpty {
-                        SceneClipboardRow(text: snapshot.clipboardText)
-                    }
+                    SceneClipboardStrips(snapshot: snapshot)
                     SceneScreenshotRow(assetURL: snapshot.screenshotAssetURL)
                 }
                 .padding(20)

@@ -51,7 +51,9 @@ final class LocalDataErasureTests: XCTestCase {
             LightAnchorStorage.assetsURL(),
             LightAnchorStorage.diagnosticsURL(),
             LightAnchorStorage.launchMarkerURL(),
-            LightAnchorStorage.memoryChatURL()
+            LightAnchorStorage.memoryChatURL(),
+            LightAnchorStorage.recordingsURL(),
+            LightAnchorStorage.clipboardHistoryURL()
         ].map(\.lastPathComponent)
 
         for name in storageFiles where !handledElsewhere.contains(name) {

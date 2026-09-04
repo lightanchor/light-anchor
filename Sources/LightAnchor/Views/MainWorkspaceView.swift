@@ -15,9 +15,10 @@ struct MainWorkspaceView: View {
     @State private var selectedDestination: WorkspaceDestination? = .now
     @State private var showingStartWork = false
     /// 「更多设置…」带过去的名字：浮层里敲了一半就不该让用户再打一遍。
-    @State private var startWorkInitialName = ""
     /// 「换一件事」浮层：开始/切换到某件事的唯一入口（⌘K）。
     @State private var showingSwitchWork = false
+    /// 打开「换一件事」时预选的目标（步骤卡「切到这步」带过来）。
+    @State private var switchWorkInitialPick: UUID?
     /// 等待编辑器按打开瞬间的 episode 钉住（.sheet(item:)）：
     /// isPresented + if-let 在条件落空时会呈现一张空 sheet，把主窗压暗。
     @State private var waitingEditorContext: WaitingEditorContext?
@@ -120,10 +121,10 @@ struct MainWorkspaceView: View {
             workspaceDetail
         }
         .overlay(alignment: .topLeading) { anchorStripControls }
-        // 悬浮动作组（新建定时 / 录制过程）：工具类动作不占侧栏，
-        // 右下角收着，点开展开；录制中带红点指示，任何页面都可见。
+        // 录制状态胶囊：只在录制中出现，右下角悬浮，任何页面都可见。
+        // 工具类动作（新建定时 / 录制过程）收在岛工具行的「工具」菜单里。
         .overlay(alignment: .bottomTrailing) {
-            WorkspaceToolCluster()
+            WorkspaceRecordingPill()
                 .environmentObject(workspace)
                 .padding(.trailing, 18)
                 .padding(.bottom, 18)
@@ -181,6 +182,30 @@ struct MainWorkspaceView: View {
                 }
             default: break
             }
+            // 调试后门：LIGHTANCHOR_DEBUG_DUMP_WINDOWS=<目录> 两秒后把每个窗口的内容
+            // 渲染成 PNG 落到该目录（截图/验收用；不需要屏幕录制权限）。
+            // 调试后门：LIGHTANCHOR_DEBUG_WINDOW_SIZE=<宽>x<高> 把主窗撑到这个尺寸，
+            // 好把内容长的界面（现场页）一次截全。
+            if let size = ProcessInfo.processInfo.environment["LIGHTANCHOR_DEBUG_WINDOW_SIZE"] {
+                let parts = size.split(separator: "x").compactMap { Double($0) }
+                if parts.count == 2 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        NSApp.windows.first { $0.isVisible }?
+                            .setContentSize(NSSize(width: parts[0], height: parts[1]))
+                    }
+                }
+            }
+            if let directory = ProcessInfo.processInfo.environment["LIGHTANCHOR_DEBUG_DUMP_WINDOWS"] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                    for (index, window) in NSApp.windows.enumerated() where window.isVisible {
+                        guard let view = window.contentView,
+                              let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
+                        view.cacheDisplay(in: view.bounds, to: rep)
+                        let url = URL(fileURLWithPath: directory).appendingPathComponent("window-\(index).png")
+                        try? rep.representation(using: .png, properties: [:])?.write(to: url)
+                    }
+                }
+            }
             #endif
             selectedDestination = WorkspaceDestination(rawValue: destinationRawValue) ?? .now
             showingInspector = inspectorSceneValue
@@ -221,27 +246,32 @@ struct MainWorkspaceView: View {
             inspectorSceneValue = value
         }
         .sheet(isPresented: $showingStartWork) {
-            StartWorkView(initialName: startWorkInitialName)
+            StartWorkView()
                 .environmentObject(workspace)
         }
-        .sheet(isPresented: $showingSwitchWork) {
-            SwitchWorkSheet(
-                onSwitched: {
-                    showingSwitchWork = false
-                    // 换过去之后要看到的是那件事本身，不是刚才的回顾页。
-                    reviewingTargetID = nil
-                    selectedSearchResult = nil
-                    withAnimation(sideDotAnimation) {
-                        selectedDestination = .now
-                    }
-                },
-                onNewWorkDetails: { name in
-                    showingSwitchWork = false
-                    startWorkInitialName = name
-                    showingStartWork = true
-                }
-            )
-            .environmentObject(workspace)
+        // 「换一件事」不是系统 sheet：是压暗的舞台上居中的一张纸（定稿 r22 的 .stage），
+        // 浮层可以溢出到纸外，底下露出便笺垫的纸边——这些窗口做不到。
+        .overlay {
+            if showingSwitchWork {
+                SwitchWorkStage(
+                    onSwitched: {
+                        showingSwitchWork = false
+                        switchWorkInitialPick = nil
+                        // 换过去之后要看到的是那件事本身，不是刚才的回顾页。
+                        reviewingTargetID = nil
+                        selectedSearchResult = nil
+                        withAnimation(sideDotAnimation) {
+                            selectedDestination = .now
+                        }
+                    },
+                    onDismiss: {
+                        showingSwitchWork = false
+                        switchWorkInitialPick = nil
+                    },
+                    initialPick: switchWorkInitialPick
+                )
+                .environmentObject(workspace)
+            }
         }
         // 「已放下」确认弹窗：暂时放下 / 换一件事、现场存好后弹出——这段
         // 专注了多久、保存了什么摆在眼前，趁记忆还热写下「回来先看」，
@@ -516,7 +546,9 @@ struct MainWorkspaceView: View {
             .sorted { ($0.endedAt ?? $0.startedAt) > ($1.endedAt ?? $1.startedAt) }
             .prefix(12)
             .compactMap { episode in
-                guard let target = workspace.snapshot.targets[episode.targetID] else { return nil }
+                guard let target = workspace.snapshot.targets[episode.targetID], target.retiredAt == nil else {
+                    return nil
+                }
                 return (target: target, episode: episode)
             }
     }
@@ -778,6 +810,12 @@ struct MainWorkspaceView: View {
         showingSwitchWork = true
     }
 
+    /// 「切到这步」：仪式照走（用户定：步骤切换算换一件事），这一条已经挑好。
+    private func openSwitchWork(picking targetID: UUID) {
+        switchWorkInitialPick = targetID
+        showingSwitchWork = true
+    }
+
     private func toggleSwitchWork() {
         showingSwitchWork.toggle()
     }
@@ -800,6 +838,16 @@ struct MainWorkspaceView: View {
             Spacer(minLength: 0)
 
             // 对话页整条工具行都不出现（用户定），这里无需再按页隐藏。
+            // 工具组（新建定时 / 录制过程）：图标直显、悬停有提示，
+            // 与右侧常用三键之间一道竖线分组。
+            WorkspaceToolbarTools()
+
+            Rectangle()
+                .fill(LightAnchorTheme.hairlineBorder)
+                .frame(width: 1, height: 16)
+                .padding(.horizontal, 6)
+                .accessibilityHidden(true)
+
             // + 直接开捕获窗（沿用上次去向，去向在捕获窗里改）——
             // 原来的「记到稍后 / 存进暂存箱」下拉被否：多一步选择才见到输入框。
             Button(action: openCaptureWindow) {
@@ -907,6 +955,7 @@ struct MainWorkspaceView: View {
             // 有当前工作时它是「换一件事」。
             onStart: openSwitchWork,
             onSwitch: openSwitchWork,
+            onSwitchToStep: { openSwitchWork(picking: $0) },
             onCapture: openCaptureWindow,
             onWait: showWaitingEditor,
             onRestore: restoreCurrentContext,
@@ -994,7 +1043,7 @@ struct MainWorkspaceView: View {
             }
         }
 
-        for target in workspace.snapshot.targets.values {
+        for target in workspace.snapshot.targets.values where target.retiredAt == nil {
             guard let score = WorkspaceSearchScoring.score(
                 query: query,
                 fields: [
@@ -1700,10 +1749,19 @@ private struct NowSpaceView: View {
     @EnvironmentObject private var workspace: AttentionWorkspace
     let onStart: () -> Void
     let onSwitch: () -> Void
+    /// 「切到这步」：打开换一件事并预选那一步（步骤切换算换一件事，仪式照走）。
+    let onSwitchToStep: (UUID) -> Void
     let onCapture: () -> Void
     let onWait: () -> Void
     let onRestore: () -> Void
     let onOpenDestination: (WorkspaceDestination) -> Void
+
+    // 步骤卡的输入态：点「加一步」现身，回车连着加，esc 收起。
+    @State private var addingStep = false
+    @State private var stepDraft = ""
+    @FocusState private var stepFieldFocused: Bool
+    /// 完成一件还有未完成步骤的大事：先提醒，确认了才连带收起。
+    @State private var confirmingFinishSteps = false
 
     var body: some View {
         // 居中舞台构图（样机 .herowrap/.empty：垂直水平双居中，
@@ -1826,9 +1884,11 @@ private struct NowSpaceView: View {
                         .foregroundStyle(LightAnchorDesign.waiting)
                 }
 
+                stepsSection(for: target)
+
                 cardSeparator
 
-                currentWorkActions(episode: episode)
+                currentWorkActions(episode: episode, target: target)
             }
             .padding(.horizontal, 26)
             .padding(.top, 22)
@@ -1836,6 +1896,20 @@ private struct NowSpaceView: View {
             // 宽度跟随窗口（用户要求：不写死），铺满除页边距外的舞台宽。
             .frame(maxWidth: .infinity, alignment: .leading)
             .lightAnchorPanel(radius: LightAnchorDesign.radiusHero)
+            .confirmationDialog(
+                finishStepsTitle(for: target),
+                isPresented: $confirmingFinishSteps,
+                titleVisibility: .visible
+            ) {
+                Button(tr("finish_and_collapse_steps")) {
+                    if let current = workspace.currentEpisode {
+                        _ = workspace.endEpisodeCollapsingSteps(current.id)
+                    }
+                }
+                Button(tr("cancel"), role: .cancel) {}
+            } message: {
+                Text(tr("finish_steps_alert_message"))
+            }
 
             workspaceStatChips
                 .padding(.top, 18)
@@ -1900,8 +1974,133 @@ private struct NowSpaceView: View {
         workspace.snapshot.focusMinutes(of: episode.id)
     }
 
+    // MARK: 步骤（大任务拆小步骤）
+
+    /// 步骤住在哪件大事名下：当前是步骤就看它的母任务——顺便看到大任务进度和兄弟步骤。
+    private func stepsHostID(for target: AttentionTarget) -> UUID {
+        target.parentTargetID ?? target.id
+    }
+
+    /// 步骤卡：清单 + 进度 + 「加一步」。步骤是完整的目标（自己的段/现场/计时），
+    /// 这里只是大任务名下的一份目录；切换走换一件事仪式。
     @ViewBuilder
-    private func currentWorkActions(episode: AttentionEpisode) -> some View {
+    private func stepsSection(for target: AttentionTarget) -> some View {
+        let hostID = stepsHostID(for: target)
+        let steps = workspace.snapshot.steps(of: hostID).filter { $0.retiredAt == nil }
+        if !steps.isEmpty || addingStep || target.parentTargetID == nil {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 8) {
+                    Text(stepsHeader(for: target))
+                        .font(LightAnchorTheme.supportingFont(size: 12, weight: .semibold))
+                        .foregroundStyle(LightAnchorTheme.mutedInk)
+                    if let progress = workspace.snapshot.stepProgress(of: hostID) {
+                        // 眉题已经写着「步骤」，计数不再带单位。
+                        Text("\(progress.done)/\(progress.total)")
+                            .font(LightAnchorTheme.supportingFont(size: 12))
+                            .monospacedDigit()
+                            .foregroundStyle(LightAnchorTheme.accentInk)
+                    }
+                    Spacer(minLength: 8)
+                    if !addingStep {
+                        Button(tr("add_a_step")) {
+                            addingStep = true
+                            stepFieldFocused = true
+                        }
+                        .buttonStyle(LightAnchorQuietButtonStyle(compact: true))
+                    }
+                }
+                ForEach(steps) { step in
+                    stepRow(step, currentTargetID: target.id)
+                }
+                if addingStep {
+                    TextField(tr("step_name_placeholder"), text: $stepDraft)
+                        .textFieldStyle(.plain)
+                        .font(LightAnchorTheme.bodyFont(size: 13))
+                        .focused($stepFieldFocused)
+                        .frame(minHeight: 26)
+                        .onSubmit { commitStepDraft(hostID: hostID) }
+                        .onExitCommand {
+                            addingStep = false
+                            stepDraft = ""
+                        }
+                }
+            }
+            .lightAnchorRecessed(radius: 12, padding: 13)
+        }
+    }
+
+    private func stepsHeader(for target: AttentionTarget) -> String {
+        if let parentID = target.parentTargetID,
+           let parent = workspace.snapshot.targets[parentID] {
+            return String(format: tr("step_of_parent"), parent.name)
+        }
+        return tr("steps")
+    }
+
+    private func stepRow(_ step: AttentionTarget, currentTargetID: UUID) -> some View {
+        let done = workspace.snapshot.isTargetCompleted(step.id)
+        let latest = workspace.snapshot.latestEpisode(of: step.id)
+        let minutes = latest.map { workspace.snapshot.focusMinutes(of: $0.id) } ?? 0
+        return HStack(spacing: 10) {
+            if done {
+                LightAnchorIcon("check", size: 11)
+                    .foregroundStyle(LightAnchorTheme.mutedInk)
+            } else {
+                LightAnchorStatusDot(
+                    latest.map { LightAnchorStatusDotForm($0.state) } ?? .ended,
+                    size: 8
+                )
+            }
+            Text(step.name)
+                .font(LightAnchorTheme.bodyFont(size: 13))
+                .strikethrough(done)
+                .foregroundStyle(done ? LightAnchorTheme.faintInk : LightAnchorTheme.ink)
+                .lineLimit(1)
+            Spacer(minLength: 10)
+            if minutes > 0 {
+                Text(String(format: tr("focused"), UserFacingCopy.focusDuration(minutes)))
+                    .font(LightAnchorTheme.supportingFont(size: 11.5))
+                    .monospacedDigit()
+                    .foregroundStyle(LightAnchorTheme.faintInk)
+            }
+            if step.id == currentTargetID {
+                Text(tr("step_current"))
+                    .font(LightAnchorTheme.supportingFont(size: 11.5, weight: .semibold))
+                    .foregroundStyle(LightAnchorTheme.accentInk)
+            } else if !done {
+                Button(tr("switch_to_this_step")) {
+                    onSwitchToStep(step.id)
+                }
+                .buttonStyle(LightAnchorQuietButtonStyle(compact: true))
+            }
+        }
+        .frame(minHeight: 26)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func commitStepDraft(hostID: UUID) {
+        let name = stepDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else {
+            addingStep = false
+            return
+        }
+        if workspace.addStep(named: name, to: hostID) != nil {
+            stepDraft = ""
+            // 停在输入态：拆步骤往往一口气拆完。
+            stepFieldFocused = true
+        }
+    }
+
+    private func finishStepsTitle(for target: AttentionTarget) -> String {
+        let count = workspace.snapshot.unfinishedSteps(of: target.id).count
+        return String(
+            format: count == 1 ? tr("finish_steps_alert_title_one") : tr("finish_steps_alert_title"),
+            count
+        )
+    }
+
+    @ViewBuilder
+    private func currentWorkActions(episode: AttentionEpisode, target: AttentionTarget) -> some View {
         HStack(alignment: .center, spacing: 8) {
             switch episode.state {
             case .active, .returning:
@@ -1945,7 +2144,12 @@ private struct NowSpaceView: View {
             if episode.state != .ended {
                 Spacer(minLength: 8)
                 Button {
-                    _ = workspace.endEpisode(episode.id)
+                    // 大任务还有没做完的步骤：先提醒，确认了才连带收起（用户定）。
+                    if workspace.snapshot.unfinishedSteps(of: target.id).isEmpty {
+                        _ = workspace.endEpisode(episode.id)
+                    } else {
+                        confirmingFinishSteps = true
+                    }
                 } label: {
                     // 勾形给「完成」一个身份记号——三颗灰字按钮里它是收束的那颗。
                     HStack(spacing: 6) {
@@ -2051,6 +2255,12 @@ private struct TargetReviewView: View {
                         .foregroundStyle(LightAnchorTheme.mutedInk)
                         .lineSpacing(3)
                         .fixedSize(horizontal: false, vertical: true)
+                }
+                if let progress = workspace.snapshot.stepProgress(of: target.id) {
+                    Text(String(format: tr("steps_progress"), progress.done, progress.total))
+                        .font(LightAnchorTheme.supportingFont(size: 11.5))
+                        .monospacedDigit()
+                        .foregroundStyle(LightAnchorTheme.faintInk)
                 }
             }
 
@@ -2277,7 +2487,7 @@ private struct LaterSpaceView: View {
                     .font(LightAnchorTheme.bodyFont(size: 13.5, weight: .medium))
                     .foregroundStyle(LightAnchorTheme.ink)
                     .lineLimit(1)
-                Text(setAsideMeta(entry.episode))
+                Text(setAsideMeta(entry))
                     .font(LightAnchorTheme.supportingFont(size: 11.5))
                     .monospacedDigit()
                     .foregroundStyle(LightAnchorTheme.faintInk)
@@ -2292,11 +2502,20 @@ private struct LaterSpaceView: View {
         .accessibilityElement(children: .combine)
     }
 
-    private func setAsideMeta(_ episode: AttentionEpisode) -> String {
-        let focus = workspace.snapshot.focusMinutes(of: episode.id)
-        let aside = UserFacingCopy.setAsideAge(of: episode.updatedAt)
-        guard focus > 0 else { return aside }
-        return aside + " · " + String(format: tr("total_focus"), UserFacingCopy.focusDuration(focus))
+    private func setAsideMeta(_ entry: (target: AttentionTarget, episode: AttentionEpisode)) -> String {
+        let focus = workspace.snapshot.focusMinutes(of: entry.episode.id)
+        var meta = UserFacingCopy.setAsideAge(of: entry.episode.updatedAt)
+        if focus > 0 {
+            meta += " · " + String(format: tr("total_focus"), UserFacingCopy.focusDuration(focus))
+        }
+        // 步骤露出归属；大任务露出步骤进度（用户定：列表里步骤要看得见）。
+        if let parentID = entry.target.parentTargetID,
+           let parent = workspace.snapshot.targets[parentID] {
+            meta = String(format: tr("step_of_parent"), parent.name) + " · " + meta
+        } else if let progress = workspace.snapshot.stepProgress(of: entry.target.id) {
+            meta += " · " + String(format: tr("steps_progress"), progress.done, progress.total)
+        }
+        return meta
     }
 
     private var emptyActionTitle: String {
@@ -2950,16 +3169,11 @@ private struct WaitingRow: View {
 struct StartWorkView: View {
     @EnvironmentObject private var workspace: AttentionWorkspace
     @Environment(\.dismiss) private var dismiss
-    @State private var name: String
+    @State private var name = ""
     @State private var note = ""
     @State private var showingMore = false
     @State private var environmentProfileID: UUID?
     @State private var prepareEnvironment = false
-
-    /// 「换一件事」浮层里敲了一半的名字带进来，用户不用再打一遍。
-    init(initialName: String = "") {
-        _name = State(initialValue: initialName)
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {

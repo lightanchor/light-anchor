@@ -471,4 +471,49 @@ struct AttentionSnapshot: Codable, Equatable {
         guard let episode = currentEpisode else { return nil }
         return latestSceneSnapshot(for: episode.targetID)
     }
+
+    // MARK: 步骤（大任务里的小步骤）
+
+    /// 某件大任务的全部步骤（含已完成/已收起的），按创建先后。
+    func steps(of parentID: UUID) -> [AttentionTarget] {
+        targets.values
+            .filter { $0.parentTargetID == parentID }
+            .sorted { $0.createdAt < $1.createdAt }
+    }
+
+    /// 某目标最新的一段（按开始时间）。
+    func latestEpisode(of targetID: UUID) -> AttentionEpisode? {
+        episodes.values
+            .filter { $0.targetID == targetID }
+            .sorted { $0.startedAt > $1.startedAt }
+            .first
+    }
+
+    /// 一个目标算「完成」= 最近一段以完成收束（目标本身没有完成态）。
+    func isTargetCompleted(_ targetID: UUID) -> Bool {
+        guard let latest = latestEpisode(of: targetID) else { return false }
+        return latest.state == .ended && latest.endedReason == .completed
+    }
+
+    /// 大任务的进度：完成的步骤数 / 全部步骤数。没有步骤给 nil。
+    func stepProgress(of parentID: UUID) -> (done: Int, total: Int)? {
+        let all = steps(of: parentID)
+        guard !all.isEmpty else { return nil }
+        return (all.filter { isTargetCompleted($0.id) }.count, all.count)
+    }
+
+    /// 还没做完也没被收起的步骤（大任务完成时要提醒的就是这些）。
+    func unfinishedSteps(of parentID: UUID) -> [AttentionTarget] {
+        steps(of: parentID).filter { $0.retiredAt == nil && !isTargetCompleted($0.id) }
+    }
+
+    /// 还没动过的步骤（一段都没开始）：换一件事面板的「步骤」组。
+    var plannedSteps: [AttentionTarget] {
+        targets.values
+            .filter { target in
+                guard let parentID = target.parentTargetID, target.retiredAt == nil else { return false }
+                return latestEpisode(of: target.id) == nil && !isTargetCompleted(parentID)
+            }
+            .sorted { $0.createdAt < $1.createdAt }
+    }
 }

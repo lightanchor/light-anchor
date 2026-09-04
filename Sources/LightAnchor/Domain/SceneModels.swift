@@ -132,6 +132,39 @@ struct SceneSnapshot: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+extension ContextCapsule {
+    /// 剔掉若干现场条目后的上下文——「换一件事」里被划掉的不带走。
+    /// 条目地址的写法与 `SceneSnapshotBuilder.items(from:)` 一致：文件 / 网页 /
+    /// 终端目录是 URL 的 absoluteString，应用是 bundleID。
+    func removing(_ items: [SceneItem]) -> ContextCapsule {
+        var result = self
+        let files = Set(items.filter { $0.kind == .file }.map(\.address))
+        result.files.removeAll { files.contains($0.absoluteString) }
+
+        let links = Set(items.filter { $0.kind == .link }.map(\.address))
+        result.links.removeAll { links.contains($0.absoluteString) }
+
+        // 终端目录与当时的命令是并列数组，要一起删。
+        let directories = Set(items.filter { $0.kind == .terminal }.map(\.address))
+        var keptDirectories: [URL] = []
+        var keptCommands: [String] = []
+        for (index, directory) in terminalWorkingDirectories.enumerated()
+        where !directories.contains(directory.absoluteString) {
+            keptDirectories.append(directory)
+            keptCommands.append(index < terminalCommands.count ? terminalCommands[index] : "")
+        }
+        result.terminalWorkingDirectories = keptDirectories
+        result.terminalCommands = keptCommands
+
+        let bundleIDs = Set(items.filter { $0.kind == .application }.map(\.address))
+        let appNames = Set(items.filter { $0.kind == .application }.map(\.title))
+        result.windowFacts.removeAll { bundleIDs.contains($0.applicationBundleIdentifier) }
+        result.applicationBundleIdentifiers.removeAll { bundleIDs.contains($0) }
+        result.applications.removeAll { appNames.contains($0) }
+        return result
+    }
+}
+
 // MARK: - 现场条目失效检查
 
 /// 单个条目的失效状态。

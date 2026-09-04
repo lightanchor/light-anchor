@@ -607,8 +607,8 @@ final class MacContextRecorder {
 
     /// 读剪贴板文字。密码管理器等标记为机密/瞬态的内容一律不读；前台是终端或
     /// 密码管理器时整段跳过（剪贴板里大概率是刚复制的命令或口令）；剩下的文字
-    /// 也先脱敏再截断。
-    private static func clipboardText(limit: Int, frontmostBundleIdentifier: String?) -> String {
+    /// 也先脱敏再截断。现场那一次读取和跟随事情的剪贴板历史共用这一条规则。
+    static func clipboardText(limit: Int, frontmostBundleIdentifier: String?) -> String {
         if let frontmostBundleIdentifier,
            isClipboardSensitiveApplication(frontmostBundleIdentifier) {
             return ""
