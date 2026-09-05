@@ -86,7 +86,8 @@ chore(release): 更新 manifest 校验和与签名脚本
 | --- | --- |
 | [`../AGENTS.md`](../AGENTS.md) | 仓库约定：结构、命令、代码风格、测试与提交要求 |
 | [`chat-memory-design.md`](./chat-memory-design.md) | 「对话」页三种记忆与检索的设计与验收标准 |
-| [`design/README.md`](./design/README.md) | 界面视觉基准（已冻结，不再更新） |
+| [`vnext-plan-2026-08-05.md`](./vnext-plan-2026-08-05.md) | 2026-08-05 的产品与开发基线（历史记录，文首有现状勘误） |
+| [`switch-work-redesign-r23-2026-09-04.html`](./switch-work-redesign-r23-2026-09-04.html) | 「换一件事」重设计第二十三轮样张（浏览器打开） |
 | [`../Support/Brand/BRAND.md`](../Support/Brand/BRAND.md) | 「蜜芽方块」品牌与菜单栏蓝点形态 |
 
 ## 第三方素材

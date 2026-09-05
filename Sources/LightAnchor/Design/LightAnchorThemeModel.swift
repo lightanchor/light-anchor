@@ -254,7 +254,7 @@ enum LightAnchorThemeRole: String, CaseIterable, Hashable, Sendable {
 /// retained alongside resolved colors so tests and diagnostics can verify the
 /// source design variables.
 ///
-/// 设计基准：暖白 cozy 体系（docs/design/blue-dot-requirements.md · 已冻结的视觉定稿）。
+/// 设计基准：暖白 cozy 体系（蓝点视觉语言的定稿体系）。
 /// 主色 #5BA7CE 承担填充与识别；文字级强调使用同族加深 #2F7099。
 struct LightAnchorThemePalette {
     let theme: LightAnchorResolvedTheme

@@ -167,7 +167,7 @@ final class LightAnchorPaletteTests: XCTestCase {
                 )
             ),
             2.6,
-            "浅色主按钮为用户定稿的品牌例外（docs/design/blue-dot-requirements.md）"
+            "浅色主按钮为用户定稿的品牌例外"
         )
     }
 

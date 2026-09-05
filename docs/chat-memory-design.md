@@ -67,5 +67,5 @@
 
 ## 随手项(不阻塞)
 
-API Key 迁 Keychain(现明文在 UserDefaults,且会进备份 tarball);
-英文时间词解析与提示词双语。
+API Key 已迁 Keychain(2026-09:出 UserDefaults 与备份);剩下的
+英文时间词解析与提示词双语仍未做。
