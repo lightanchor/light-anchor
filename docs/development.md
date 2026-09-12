@@ -21,7 +21,23 @@ Scripts/smoke-update-release.sh
 Scripts/reset-permissions.sh            # 清掉本机 TCC 授权记录，重新走一遍授权
 ```
 
-`Scripts/smoke-macos-app.sh` 在临时 `LIGHTANCHOR_DATA_ROOT` 下启动真实 App 包，验证进程存活、`lightanchor://capture` 深链落进事件日志和退出清理，不污染默认数据目录；日常运行也可以用同一变量指定隔离数据根。
+`Scripts/smoke-macos-app.sh` 在临时 `LIGHTANCHOR_DATA_ROOT` 下启动真实 App 包，验证进程存活、`lightanchor://capture` 深链落进逐条事件日志、生成可读说明的自动快照和退出清理，不污染默认数据目录。测试用的 App 包和脚本日志放在数据根之外，避免被快照收进去；日常运行也可以用同一变量指定隔离数据根。
+
+## 发布前数据策略
+
+发布前只维护当前数据结构：事件文件只包含 `event`，导出文档只包含 `events`，没有事件 schema 版本号、版本门槛或迁移分支。旧提醒不映射成期限，旧 `waiting` 工作状态不映射成暂停。发布清单和诊断导出不再携带事件格式版本；应用构建号、更新签名与发布清单校验仍独立保留。
+
+开发数据按 `AGENTS.md` 的授权范围处理，需要时清空重建，不为了保留数据而保留旧设计。常规测试仍使用临时 `LIGHTANCHOR_DATA_ROOT`；读取失败和畸形备份仍报告错误，不自动清空数据或绕过校验。
+
+## 快照说明与 GitHub 连接
+
+新快照的说明由 `SnapshotNote` 从本批事件及回放前的状态生成。开始、换事、继续、放下、完成和等待状态各有明确文案；现场补录不会冒充一次换事。去抖窗口合并用户动作、累计新捕获数量，过滤后台补录的重复说明；长名称截断、换行压成空格。中英文文案走本地化表，提交保存创建时的语言，不改写已有 Git 历史。
+
+`GitHubAuthService.bundledClientID` 已内置 OAuth App 的 Client ID，开发运行和打包后的应用共用，无须用户设置环境变量。测试另一个 OAuth App 时，可用非空的 `LIGHTANCHOR_GITHUB_CLIENT_ID` 覆盖；空值和纯空白值继续使用内置 ID。Client ID 是应用标识，不是访问令牌；不要把 Client Secret 或 PAT 放进这个配置。登录成功后的访问令牌仍由 Keychain 保管。
+
+应用所有者需要在 GitHub 的 **Settings → Developer settings → OAuth Apps → 对应应用** 中启用 **Device Flow** 并保存。若 GitHub 返回 `device_flow_disabled`，连接界面会明确提示该操作，而不是笼统报“返回内容异常”。用户随后在轻锚的 **设置 → 数据管理 → 版本快照 → 连接 GitHub** 发起配对，并在浏览器确认；配置 Client ID 本身不等于完成用户授权，也不会推送任何数据。
+
+相关验证：`swift test --filter 'SnapshotNoteTests|SnapshotControllerTests|GitSnapshotServiceTests|GitHubAuthTests|GitSyncTests|LocalizationTests'`。认证测试使用模拟 HTTP 与内存令牌库；Git 测试使用临时目录和本地裸仓库，不推送真实用户数据。
 
 ## 提交信息
 

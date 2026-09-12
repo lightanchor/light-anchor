@@ -185,6 +185,11 @@ struct AttentionTarget: Codable, Equatable, Identifiable {
     /// 连带收起的墓碑：大任务完成时没做完的步骤盖上这个时刻，
     /// 从此不再出现在任何清单里（事件日志保留全部历史）。
     var retiredAt: Date?
+    /// 什么时候必须做完。**可以留空**——多数事没有期限，硬逼人填只会得到
+    /// 一个编出来的日期。填了的才会到期来找你（见 DueDate）。
+    var dueAt: Date?
+    /// 上次为这个期限提醒过的时刻：同一个期限只催一次，不隔天再冒出来。
+    var nudgedAt: Date?
 
     init(
         id: UUID = UUID(),
@@ -195,7 +200,9 @@ struct AttentionTarget: Codable, Equatable, Identifiable {
         environmentProfileID: UUID? = nil,
         sceneFilterMode: SceneFilterMode? = nil,
         parentTargetID: UUID? = nil,
-        retiredAt: Date? = nil
+        retiredAt: Date? = nil,
+        dueAt: Date? = nil,
+        nudgedAt: Date? = nil
     ) {
         self.id = id
         self.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -206,6 +213,8 @@ struct AttentionTarget: Codable, Equatable, Identifiable {
         self.sceneFilterMode = sceneFilterMode
         self.parentTargetID = parentTargetID
         self.retiredAt = retiredAt
+        self.dueAt = dueAt
+        self.nudgedAt = nudgedAt
     }
 
     var isValid: Bool {
@@ -366,10 +375,13 @@ struct ContextCapsule: Codable, Equatable {
     }
 }
 
+/// 没有「等待中」这一档：**等结果的事就是被放下了**。原来它和「放下」并列，
+/// 于是有了一个会自己漂移的状态——你一旦真的去干别的，切换会把它改成 paused，
+/// 而那条没到的结果还挂着。归属现在只由「身上有没有一条还没等到的结果」决定
+/// （见 LaterListProjection），状态只管这段工作本身。
 enum AttentionEpisodeState: String, Codable, Equatable {
     case active
     case paused
-    case waiting
     case returning
     case ended
 }
@@ -379,6 +391,49 @@ enum AttentionEpisodeState: String, Codable, Equatable {
 enum AttentionEpisodeEndReason: String, Codable, Equatable {
     case completed
     case abandoned
+}
+
+/// 一段工作的总结（「上次做到哪」）。
+///
+/// 现场告诉你**东西在哪**，总结告诉你**当时在干什么、卡在哪**——隔几天回来，
+/// 前者不够：五个文件名说不出你上次为什么停下。所以它和现场是同一份东西的
+/// 两面，都挂在这一段上，绝不是两个并列的页签。
+///
+/// 正文是 Markdown-lite：`## 小标题` + 段落，与「整理记录」同一套写法。
+/// 全文只许复述 `factCount` 条本机事实；署名如实写明是哪套引擎整理的，
+/// 启发式降级也照签自己的名，用户看得出这份没过模型。
+struct EpisodeSummary: Codable, Equatable, Sendable {
+    var text: String
+    /// 署名：哪套引擎整理的（模型名 / 「端侧模型」/「启发式（离线）」）。
+    var engineName: String
+    /// 出自多少条本机事实。
+    var factCount: Int
+    var generatedAt: Date
+    /// 用户自己改过：改过的不再被自动重写覆盖（要重写得他自己点）。
+    var isEdited: Bool
+
+    init(
+        text: String,
+        engineName: String,
+        factCount: Int,
+        generatedAt: Date = Date(),
+        isEdited: Bool = false
+    ) {
+        self.text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.engineName = engineName.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.factCount = max(0, factCount)
+        self.generatedAt = generatedAt
+        self.isEdited = isEdited
+    }
+
+    var isEmpty: Bool { text.isEmpty }
+
+    /// 「N 字」：中日韩按字数报，不按词数——这一行是给人估阅读量的。
+    var characterCount: Int {
+        text.replacingOccurrences(of: "#", with: "")
+            .filter { !$0.isWhitespace }
+            .count
+    }
 }
 
 struct AttentionEpisode: Codable, Equatable, Identifiable {
@@ -392,6 +447,9 @@ struct AttentionEpisode: Codable, Equatable, Identifiable {
     var context: ContextCapsule
     var returnCue: String
     var waitingIDs: [UUID]
+    /// 这一段的总结。可选：没整理过就是 nil（旧日志里也没有这个字段，
+    /// Optional 的合成解码遇到缺 key 会给 nil，不需要迁移）。
+    var summary: EpisodeSummary?
 
     init(
         id: UUID = UUID(),
@@ -403,7 +461,8 @@ struct AttentionEpisode: Codable, Equatable, Identifiable {
         endedReason: AttentionEpisodeEndReason? = nil,
         context: ContextCapsule = ContextCapsule(),
         returnCue: String = "",
-        waitingIDs: [UUID] = []
+        waitingIDs: [UUID] = [],
+        summary: EpisodeSummary? = nil
     ) {
         self.id = id
         self.targetID = targetID
@@ -415,6 +474,7 @@ struct AttentionEpisode: Codable, Equatable, Identifiable {
         self.context = context
         self.returnCue = returnCue.trimmingCharacters(in: .whitespacesAndNewlines)
         self.waitingIDs = waitingIDs
+        self.summary = summary.flatMap { $0.isEmpty ? nil : $0 }
     }
 }
 
@@ -425,20 +485,14 @@ enum WaitingStatus: String, Codable, Equatable {
     case cancelled
 }
 
-enum WaitingRestorePolicy: String, Codable, CaseIterable {
-    case manual
-    case notify
-    case nextTransition
-
-    var title: String {
-        switch self {
-        case .manual: tr("return_manually")
-        case .notify: tr("notify_when_the_result_arrives")
-        case .nextTransition: tr("remind_me_at_the_next_transition")
-        }
-    }
-}
-
+/// 一条等待：一个悬在别人手里的结果。
+///
+/// 它身上押的是**截止日期**（`dueAt`），不是「几点提醒我」。「三天」是你对别人
+/// 耐心的估计，是编的；「周五」是你自己日程上的硬点。而且日期能倒着算——
+/// 「周五要用，催一趟要一天，那今天就得动」——时长模型里没有终点，倒不回来。
+///
+/// 软件永远判断不了「结果到了」（那要它看得见你的邮箱），但能百分百判断
+/// 「快到期了」。所以 `.ready` 只能由人确认，到期只负责催你。
 struct WaitingItem: Codable, Equatable, Identifiable {
     let id: UUID
     let episodeID: UUID
@@ -448,9 +502,10 @@ struct WaitingItem: Codable, Equatable, Identifiable {
     var completedAt: Date?
     var status: WaitingStatus
     var evidence: String
-    var notificationSent: Bool
-    var restorePolicy: WaitingRestorePolicy
-    var monitor: WaitingMonitorConfiguration?
+    /// 什么时候必须拿到。可以留空——没期限的等待只是一笔账，永不打扰。
+    var dueAt: Date?
+    /// 上次为这个期限催过的时刻：催过就不再催，除非你改了期限。
+    var nudgedAt: Date?
     var originalContext: ContextCapsule
 
     init(
@@ -462,9 +517,8 @@ struct WaitingItem: Codable, Equatable, Identifiable {
         completedAt: Date? = nil,
         status: WaitingStatus = .waiting,
         evidence: String = "",
-        notificationSent: Bool = false,
-        restorePolicy: WaitingRestorePolicy = .manual,
-        monitor: WaitingMonitorConfiguration? = nil,
+        dueAt: Date? = nil,
+        nudgedAt: Date? = nil,
         originalContext: ContextCapsule = ContextCapsule()
     ) {
         self.id = id
@@ -475,37 +529,12 @@ struct WaitingItem: Codable, Equatable, Identifiable {
         self.completedAt = completedAt
         self.status = status
         self.evidence = evidence.trimmingCharacters(in: .whitespacesAndNewlines)
-        self.notificationSent = notificationSent
-        self.restorePolicy = restorePolicy
-        self.monitor = monitor
+        self.dueAt = dueAt
+        self.nudgedAt = nudgedAt
         self.originalContext = originalContext
     }
 
     var isValid: Bool {
         !description.isEmpty
-    }
-}
-
-enum WaitingMonitorKind: String, Codable, CaseIterable, Identifiable, Sendable {
-    case manual
-    case date
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .manual: tr("confirm_manually")
-        case .date: tr("at_a_set_time")
-        }
-    }
-}
-
-struct WaitingMonitorConfiguration: Codable, Equatable, Sendable {
-    var kind: WaitingMonitorKind
-    var date: Date?
-
-    init(kind: WaitingMonitorKind, date: Date? = nil) {
-        self.kind = kind
-        self.date = date
     }
 }

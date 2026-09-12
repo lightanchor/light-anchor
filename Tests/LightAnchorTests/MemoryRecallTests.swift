@@ -79,7 +79,7 @@ final class MemoryRecallTests: XCTestCase {
 
     @MainActor
     func testQuestionContextCarriesNowLedgerAndTargetHistory() throws {
-        let store = LocalEventStore(fileURL: temporaryFileURL())
+        let store = LocalEventStore(directoryURL: temporaryEventsDirectoryURL())
         let workspace = AttentionWorkspace(store: store)
         let start = Date(timeIntervalSinceNow: -1800)
         let target = try XCTUnwrap(workspace.createTarget(name: "写周报", now: start))
@@ -99,7 +99,7 @@ final class MemoryRecallTests: XCTestCase {
 
     @MainActor
     func testQuestionContextFindsCapturesByKeyword() throws {
-        let store = LocalEventStore(fileURL: temporaryFileURL())
+        let store = LocalEventStore(directoryURL: temporaryEventsDirectoryURL())
         let workspace = AttentionWorkspace(store: store)
         _ = workspace.captureText("蓝点重构要先改侧栏动画", now: Date(timeIntervalSinceNow: -600))
 
@@ -154,7 +154,7 @@ final class MemoryRecallTests: XCTestCase {
 
     @MainActor
     func testTargetHistoryDigestAccumulatesAcrossEpisodes() throws {
-        let store = LocalEventStore(fileURL: temporaryFileURL())
+        let store = LocalEventStore(directoryURL: temporaryEventsDirectoryURL())
         let workspace = AttentionWorkspace(store: store)
         let dayAgo = Date(timeIntervalSinceNow: -86_400)
         let target = try XCTUnwrap(workspace.createTarget(name: "整理照片", now: dayAgo))
@@ -171,7 +171,7 @@ final class MemoryRecallTests: XCTestCase {
 
     @MainActor
     func testBriefingInputCarriesTargetHistoryLine() throws {
-        let workspace = AttentionWorkspace(store: LocalEventStore(fileURL: temporaryFileURL()))
+        let workspace = AttentionWorkspace(store: LocalEventStore(directoryURL: temporaryEventsDirectoryURL()))
         let twoDaysAgo = Date(timeIntervalSinceNow: -2 * 86_400)
         let target = try XCTUnwrap(workspace.createTarget(name: "整理书房", now: twoDaysAgo))
         let first = try XCTUnwrap(workspace.startEpisode(targetID: target.id, now: twoDaysAgo))
@@ -189,7 +189,7 @@ final class MemoryRecallTests: XCTestCase {
 
     @MainActor
     func testTriageItemsCarryDispositionHintFromSameHostHistory() throws {
-        let workspace = AttentionWorkspace(store: LocalEventStore(fileURL: temporaryFileURL()))
+        let workspace = AttentionWorkspace(store: LocalEventStore(directoryURL: temporaryEventsDirectoryURL()))
         // 两条同域名链接已定去向（资料），第三条新链接应得到历史提示。
         for index in 0..<2 {
             let capture = try XCTUnwrap(workspace.captureLink(
@@ -214,7 +214,7 @@ final class MemoryRecallTests: XCTestCase {
 
     @MainActor
     func testNarrativeInputAppendsPeriodComparison() throws {
-        let workspace = AttentionWorkspace(store: LocalEventStore(fileURL: temporaryFileURL()))
+        let workspace = AttentionWorkspace(store: LocalEventStore(directoryURL: temporaryEventsDirectoryURL()))
         let calendar = Calendar.current
         let now = Date()
         // 上周与本周各一段，叙事事实应出现对比句。
@@ -236,7 +236,7 @@ final class MemoryRecallTests: XCTestCase {
 
     @MainActor
     func testArchivedCapturesProjectionAndSearchability() throws {
-        let store = LocalEventStore(fileURL: temporaryFileURL())
+        let store = LocalEventStore(directoryURL: temporaryEventsDirectoryURL())
         let workspace = AttentionWorkspace(store: store)
         let capture = try XCTUnwrap(workspace.captureText("过期的灵感碎片", now: Date(timeIntervalSinceNow: -300)))
         XCTAssertTrue(workspace.archiveCapture(capture.id))
@@ -252,10 +252,10 @@ final class MemoryRecallTests: XCTestCase {
         )
     }
 
-    private func temporaryFileURL() -> URL {
+    private func temporaryEventsDirectoryURL() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("memory-recall-tests-\(UUID().uuidString)")
-            .appendingPathComponent("events.json")
+            .appendingPathComponent("events", isDirectory: true)
     }
 }
 

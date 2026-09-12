@@ -184,6 +184,12 @@ struct IntelligenceView: View {
                 )
                 settingsRowDivider
                 toggleRow(
+                    title: tr("auto_summarize_episodes"),
+                    detail: tr("auto_summarize_episodes_detail"),
+                    isOn: $preferences.autoSummarizeEpisodes
+                )
+                settingsRowDivider
+                toggleRow(
                     title: tr("check_whether_the_scene_changed_before"),
                     detail: nil,
                     isOn: $preferences.checkSceneStaleness

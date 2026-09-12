@@ -7,12 +7,14 @@ cd "$ROOT_DIR"
 
 APP=${LIGHTANCHOR_APP_PATH:-$ROOT_DIR/dist/LightAnchor.app}
 SKIP_BUILD=${LIGHTANCHOR_SKIP_BUILD:-false}
-DATA_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/lightanchor-app-smoke.XXXXXX")
+SMOKE_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/lightanchor-app-smoke.XXXXXX")
+SMOKE_ROOT=${SMOKE_ROOT:A}
+DATA_ROOT="$SMOKE_ROOT/data"
+mkdir -p "$DATA_ROOT"
 SMOKE_BUNDLE_ID="com.lightanchor.smoke.$$"
-DATA_ROOT=${DATA_ROOT:A}
-SMOKE_APP="$DATA_ROOT/LightAnchorSmoke.app"
-APP_LOG="$DATA_ROOT/app.log"
-EVENTS_FILE="$DATA_ROOT/events.json"
+SMOKE_APP="$SMOKE_ROOT/LightAnchorSmoke.app"
+APP_LOG="$SMOKE_ROOT/app.log"
+EVENTS_DIRECTORY="$DATA_ROOT/events"
 MARKER="$DATA_ROOT/launch-marker.json"
 APP_PID=""
 QUIT_REQUESTED=false
@@ -24,8 +26,8 @@ cleanup() {
             kill "$smoke_pid" 2>/dev/null || true
         done < <(/usr/bin/pgrep -f "$SMOKE_APP/Contents/MacOS/LightAnchor" 2>/dev/null || true)
     fi
-    if [[ -d "$DATA_ROOT" ]]; then
-        rm -rf "$DATA_ROOT"
+    if [[ -d "$SMOKE_ROOT" ]]; then
+        rm -rf "$SMOKE_ROOT"
     fi
 }
 trap cleanup EXIT INT TERM
@@ -75,7 +77,7 @@ done
 sleep 1
 
 run_close_script() {
-    /usr/bin/osascript - "$APP_PID" >"$DATA_ROOT/close-window.log" 2>&1 <<'APPLESCRIPT' &
+    /usr/bin/osascript - "$APP_PID" >"$SMOKE_ROOT/close-window.log" 2>&1 <<'APPLESCRIPT' &
 on run argv
     set appPID to (item 1 of argv) as integer
     tell application "System Events"
@@ -145,9 +147,12 @@ send_capture() {
 }
 
 capture_recorded() {
-    [[ -s "$EVENTS_FILE" ]] && /usr/bin/jq -e --arg link "$CAPTURE_LINK" \
-        '.events[] | select(.kind == "captureChanged" and .capture.sourceURL == $link)' \
-        "$EVENTS_FILE" >/dev/null 2>&1
+    local -a records
+    records=("$EVENTS_DIRECTORY"/**/*.json(N.))
+    (( ${#records} > 0 )) || return 1
+    /usr/bin/jq -s -e --arg link "$CAPTURE_LINK" \
+        'any(.[]; .event.kind == "captureChanged" and .event.capture.sourceURL == $link)' \
+        "${records[@]}" >/dev/null 2>&1
 }
 
 send_capture
@@ -157,8 +162,20 @@ for _ in {1..40}; do
     fi
     sleep 0.25
 done
-[[ -s "$EVENTS_FILE" ]] || fail "deep-link capture was not written to the isolated store"
+[[ -d "$EVENTS_DIRECTORY" ]] || fail "deep-link capture was not written to the isolated store"
 capture_recorded || fail "deep-link capture did not match the expected captureChanged record"
+
+for _ in {1..60}; do
+    if /usr/bin/git -C "$DATA_ROOT" grep --quiet --fixed-strings -e "$CAPTURE_TOKEN" HEAD -- events 2>/dev/null; then
+        break
+    fi
+    sleep 0.25
+done
+/usr/bin/git -C "$DATA_ROOT" grep --quiet --fixed-strings -e "$CAPTURE_TOKEN" HEAD -- events \
+    || fail "deep-link capture did not reach an automatic snapshot"
+SNAPSHOT_SUBJECT=$(/usr/bin/git -C "$DATA_ROOT" log -1 --format=%s)
+[[ "$SNAPSHOT_SUBJECT" == *"捕获一条"* || "$SNAPSHOT_SUBJECT" == *"Captured one item"* ]] \
+    || fail "automatic snapshot lost the capture description: $SNAPSHOT_SUBJECT"
 
 if /usr/bin/osascript \
     -e "tell application id \"$SMOKE_BUNDLE_ID\" to quit" \
@@ -181,4 +198,4 @@ wait "$APP_PID" 2>/dev/null || true
 [[ "$QUIT_REQUESTED" == "true" ]] || fail "could not send a normal quit request"
 [[ ! -e "$MARKER" ]] || fail "normal app termination did not clean the launch marker"
 
-print -r -- "macOS app smoke passed: window close/reopen (single window), isolated data root, deep-link capture, clean exit."
+print -r -- "macOS app smoke passed: window close/reopen (single window), isolated data root, deep-link capture, readable automatic snapshot ($SNAPSHOT_SUBJECT), clean exit."

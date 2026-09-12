@@ -171,12 +171,12 @@ final class IntelligenceCapabilityTests: XCTestCase {
     // MARK: - Helpers
 
     private func makeWorkspace() -> AttentionWorkspace {
-        AttentionWorkspace(store: LocalEventStore(fileURL: temporaryFileURL()))
+        AttentionWorkspace(store: LocalEventStore(directoryURL: temporaryEventsDirectoryURL()))
     }
 
-    private func temporaryFileURL() -> URL {
+    private func temporaryEventsDirectoryURL() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("IntelligenceCapabilityTests-\(UUID().uuidString)", isDirectory: true)
-            .appendingPathComponent("events.json")
+            .appendingPathComponent("events", isDirectory: true)
     }
 }

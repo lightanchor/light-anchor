@@ -13,6 +13,8 @@ struct LightAnchorApp: App {
     /// reading a `@StateObject` from `init` yields a throwaway instance that is
     /// deallocated straight away, cancelling the maintenance loop with it.
     private let runtime: WorkspaceRuntime
+    /// 同上直接持有：监听事件落盘、去抖后落 git 快照。
+    private let snapshotController: SnapshotController
 
     init() {
         AppLifecycleTracker.shared.start()
@@ -23,6 +25,9 @@ struct LightAnchorApp: App {
         let themeController = LightAnchorThemeController()
         _themeController = StateObject(wrappedValue: themeController)
         runtime = WorkspaceRuntime(workspace: workspace)
+        snapshotController = SnapshotController()
+        snapshotController.workspace = workspace
+        snapshotController.start()
         LocalDiagnostics.shared.installUncaughtExceptionHandler()
         let hotKeys = GlobalHotKeyCenter.shared
         hotKeys.onAction = { action in
@@ -140,6 +145,8 @@ extension Notification.Name {
     static let requestCaptureDraftTerminationDecision = Notification.Name(
         "LightAnchor.requestCaptureDraftTerminationDecision"
     )
+    /// 事件日志落盘一批新事件。快照控制器监听它来触发去抖快照。
+    static let lightAnchorEventsChanged = Notification.Name("LightAnchor.eventsChanged")
 }
 
 private struct LightAnchorCommands: Commands {

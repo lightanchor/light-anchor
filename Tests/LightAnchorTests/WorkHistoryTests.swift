@@ -3,6 +3,47 @@ import XCTest
 @testable import LightAnchor
 
 final class WorkHistoryTests: XCTestCase {
+    func testWorkSegmentsOnlyUseExplicitlyAssociatedScenes() throws {
+        let start = Date(timeIntervalSinceReferenceDate: 700_000_000)
+        let target = AttentionTarget(name: "写方案")
+        let otherTarget = AttentionTarget(name: "另一件事")
+        let first = AttentionEpisode(targetID: target.id, startedAt: start, state: .ended)
+        let second = AttentionEpisode(targetID: target.id, startedAt: start.addingTimeInterval(60))
+        let otherEpisode = AttentionEpisode(targetID: otherTarget.id, startedAt: start.addingTimeInterval(120))
+        let olderScene = SceneSnapshot(targetID: target.id, episodeID: first.id, capturedAt: start)
+        let latestScene = SceneSnapshot(
+            targetID: target.id, episodeID: first.id, capturedAt: start.addingTimeInterval(30)
+        )
+        let unassociated = SceneSnapshot(targetID: target.id, capturedAt: start.addingTimeInterval(90))
+        let checkpoint = SceneSnapshot(capturedAt: start.addingTimeInterval(120))
+        let wrongTarget = SceneSnapshot(
+            targetID: otherTarget.id, episodeID: second.id, capturedAt: start.addingTimeInterval(150)
+        )
+        var snapshot = AttentionSnapshot.replay([
+            .targetChanged(target), .targetChanged(otherTarget),
+            .episodeChanged(first), .episodeChanged(second), .episodeChanged(otherEpisode),
+            .sceneSnapshotChanged(olderScene), .sceneSnapshotChanged(latestScene),
+            .sceneSnapshotChanged(unassociated), .sceneSnapshotChanged(checkpoint),
+            .sceneSnapshotChanged(wrongTarget)
+        ])
+
+        let segments = snapshot.workSegments(for: target.id)
+        XCTAssertEqual(segments.map(\.id), [second.id, first.id])
+        XCTAssertNil(segments[0].scene)
+        XCTAssertEqual(segments[1].scene?.id, latestScene.id)
+        XCTAssertEqual(snapshot.sceneSnapshots[unassociated.id], unassociated)
+        XCTAssertEqual(snapshot.sceneSnapshots[checkpoint.id], checkpoint)
+        XCTAssertTrue(snapshot.workSegments(for: UUID()).isEmpty)
+
+        let third = AttentionEpisode(targetID: target.id, startedAt: start.addingTimeInterval(180))
+        snapshot.episodes[third.id] = third
+        let updated = snapshot.workSegments(for: target.id)
+        XCTAssertEqual(updated.map(\.id), [third.id, second.id, first.id])
+        XCTAssertNil(updated[0].scene)
+        XCTAssertNil(updated[1].scene)
+        XCTAssertEqual(updated[2].scene?.id, latestScene.id)
+    }
+
     func testBuildsReadableTraceFromEpisodeWaitAndScene() throws {
         let start = Date(timeIntervalSince1970: 1_700_000_000)
         let target = AttentionTarget(name: "修复同步", note: "检查冲突处理", createdAt: start, updatedAt: start)

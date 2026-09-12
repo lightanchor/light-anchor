@@ -290,7 +290,7 @@ def main():
         "// 端点样式必须是 .round，否则和原图对不上。",
         "import SwiftUI",
         "",
-        "/// 侧栏导航用的描边字形（Lucide）。",
+        "/// Lucide 描边字形库（侧栏导航、设置行等共用）。",
         "enum LightAnchorNavGlyph: String, CaseIterable {",
     ]
     for name in icons:

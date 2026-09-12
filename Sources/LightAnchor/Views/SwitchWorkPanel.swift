@@ -1,25 +1,31 @@
 import AppKit
 import SwiftUI
 
-/// 「换一件事」（定稿：`docs/switch-work-redesign-r23-2026-09-04.html` 方案 A · 新邮票）。
+/// 「换一件事」（定稿：`docs/switch-work-redesign-r24-2026-09-09.html`——r23 的结构与
+/// 布局之上取消邮票，并把配色与现场样式对齐「现在」页 `now-page-scrollrail`）。
 ///
 /// 一块 1020×560 的面板，左右分工：
 /// - 左栏（304）是**常驻清单**：搜索 + 分组列表（结果到了 / 放下的 / 等待中 / 稍后 / 新开）。
 ///   在左边选完，右边整句文字跟着更新——选择不再藏在句子里的弹出层。
-/// - 右区是确认区：上面「现在 · 放下 → 切换到」，中间一条静态细线箭头，右边**一张邮票**
-///   （只有票有齿孔、一道蓝内框、右上角小字时刻、右下角面值 = 恢复几样）；下面三句话
-///   （怎么放 / 回来先看 / 接下来去哪）；页脚是主操作与键位。
+/// - 右区是确认区：上面「现在 · 放下 → 切换到」是**两块同构的方块**——左边一张中性白卡，
+///   右边一块浅蓝方块（时刻在右上角，留话和「回去开 N 样 ›」直接排进块里），
+///   **两块永远等高**、中间一条静态细线箭头落在正中；下面三句话（怎么放 / 回来先看 /
+///   接下来去哪）；页脚是主操作与键位。
 ///
-/// 现场不另开容器：点「现场 N 样 ›」或票下「回去开 N 样 ›」，**右区原地换成现场页**
-/// （左栏不动），条目按 应用/文件/网页/终端 分组，行首是**真应用图标**，目录式
-/// 「名字 …… 来源」，点名字划掉；下面是**复写条**（这段事复制过的文字，同一段在同一张纸上，
-/// 放下过就把纸撕开）；真有截图才出现一张缩略图。esc / ‹ 返回 回确认页。
+/// 现场不另开容器：点「现场 N 样 ›」或块里那句「回去开 N 样 ›」，**右区原地换成现场页**
+/// （左栏不动）。现场与「现在」页同源：两张白卡（东西在哪 / 当时的剪贴板），行首一枚记号
+/// （实心蓝点＝会带走 / 空心灰圈＝不带），名字在上、位置在下，点一行就是改它带不带；
+/// 剪贴板是一列复写行、中间放下过就断开；真有截图才出现一张缩略图。esc / ‹ 返回 回确认页。
 ///
-/// 被否过的形态不要回头：命令面板、黑纱浮层、舞台接管、弹出层现场、侧翼现场、卡背面、
-/// 翻页动画、圆形邮戳与杀戳线、点线邮路与跑动蓝点、占位空框（空态一律纯文字）、任何渐变。
+/// 被否过的形态不要回头：邮票（齿孔 / 面值 / 蓝内框 / 撕边复写条）、命令面板、黑纱浮层、
+/// 舞台接管、弹出层现场、侧翼现场、卡背面、翻页动画、圆形邮戳与杀戳线、点线邮路与
+/// 跑动蓝点、按 应用/网页/文件/终端 分组的现场清单、占位空框（空态一律纯文字）、任何渐变。
 struct SwitchWorkStage: View {
     let onSwitched: () -> Void
     let onDismiss: () -> Void
+    /// 「新开…」：交给「开始一件事」那张便笺，名字带过去。凭空立一件事不在
+    /// 这个面板的职责里——这里是从已有的里面挑一件。
+    let onCreateNew: (String) -> Void
     /// 打开时预选的目标（步骤卡「切到这步」）：仪式照走，只是这一条已经挑好。
     var initialPick: UUID?
     @Environment(\.colorScheme) private var colorScheme
@@ -34,6 +40,7 @@ struct SwitchWorkStage: View {
                 SwitchWorkSheet(
                     onSwitched: onSwitched,
                     onDismiss: onDismiss,
+                    onCreateNew: onCreateNew,
                     initialPick: initialPick,
                     available: CGSize(
                         width: max(520, proxy.size.width - 32),
@@ -54,6 +61,8 @@ struct SwitchWorkSheet: View {
     let onSwitched: () -> Void
     /// esc / 算了：收起舞台。
     let onDismiss: () -> Void
+    /// 「新开…」：把名字交给「开始一件事」。
+    let onCreateNew: (String) -> Void
     /// 打开时预选的目标：仪式照走，这一条已经挑好。
     var initialPick: UUID?
     /// 舞台给的可用尺寸（窗口比设计尺寸小时用来收面板）。
@@ -71,6 +80,10 @@ struct SwitchWorkSheet: View {
     @State private var howHovered = false
     @State private var query = ""
     @State private var highlightedRow: Int?
+    /// 两块（现在 / 要去的地方）各自内容的自然高度：取大的钉给两块，
+    /// 它们就永远等高——右边多一行留话时左边跟着长，不会一高一低。
+    @State private var nowBlockContentHeight: CGFloat = 0
+    @State private var destinationBlockContentHeight: CGFloat = 0
     // ScrollView 是贪高的：量出内容高度，按内容收紧（否则面板永远撑满窗口）。
     @State private var sceneListHeight: CGFloat = 0
     @State private var sceneHeadHeight: CGFloat = 0
@@ -102,6 +115,11 @@ struct SwitchWorkSheet: View {
     /// 现场页除列表以外都是量出来的，加上列表内容高就是这一页的自然高度。
     private var sceneChromeHeight: CGFloat {
         sceneHeadHeight + sceneFootHeight + Self.sceneChromePadding
+    }
+
+    /// 两块共用的高度：谁的内容高就用谁，再不低于设计里那 150。
+    private var blockHeight: CGFloat {
+        max(150, max(nowBlockContentHeight, destinationBlockContentHeight) + SwitchWorkBlock<EmptyView>.verticalPadding)
     }
 
     private var naturalHeight: CGFloat {
@@ -320,17 +338,17 @@ struct SwitchWorkSheet: View {
 
     private var frontPage: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // 设计 .panel.stamped .head：1fr / 44 / 252，min-height 168。
+            // 设计 r24 .head：1fr / 44 / 1.06fr，min-height 150。
+            // 两块**永远等高**：网格拉伸，箭头落在两者正中——右边多一行留话时
+            // 也不会错位（padding 硬凑那版就是这么歪的）。
             HStack(alignment: .top, spacing: 10) {
                 currentSide
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                 SwitchWorkArrow()
-                    .frame(width: 44)
-                    .padding(.top, 28)
+                    .frame(width: 44, height: blockHeight)
                 destinationSide
                     .frame(width: 252, alignment: .topLeading)
             }
-            .frame(minHeight: 168, alignment: .top)
 
             prose
             Spacer(minLength: 12)
@@ -341,94 +359,145 @@ struct SwitchWorkSheet: View {
         .padding(.bottom, 20)
     }
 
-    /// 左半：手上这件。
+    /// 左半：手上这件 —— 一张中性白卡。
     @ViewBuilder
     private var currentSide: some View {
-        if let entry = currentEntry {
-            VStack(alignment: .leading, spacing: 0) {
-                eyebrow(howEyebrow)
-                HStack(spacing: 8) {
-                    SwitchWorkDot(how.dotForm, size: 7)
-                    Text(entry.target.name)
-                        .font(LightAnchorTheme.interfaceFont(size: 16.5, weight: .semibold))
-                        .foregroundStyle(LightAnchorTheme.ink)
-                        .lineLimit(1)
-                }
-                .padding(.top, 5)
-                Text(currentMeta(entry))
-                    .font(LightAnchorTheme.supportingFont(size: 13))
-                    .monospacedDigit()
-                    .foregroundStyle(LightAnchorTheme.stageMutedInk)
-                    .lineLimit(2)
-                    .padding(.top, 4)
-                if preview.map({ !$0.items.isEmpty }) ?? false {
-                    SwitchWorkSceneLink(title: currentEntryTitle) { page = .currentScene }
-                        .padding(.top, 10)
-                }
-            }
-        } else {
-            VStack(alignment: .leading, spacing: 0) {
-                eyebrow(tr("switch_now_eyebrow"))
-                Text(tr("switch_nothing_in_hand"))
-                    .font(LightAnchorTheme.interfaceFont(size: 16.5, weight: .medium))
-                    .foregroundStyle(LightAnchorTheme.stageFaintInk)
+        SwitchWorkBlock(
+            tone: .now,
+            height: blockHeight,
+            onContentHeight: { nowBlockContentHeight = $0 }
+        ) {
+            if let entry = currentEntry {
+                VStack(alignment: .leading, spacing: 0) {
+                    eyebrow(howEyebrow)
+                    HStack(spacing: 8) {
+                        SwitchWorkDot(how.dotForm, size: 7)
+                        Text(entry.target.name)
+                            .font(LightAnchorTheme.interfaceFont(size: 16, weight: .semibold))
+                            .foregroundStyle(LightAnchorTheme.ink)
+                            .lineLimit(1)
+                    }
                     .padding(.top, 5)
+                    Text(currentMeta(entry))
+                        .font(LightAnchorTheme.supportingFont(size: 12.5))
+                        .monospacedDigit()
+                        .foregroundStyle(LightAnchorTheme.stageMutedInk)
+                        .lineLimit(2)
+                        .padding(.top, 5)
+                    if preview.map({ !$0.items.isEmpty }) ?? false {
+                        SwitchWorkSceneLink(title: currentEntryTitle) { page = .currentScene }
+                            .padding(.top, 10)
+                    }
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    eyebrow(tr("switch_now_eyebrow"))
+                    Text(tr("switch_nothing_in_hand"))
+                        .font(LightAnchorTheme.interfaceFont(size: 16, weight: .medium))
+                        .foregroundStyle(LightAnchorTheme.stageFaintInk)
+                        .padding(.top, 5)
+                }
             }
         }
     }
 
-    /// 右半：要去的那件 = 一张新贴的邮票。没选时是零容器的三行灰字。
+    /// 右半：要去的那件 —— 一块浅蓝方块（邮票整套已取消：齿孔、面值、内框都没了）。
+    /// 时刻在右上角，留话和「回去开 N 样 ›」直接排进块里。
     @ViewBuilder
     private var destinationSide: some View {
         if destination == nil {
-            // 设计 .stamp-blank：不画任何框（虚线框 / 灰票三版都被否）。
-            VStack(alignment: .leading, spacing: 0) {
-                Text(tr("switch_to"))
-                    .font(LightAnchorTheme.supportingFont(size: 10, weight: .semibold))
-                    .kerning(1.8)
-                    .foregroundStyle(LightAnchorTheme.stageFaintInk)
-                Text(tr("switch_not_chosen"))
-                    .font(LightAnchorTheme.interfaceFont(size: 15, weight: .medium))
-                    .foregroundStyle(LightAnchorTheme.stageFaintInk)
-                    .padding(.top, 8)
-                Text(tr("switch_choose_hint_left"))
-                    .font(LightAnchorTheme.supportingFont(size: 12))
-                    .foregroundStyle(LightAnchorTheme.stageFaintInk.opacity(0.8))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 4)
-            }
-            .padding(.top, 2)
-            .frame(width: 240, alignment: .leading)
-        } else {
-            VStack(alignment: .trailing, spacing: 0) {
-                SwitchWorkStamp(
-                    // 票面眉标固定「切换到」（设计稿 .s-k）；动词只出现在句子里。
-                    eyebrow: destinationEyebrow,
-                    time: destinationStampTime,
-                    timeEmphasis: readyWaiting != nil,
-                    dot: destinationDotForm,
-                    name: destinationName,
-                    nameIsPlaceholder: destinationNameIsPlaceholder,
-                    meta: destinationMeta,
-                    metaHighlight: destinationMetaHighlight,
-                    value: destinationSnapshot != nil ? reopeningCount : nil
-                )
-                if let cue = destinationCue, !cue.isEmpty {
-                    Text(cue)
+            SwitchWorkBlock(
+                tone: .blank,
+                height: blockHeight,
+                onContentHeight: { _ in destinationBlockContentHeight = 0 }
+            ) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(tr("switch_to"))
+                        .font(LightAnchorTheme.supportingFont(size: 11, weight: .semibold))
+                        .kerning(0.45)
+                        .foregroundStyle(LightAnchorTheme.stageFaintInk)
+                    Text(tr("switch_not_chosen"))
+                        .font(LightAnchorTheme.interfaceFont(size: 15, weight: .medium))
+                        .foregroundStyle(LightAnchorTheme.stageFaintInk)
+                    Text(tr("switch_choose_hint_left"))
                         .font(LightAnchorTheme.supportingFont(size: 12))
-                        .foregroundStyle(LightAnchorTheme.stageMutedInk)
-                        .multilineTextAlignment(.trailing)
-                        .lineLimit(2)
-                        .padding(.top, 10)
+                        .foregroundStyle(LightAnchorTheme.stageFaintInk.opacity(0.8))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                if destinationSnapshot != nil {
-                    SwitchWorkSceneLink(title: reopenEntryTitle) { page = .destinationScene }
-                        .padding(.top, 8)
+                .frame(maxHeight: .infinity, alignment: .center)
+            }
+        } else {
+            SwitchWorkBlock(
+                tone: .destination,
+                height: blockHeight,
+                onContentHeight: { destinationBlockContentHeight = $0 }
+            ) {
+                VStack(alignment: .leading, spacing: 0) {
+                    // 眉标固定「切换到」（设计稿 .s-k）；动词只出现在句子里。
+                    Text(destinationEyebrow)
+                        .font(LightAnchorTheme.supportingFont(size: 11, weight: .semibold))
+                        .kerning(0.45)
+                        .foregroundStyle(LightAnchorTheme.accentInk)
+                        .lineLimit(1)
+                        // 右上角那行时刻的位子：眉标不许伸过去。
+                        .padding(.trailing, 62)
+                    HStack(spacing: 8) {
+                        SwitchWorkDot(destinationDotForm, size: 7)
+                        Text(destinationName)
+                            .font(LightAnchorTheme.interfaceFont(size: 15.5, weight: destinationNameIsPlaceholder ? .medium : .semibold))
+                            .foregroundStyle(destinationNameIsPlaceholder ? LightAnchorTheme.stageFaintInk : LightAnchorTheme.ink)
+                            .lineLimit(1)
+                    }
+                    .padding(.top, 6)
+                    if !destinationMeta.isEmpty {
+                        destinationMetaText
+                            .font(LightAnchorTheme.supportingFont(size: 12.5))
+                            .monospacedDigit()
+                            .lineLimit(2)
+                            .padding(.top, 5)
+                    }
+                    if let cue = destinationCue, !cue.isEmpty {
+                        Text(cue)
+                            .font(LightAnchorTheme.supportingFont(size: 12.5))
+                            .foregroundStyle(LightAnchorTheme.secondaryInk)
+                            .lineSpacing(4)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 9)
+                    }
+                    if destinationSnapshot != nil {
+                        SwitchWorkSceneLink(title: reopenEntryTitle) { page = .destinationScene }
+                            .padding(.top, 10)
+                    }
                 }
             }
-            .frame(width: 240, alignment: .trailing)
-            .padding(.top, 2)
+            .overlay(alignment: .topTrailing) {
+                if !destinationStampTime.isEmpty {
+                    Text(destinationStampTime)
+                        .font(LightAnchorTheme.supportingFont(
+                            size: 11.5,
+                            weight: readyWaiting != nil ? .semibold : .regular
+                        ))
+                        .monospacedDigit()
+                        .foregroundStyle(readyWaiting != nil
+                            ? LightAnchorTheme.success
+                            : LightAnchorTheme.stageMutedInk)
+                        .lineLimit(1)
+                        .padding(.trailing, 16)
+                        .padding(.top, 15)
+                }
+            }
         }
+    }
+
+    /// 目的地那行状态：「恢复 4 样」+ 绿色的「Keynote 已开着」。
+    private var destinationMetaText: Text {
+        guard let highlight = destinationMetaHighlight, !highlight.isEmpty else {
+            return Text(destinationMeta).foregroundStyle(LightAnchorTheme.stageMutedInk)
+        }
+        return Text(destinationMeta).foregroundStyle(LightAnchorTheme.stageMutedInk)
+            + Text(verbatim: " · ").foregroundStyle(LightAnchorTheme.stageMutedInk)
+            + Text(highlight).foregroundStyle(LightAnchorTheme.success)
     }
 
     private var destinationDotForm: SwitchWorkDotForm {
@@ -456,9 +525,11 @@ struct SwitchWorkSheet: View {
                 return UserFacingCopy.relativeAge(of: waiting.completedAt ?? waiting.startedAt)
             }
             guard let episode = destinationEpisode else { return "" }
-            return episode.state == .waiting
-                ? UserFacingCopy.waitedAge(of: episode.updatedAt)
-                : UserFacingCopy.relativeAge(of: episode.updatedAt)
+            // 还在等结果的，报的是「结果多久没来」；纯放下的报「你多久没管它」。
+            if let waiting = outstandingWaiting {
+                return UserFacingCopy.waitedAge(of: waiting.startedAt)
+            }
+            return UserFacingCopy.relativeAge(of: episode.updatedAt)
         }
     }
 
@@ -659,11 +730,17 @@ struct SwitchWorkSheet: View {
             screenshotURL: nil,
             items: items,
             strips: currentStrips,
-            isStruck: { struckCurrentItemIDs.contains($0.id) },
-            status: { item, struck in
-                if struck { return (item.isRelevant ? tr("switch_st_leave") : tr("switch_st_irrelevant"), LightAnchorTheme.stageFaintInk) }
-                return nil
+            listTitle: tr("where_things_are"),
+            keptLabel: tr("switch_kept_take"),
+            hint: tr("switch_hint_leave_it"),
+            takeTitle: tr("scene_take_it"),
+            dropTitle: tr("scene_drop_it"),
+            place: { item, struck in
+                if !item.detail.isEmpty { return item.detail }
+                if struck, !item.isRelevant { return tr("switch_st_irrelevant") }
+                return item.sourceApplication
             },
+            isStruck: { struckCurrentItemIDs.contains($0.id) },
             toggle: { struckCurrentItemIDs.formSymmetricDifference([$0.id]) },
             allTitle: tr("switch_take_all"),
             noneTitle: tr("switch_take_none"),
@@ -688,16 +765,22 @@ struct SwitchWorkSheet: View {
                 screenshotURL: snapshot.screenshotAssetURL,
                 items: items,
                 strips: workspace.clipboardStrips(for: snapshot),
-                isStruck: { struckDestinationItemIDs.contains($0.id) },
-                // 每行右侧都说清这一条回去会怎样：划掉的「不开」、已经开着的「已开着」
-                // （绿）、其余「会打开」。设计里这一列从不空着。
-                status: { item, struck in
-                    if struck { return (tr("switch_st_skip"), LightAnchorTheme.stageFaintInk) }
+                listTitle: tr("switch_things_to_reopen"),
+                keptLabel: tr("switch_kept_reopen"),
+                hint: tr("switch_hint_dont_open_it"),
+                takeTitle: tr("switch_st_take_open"),
+                dropTitle: tr("switch_st_skip"),
+                // 每一条都说清回去会怎样：划掉的「这次不开」、已经开着的「已开着」、
+                // 其余报它的来源。
+                place: { item, struck in
+                    if !item.detail.isEmpty { return item.detail }
+                    if struck { return tr("switch_st_skip_this_time") }
                     if item.kind == .application, Self.isRunning(bundleID: item.address) {
-                        return (tr("switch_st_open"), LightAnchorTheme.success)
+                        return tr("switch_st_open")
                     }
-                    return (tr("switch_st_will_open"), LightAnchorTheme.stageFaintInk)
+                    return item.sourceApplication
                 },
+                isStruck: { struckDestinationItemIDs.contains($0.id) },
                 toggle: { struckDestinationItemIDs.formSymmetricDifference([$0.id]) },
                 allTitle: tr("switch_restore_all"),
                 noneTitle: tr("switch_restore_none"),
@@ -717,8 +800,13 @@ struct SwitchWorkSheet: View {
         screenshotURL: URL?,
         items: [SceneItem],
         strips: [ClipboardStrip],
+        listTitle: String,
+        keptLabel: String,
+        hint: String,
+        takeTitle: String,
+        dropTitle: String,
+        place: @escaping (SceneItem, Bool) -> String,
         isStruck: @escaping (SceneItem) -> Bool,
-        status: @escaping (SceneItem, Bool) -> (String, LightAnchorThemeColor)?,
         toggle: @escaping (SceneItem) -> Void,
         allTitle: String,
         noneTitle: String,
@@ -726,6 +814,13 @@ struct SwitchWorkSheet: View {
         none: @escaping () -> Void
     ) -> some View {
         let hasPhoto = screenshotURL != nil
+        let kept = items.filter { !isStruck($0) }.count
+        let tally = NowSceneSection.displayOrder
+            .compactMap { kind -> String? in
+                let count = items.filter { $0.kind == kind }.count
+                return count > 0 ? "\(kind.title) \(count)" : nil
+            }
+            .joined(separator: " · ")
         return VStack(alignment: .leading, spacing: 0) {
             // 设计 .sp-head（haspic 时 min-height 126、正文右让 186）
             VStack(alignment: .leading, spacing: 0) {
@@ -754,28 +849,79 @@ struct SwitchWorkSheet: View {
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { sceneHeadHeight = $0 }
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    // 分组顺序按条目里第一次出现的先后，不套一份固定的类别顺序——
-                    // 采集下来是什么次序，看到的就是什么次序。
-                    ForEach(Self.kindOrder(of: items)) { kind in
-                        let rows = items.filter { $0.kind == kind }
-                        if !rows.isEmpty {
-                            sceneGroupHeader(kind.title, count: rows.count)
-                            ForEach(rows) { item in
-                                let struck = isStruck(item)
-                                SwitchWorkSceneRow(
-                                    item: item,
-                                    struck: struck,
-                                    status: status(item, struck),
-                                    action: { toggle(item) }
-                                )
-                            }
-                        }
+                // 现场与「现在」页同源：两张白卡（东西在哪 / 当时的剪贴板），
+                // 不再按 应用·网页·文件·终端 分组——卡头一行就把类别数报清了。
+                VStack(alignment: .leading, spacing: 12) {
+                    NowCard {
+                        Text(listTitle)
+                            .font(LightAnchorTheme.supportingFont(size: 12.5, weight: .semibold))
+                            .foregroundStyle(LightAnchorTheme.ink)
+                            .fixedSize()
+                        Text(tally.isEmpty
+                            ? String(format: tr("scene_tally_plain"), items.count, kept)
+                            : String(format: tr("switch_scene_tally"), items.count, tally, keptLabel, kept))
+                            .font(LightAnchorTheme.supportingFont(size: 12))
+                            .monospacedDigit()
+                            .foregroundStyle(LightAnchorTheme.stageMutedInk)
+                            .lineLimit(1)
+                        Spacer(minLength: 8)
+                        Text(hint)
+                            .font(LightAnchorTheme.supportingFont(size: 11.5))
+                            .foregroundStyle(LightAnchorTheme.stageFaintInk)
+                            .lineLimit(1)
+                            // 提示让位给右边两枚动作：挤不下先截提示，别把按钮挤成两行。
+                            .layoutPriority(-1)
+                        Button(noneTitle, action: none)
+                            .buttonStyle(LightAnchorInlineButtonStyle())
+                        Button(allTitle, action: all)
+                            .buttonStyle(LightAnchorInlineButtonStyle())
+                    } content: {
+                        SceneThingsGrid(
+                            items: items,
+                            isOff: isStruck,
+                            placeText: { place($0, isStruck($0)) },
+                            takeTitle: takeTitle,
+                            dropTitle: dropTitle,
+                            toggle: toggle
+                        )
+                        .padding(4)
                     }
+
                     if !strips.isEmpty {
-                        sceneGroupHeader(tr("switch_clipboard_strip"), count: strips.reduce(0) { $0 + $1.entries.count })
-                        SwitchWorkClipboardStrips(strips: strips)
-                            .padding(.top, 6)
+                        NowCard {
+                            Text(tr("clipboard_then"))
+                                .font(LightAnchorTheme.supportingFont(size: 12.5, weight: .semibold))
+                                .foregroundStyle(LightAnchorTheme.ink)
+                                .fixedSize()
+                            Text(String(
+                                format: tr("clipboard_count"),
+                                strips.reduce(0) { $0 + $1.entries.count }
+                            ))
+                            .font(LightAnchorTheme.supportingFont(size: 12))
+                            .monospacedDigit()
+                            .foregroundStyle(LightAnchorTheme.stageMutedInk)
+                            Spacer(minLength: 8)
+                            Button(tr("clipboard_copy_all")) {
+                                let text = strips.flatMap(\.entries).map(\.text).joined(separator: "\n")
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(text, forType: .string)
+                                workspace.presentNotice(tr("clipboard_all_copied"))
+                            }
+                            .buttonStyle(LightAnchorInlineButtonStyle())
+                        } content: {
+                            VStack(alignment: .leading, spacing: 0) {
+                                ForEach(Array(strips.enumerated()), id: \.element.id) { index, strip in
+                                    if index > 0, let pause = strips[index - 1].pauseAfter {
+                                        NowClipboardGap(pause: pause)
+                                    }
+                                    ForEach(Array(strip.entries.enumerated()), id: \.element.id) { row, entry in
+                                        NowClipboardRow(entry: entry, isLatest: index == 0 && row == 0)
+                                            .environmentObject(workspace)
+                                    }
+                                }
+                            }
+                            .padding(4)
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -795,17 +941,10 @@ struct SwitchWorkSheet: View {
                         .font(LightAnchorTheme.supportingFont(size: 12.5, weight: .medium))
                         .foregroundStyle(LightAnchorTheme.primary)
                     Spacer()
+                    // 「全不带 / 全带上」已经进了卡头，页脚不再重复摆一遍。
                     Text(tr("switch_tap_to_strike"))
                         .font(LightAnchorTheme.supportingFont(size: 12.5))
                         .foregroundStyle(LightAnchorTheme.stageFaintInk)
-                    Spacer()
-                    HStack(spacing: 12) {
-                        Button(allTitle, action: all)
-                        Button(noneTitle, action: none)
-                    }
-                    .buttonStyle(.plain)
-                    .font(LightAnchorTheme.supportingFont(size: 12.5))
-                    .foregroundStyle(LightAnchorTheme.primary)
                 }
                 .padding(.top, 14)
             }
@@ -814,33 +953,6 @@ struct SwitchWorkSheet: View {
         .padding(.horizontal, 34)
         .padding(.top, 30)
         .padding(.bottom, 20)
-    }
-
-    /// 现场条目里出现过的类别，按第一次出现的先后。
-    private static func kindOrder(of items: [SceneItem]) -> [SceneItemKind] {
-        var seen: Set<SceneItemKind> = []
-        return items.compactMap { seen.insert($0.kind).inserted ? $0.kind : nil }
-    }
-
-    /// 设计 .sp-g：眉标 + 细线 + 计数。
-    private func sceneGroupHeader(_ title: String, count: Int) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Text(title)
-                .font(LightAnchorTheme.supportingFont(size: 10.5, weight: .semibold))
-                .kerning(1.5)
-                .foregroundStyle(LightAnchorTheme.stageFaintInk)
-            Rectangle()
-                .fill(LightAnchorTheme.stageLineSoft)
-                .frame(height: 1)
-                .offset(y: -2)
-            Text(verbatim: "\(count)")
-                .font(LightAnchorTheme.supportingFont(size: 11))
-                .monospacedDigit()
-                .foregroundStyle(LightAnchorTheme.stageFaintInk)
-        }
-        .padding(.horizontal, 4)
-        .padding(.top, 15)
-        .padding(.bottom, 3)
     }
 
     // MARK: - 小部件
@@ -945,16 +1057,25 @@ struct SwitchWorkSheet: View {
         return workspace.snapshot.readyWaitingItems.first { $0.episodeID == episode.id }
     }
 
+    /// 还没等到的那条：目的地这件事是不是仍卡在别人手里。看的是等待本身，
+    /// 不是那段工作此刻的状态——「等待中」已经不是一种状态了。
+    private var outstandingWaiting: WaitingItem? {
+        guard let episode = destinationEpisode else { return nil }
+        return workspace.snapshot.waitingItems.values
+            .filter { $0.episodeID == episode.id && $0.status == .waiting }
+            .min { $0.startedAt < $1.startedAt }
+    }
+
     private var destinationVerb: String? {
         guard let destination else { return nil }
         switch destination {
         case .create: return tr("switch_verb_new")
         case .capture: return tr("switch_verb_from_later")
         case .target:
-            switch destinationEpisode?.state {
-            case .waiting, .returning: return tr("switch_verb_return")
-            default: return readyWaiting != nil ? tr("switch_verb_return") : tr("switch_verb_resume")
+            if destinationEpisode?.state == .returning || readyWaiting != nil {
+                return tr("switch_verb_return")
             }
+            return outstandingWaiting != nil ? tr("switch_verb_return") : tr("switch_verb_resume")
         }
     }
 
@@ -1303,9 +1424,12 @@ struct SwitchWorkSheet: View {
             case .capture(let captureID):
                 switched = workspace.createTargetFromCapture(captureID) != nil
             case .create(let name):
-                guard !name.isEmpty, let target = workspace.createTarget(name: name) else { return }
-                // 新开一件就是空手开始，一张空桌（票面和第三句写的都是「现场从零开始」）。
-                switched = workspace.startEpisode(targetID: target.id, context: ContextCapsule()) != nil
+                // 不在这儿建了：凭空立一件事要交代的东西（期限、开工要开什么）
+                // 这个面板问不了——它的右区是给「交接」用的，新事没有现场可交接。
+                // 名字带走，交给「开始一件事」那张便笺。
+                guard !name.isEmpty else { return }
+                onCreateNew(name)
+                return
             }
         }
 
@@ -1372,7 +1496,6 @@ enum SwitchWorkDotForm: Equatable {
         switch state {
         case .active: self = .active
         case .paused: self = .pause
-        case .waiting: self = .wait
         case .returning: self = .ready
         case .ended: self = .done
         }
@@ -1417,142 +1540,78 @@ struct SwitchWorkDot: View {
     }
 }
 
-// MARK: - 邮票
+// MARK: - 两块：一块中性白（现在），一块浅蓝（要去的地方）
 
-/// 一张真正的小邮票（定稿方案 A）：只有票有齿孔（一圈 3px 细齿）、一道 1px 蓝内框、
-/// 右上角一行小字时刻、右下角「面值」= 这次要恢复几样。票上没有任何斜盖的装饰
-/// （圆邮戳、杀戳线两版都被否）。
+/// 左边「现在」和右边目的地是**同一种块**，只是温度不同：一块中性白、一块浅蓝。
+/// 邮票整套已取消——齿孔、面值、蓝内框、复写条撕边全部去掉。
 ///
-/// 齿孔用 mask 抠、投影必须画在**外层**：SwiftUI 与 CSS 一样，`mask` 会把同层的
-/// 投影一起剪掉，所以外层负责 shadow、内层负责 mask。
-struct SwitchWorkStamp: View {
-    let eyebrow: String
-    let time: String
-    var timeEmphasis = false
-    let dot: SwitchWorkDotForm
-    let name: String
-    var nameIsPlaceholder = false
-    let meta: String
-    var metaHighlight: String?
-    let value: Int?
+/// 两块的内边距、圆角、最小高度都相同，外面用等高的网格拉伸，所以不管右边
+/// 有没有留话，白卡和蓝块永远顶底对齐。
+struct SwitchWorkBlock<Content: View>: View {
+    enum Tone {
+        /// 手上这件：中性白卡。
+        case now
+        /// 要去的地方：浅蓝方块。
+        case destination
+        /// 还没选：透明 + 虚线边（空位的通用语言）。
+        case blank
+    }
 
-    static let width: CGFloat = 240
+    let tone: Tone
+    /// 外面钉进来的高度：两块永远等高，谁的内容高就都用那个高。
+    var height: CGFloat?
+    /// 把内容的自然高度报出去（不含内边距），供外面算等高。
+    var onContentHeight: ((CGFloat) -> Void)?
+    @ViewBuilder let content: () -> Content
+
+    /// 内边距（上 14 / 下 13）：算等高时要把它加回去。
+    static var verticalPadding: CGFloat { 27 }
 
     var body: some View {
-        stampPaper
-            .lightAnchorStampShadow()
-    }
-
-    private var stampPaper: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ZStack(alignment: .topLeading) {
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(eyebrow)
-                            .font(LightAnchorTheme.supportingFont(size: 10, weight: .semibold))
-                            .kerning(1.8)
-                            .foregroundStyle(LightAnchorTheme.primary)
-                            .lineLimit(1)
-                            .layoutPriority(1)
-                        Spacer(minLength: 4)
-                        if !time.isEmpty {
-                            // 票面右上角那行小字：空间不够时它让位给眉标（英文动词比中文长）。
-                            Text(time)
-                                .font(LightAnchorTheme.supportingFont(size: 11, weight: timeEmphasis ? .semibold : .regular))
-                                .monospacedDigit()
-                                .foregroundStyle(timeEmphasis ? LightAnchorTheme.success : LightAnchorTheme.stageMutedInk)
-                                .lineLimit(1)
-                                .layoutPriority(-1)
-                                .padding(.trailing, -2)
-                        }
-                    }
-                    HStack(spacing: 7) {
-                        SwitchWorkDot(dot, size: 7)
-                        Text(name)
-                            .font(LightAnchorTheme.interfaceFont(size: 15, weight: nameIsPlaceholder ? .medium : .semibold))
-                            .foregroundStyle(nameIsPlaceholder ? LightAnchorTheme.stageFaintInk : LightAnchorTheme.ink)
-                            .lineLimit(1)
-                    }
-                    .padding(.top, 8)
-                    if !meta.isEmpty {
-                        metaText
-                            .font(LightAnchorTheme.supportingFont(size: 12))
-                            .monospacedDigit()
-                            .lineLimit(2)
-                            .multilineTextAlignment(.leading)
-                            .padding(.top, 3)
-                            .padding(.trailing, value == nil ? 0 : 36)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .topLeading)
+        content()
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { measured in
+                onContentHeight?(measured)
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 12)
-            .padding(.bottom, 11)
-            // 116 是含 padding 的总高（CSS border-box），不是内容高。
-            .frame(minHeight: 116, alignment: .top)
-            // 票面：极淡的一层主蓝（设计里是 5% 斜渐变，这里用纯色，不引入渐变）。
-            .background(LightAnchorTheme.primary.opacity(0.03))
-            .overlay(alignment: .bottomTrailing) {
-                if let value {
-                    // 面值：邮票角上本来就该有的那个位（右下，右上让给时刻）。
-                    VStack(spacing: 0) {
-                        Text(verbatim: "\(value)")
-                            .font(LightAnchorTheme.interfaceFont(size: 17, weight: .bold))
-                            .monospacedDigit()
-                        Text(tr("switch_stamp_unit"))
-                            .font(LightAnchorTheme.supportingFont(size: 8.5))
-                            .kerning(0.85)
-                    }
-                    .foregroundStyle(LightAnchorTheme.primary)
-                    .padding(.trailing, 11)
-                    .padding(.bottom, 9)
-                }
+            .padding(EdgeInsets(top: 14, leading: 17, bottom: 13, trailing: 17))
+            .frame(height: height, alignment: .topLeading)
+            .frame(minHeight: 122, alignment: .topLeading)
+            .background {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(fill)
             }
             .overlay {
-                // 一道内框（设计 .stamp .in border）
-                Rectangle().strokeBorder(LightAnchorTheme.primary.opacity(0.42), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(stroke, style: strokeStyle)
             }
-            .padding(7)
-        }
-        .frame(width: Self.width)
-        .background(LightAnchorTheme.surface)
-        .mask(SwitchWorkPerforation(pitch: 12, radius: 3).fill(style: FillStyle(eoFill: true)))
+            .shadow(
+                color: .black.opacity(tone == .now ? 0.04 : 0),
+                radius: 1,
+                y: 1
+            )
     }
 
-    private var metaText: Text {
-        guard let metaHighlight, !metaHighlight.isEmpty else {
-            return Text(meta).foregroundStyle(LightAnchorTheme.stageMutedInk)
+    private var fill: LightAnchorThemeColor {
+        switch tone {
+        case .now: LightAnchorTheme.surface
+        case .destination: LightAnchorTheme.stageWash
+        case .blank: LightAnchorThemeColor.clear
         }
-        return Text(meta).foregroundStyle(LightAnchorTheme.stageMutedInk)
-            + Text(verbatim: " · ").foregroundStyle(LightAnchorTheme.stageMutedInk)
-            + Text(metaHighlight).foregroundStyle(LightAnchorTheme.success)
     }
-}
 
-/// 齿孔边：矩形沿四边打一排半圆孔（孔心落在边线上）。
-/// 与 `FillStyle(eoFill: true)` 配合作为遮罩：孔在矩形内的半边被抠掉。
-struct SwitchWorkPerforation: Shape {
-    var pitch: CGFloat = 12
-    var radius: CGFloat = 3
+    private var stroke: LightAnchorThemeColor {
+        switch tone {
+        case .now: LightAnchorTheme.stageLine
+        // 浅蓝块的边就是那层水洗蓝加深一档（深色下它自己会变浅，不写死颜色）。
+        case .destination: LightAnchorTheme.stageAccentSoft.opacity(0.5)
+        case .blank: LightAnchorTheme.stageLine
+        }
+    }
 
-    func path(in rect: CGRect) -> Path {
-        var holes = Path()
-        let columns = max(1, Int(rect.width / pitch))
-        let rows = max(1, Int(rect.height / pitch))
-        let xInset = (rect.width - CGFloat(columns) * pitch) / 2 + pitch / 2
-        let yInset = (rect.height - CGFloat(rows) * pitch) / 2 + pitch / 2
-        for column in 0..<columns {
-            let x = rect.minX + xInset + CGFloat(column) * pitch
-            holes.addEllipse(in: CGRect(x: x - radius, y: rect.minY - radius, width: radius * 2, height: radius * 2))
-            holes.addEllipse(in: CGRect(x: x - radius, y: rect.maxY - radius, width: radius * 2, height: radius * 2))
-        }
-        for row in 0..<rows {
-            let y = rect.minY + yInset + CGFloat(row) * pitch
-            holes.addEllipse(in: CGRect(x: rect.minX - radius, y: y - radius, width: radius * 2, height: radius * 2))
-            holes.addEllipse(in: CGRect(x: rect.maxX - radius, y: y - radius, width: radius * 2, height: radius * 2))
-        }
-        return Path(rect).subtracting(holes)
+    private var strokeStyle: StrokeStyle {
+        tone == .blank
+            ? StrokeStyle(lineWidth: 1, dash: [5, 4])
+            : StrokeStyle(lineWidth: 1)
     }
 }
 
@@ -1741,76 +1800,6 @@ private struct SwitchWorkPopoverRow: View {
     }
 }
 
-// MARK: - 现场页的一行：图标 · 名字 …… 来源
-
-/// 设计 .sp-i：37 高、行首 21px **真应用图标**（划掉时褪成灰）、
-/// 名字 13.5 + 终端命令等宽小字、目录式引导点、来源右侧、状态词只在偏离默认时出现。
-private struct SwitchWorkSceneRow: View {
-    let item: SceneItem
-    let struck: Bool
-    let status: (String, LightAnchorThemeColor)?
-    let action: () -> Void
-    @State private var hovered = false
-    @State private var rowWidth: CGFloat = 0
-
-    var body: some View {
-        Button(action: action) {
-            HStack(alignment: .center, spacing: 11) {
-                SwitchWorkAppIcon(item: item, size: 21)
-                    .grayscale(struck ? 1 : 0)
-                    .opacity(struck ? 0.4 : 1)
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(item.title)
-                        .font(LightAnchorTheme.interfaceFont(size: 13.5))
-                        .foregroundStyle(struck ? LightAnchorTheme.stageFaintInk : LightAnchorTheme.ink)
-                        .strikethrough(struck)
-                    if !item.detail.isEmpty {
-                        Text(item.detail)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(LightAnchorTheme.primary)
-                    }
-                }
-                .lineLimit(1)
-                // 设计 .sp-i .t：名字最多占一行的 58%，再长就截断——
-                // 短名字不撑开，长名字也不会把引导线和来源挤没。
-                .frame(maxWidth: rowWidth > 0 ? rowWidth * 0.58 : nil, alignment: .leading)
-                .layoutPriority(1)
-                SwitchWorkDottedRule(solid: false, color: LightAnchorTheme.stageLine)
-                    .frame(height: 1)
-                    .frame(minWidth: 24)
-                    .offset(y: 4)
-                // 设计里来源与状态词都是 flex:none——名字再长也先截名字，
-                // 不能把「Google Chrome · 会打开」挤成一个省略号。
-                Text(item.sourceApplication)
-                    .font(LightAnchorTheme.supportingFont(size: 12.5))
-                    .foregroundStyle(LightAnchorTheme.stageFaintInk)
-                    .lineLimit(1)
-                    .fixedSize()
-                if let status {
-                    Text(status.0)
-                        .font(LightAnchorTheme.supportingFont(size: 12))
-                        .foregroundStyle(status.1)
-                        .lineLimit(1)
-                        .fixedSize()
-                }
-            }
-            .padding(.horizontal, 9)
-            .frame(height: 37)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { rowWidth = $0 }
-            .background(
-                hovered ? LightAnchorTheme.stageRowHover : .clear,
-                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .onHover { hovered = $0 }
-        .accessibilityLabel(item.title)
-        .accessibilityValue(struck ? tr("switch_st_leave") : "")
-    }
-}
-
 /// 现场行的应用图标：取**真**应用图标（比自画的色块有辨识度）。
 /// - 应用条目用 bundleID 找 app
 /// - 文件条目直接取文件图标（本身就带应用色彩）
@@ -1933,289 +1922,6 @@ private struct SwitchWorkSceneLink: View {
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
         .animation(.easeOut(duration: 0.15), value: hovered)
-    }
-}
-
-// MARK: - 复写条：这段事复制过的文字
-
-/// 定稿（移植自 `clipboard-history-row` 的丁 · 复写条）：等宽字纸条，左缘一道竖线
-/// （当前那张是主蓝），每行「时刻 · 内容 · 来源 · 放回」；**同一段事连续复制的在同一张纸上，
-/// 放下过就把纸真的撕开**——上一张的下沿、下一张的上沿各一排半圆齿，缝里写着放下了多久。
-private struct SwitchWorkClipboardStrips: View {
-    let strips: [ClipboardStrip]
-
-    /// 每张纸最多先列这么多行，其余折成一句小结（纸多的时候整页才放得下撕口那条缝）。
-    private static let rowLimit = 3
-
-    private static let clock: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm"
-        return formatter
-    }()
-
-    /// 没列出来的条数：每张纸只先列 rowLimit 行。
-    private var hidden: Int {
-        strips.reduce(0) { $0 + max(0, $1.entries.count - Self.rowLimit) }
-    }
-
-    /// 这段记录是从什么时候起的（最早那条的时刻）。
-    private var startedAt: Date? {
-        strips.last?.entries.last?.at
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(strips.enumerated()), id: \.element.id) { index, strip in
-                SwitchWorkClipboardStrip(
-                    strip: strip,
-                    isCurrent: index == 0,
-                    tornTop: index > 0,
-                    tornBottom: index + 1 < strips.count,
-                    rowLimit: Self.rowLimit
-                )
-                // 撕口：两张纸之间真的空一条缝，小字居中坐在缝里（26 高）。
-                // `pauseAfter` 说的是「**那张纸之后**放下了多久」，所以缝里写的是
-                // 下面那张（更早的）纸的 pauseAfter，不是这张的。
-                if index + 1 < strips.count, let pause = strips[index + 1].pauseAfter {
-                    Text(String(format: tr("switch_strip_pause"), UserFacingCopy.focusDuration(Int(pause / 60))))
-                        .font(LightAnchorTheme.supportingFont(size: 10.5))
-                        .kerning(0.53)
-                        .foregroundStyle(LightAnchorTheme.stageFaintInk)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 26)
-                }
-            }
-            // 折叠那句小结坐在整叠纸的下面（设计 .smore），不是每张纸各写一句。
-            if hidden > 0, let startedAt {
-                Text(String(format: tr("switch_strip_more"), hidden, Self.clock.string(from: startedAt)))
-                    .font(LightAnchorTheme.supportingFont(size: 11))
-                    .foregroundStyle(LightAnchorTheme.stageFaintInk)
-                    .padding(.top, 8)
-                    .padding(.leading, 15)
-            }
-        }
-        .padding(.horizontal, 4)
-    }
-}
-
-private struct SwitchWorkClipboardStrip: View {
-    let strip: ClipboardStrip
-    let isCurrent: Bool
-    let tornTop: Bool
-    let tornBottom: Bool
-    let rowLimit: Int
-
-    private var shown: [ClipboardHistoryEntry] { Array(strip.entries.prefix(rowLimit)) }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(shown.enumerated()), id: \.element.id) { index, entry in
-                SwitchWorkClipboardLine(
-                    entry: entry,
-                    isHead: isCurrent && index == 0
-                )
-            }
-        }
-        .padding(.leading, isCurrent ? 17 : 15)
-        .padding(.trailing, isCurrent ? 14 : 12)
-        .padding(.top, tornTop ? 12 : (isCurrent ? 11 : 8))
-        .padding(.bottom, tornBottom ? 12 : (isCurrent ? 9 : 7))
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            ZStack(alignment: .leading) {
-                // 当前那张纸：极淡的一层主蓝洗底。
-                if isCurrent {
-                    Rectangle().fill(LightAnchorTheme.primary.opacity(0.055))
-                }
-                // 左缘竖线：当前那张是主蓝，更早的是灰的。
-                Capsule()
-                    .fill(isCurrent ? AnyShapeStyle(LightAnchorTheme.primary) : AnyShapeStyle(LightAnchorTheme.stageFaintInk.opacity(0.45)))
-                    .frame(width: 2)
-                    .padding(.vertical, 9)
-            }
-            // 没有洗底那层时 ZStack 只剩 2pt 宽的竖线，背景会把它居中——
-            // 得自己撑满再靠左，否则更早那张纸的竖线跑到纸中间。
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .clipShape(paper)
-        .overlay {
-            SwitchWorkStripOutline(tornTop: tornTop, tornBottom: tornBottom)
-                .stroke(borderColor, lineWidth: 1)
-        }
-        // 撕齿：一排细弧线骑在撕口上、弧尖探进缝里（设计 .torn-b/.torn-t::after 的
-        // radial-gradient 圆环——圆心离纸口 1px、半径 5.4、线宽 1、周期 12）。
-        .overlay(alignment: .top) {
-            if tornTop {
-                SwitchWorkTornTeeth(pointsDown: false)
-                    .stroke(borderColor, lineWidth: 1)
-                    .frame(height: 6)
-                    .clipped()
-                    .offset(y: -5)
-            }
-        }
-        .overlay(alignment: .bottom) {
-            if tornBottom {
-                SwitchWorkTornTeeth(pointsDown: true)
-                    .stroke(borderColor, lineWidth: 1)
-                    .frame(height: 6)
-                    .clipped()
-                    .offset(y: 5)
-            }
-        }
-    }
-
-    /// 纸体是平直的：撕开那侧直角（设计 border-radius: 4px 4px 0 0），没撕的角圆 4。
-    private var paper: UnevenRoundedRectangle {
-        UnevenRoundedRectangle(
-            topLeadingRadius: tornTop ? 0 : 4,
-            bottomLeadingRadius: tornBottom ? 0 : 4,
-            bottomTrailingRadius: tornBottom ? 0 : 4,
-            topTrailingRadius: tornTop ? 0 : 4
-        )
-    }
-
-    private var borderColor: AnyShapeStyle {
-        isCurrent
-            ? AnyShapeStyle(LightAnchorTheme.primary.opacity(0.34))
-            : AnyShapeStyle(LightAnchorTheme.stageLine)
-    }
-}
-
-/// 复写条的一行：时刻 38 · 内容（等宽）· 来源 · 放回（悬停现身，头一行常显）。
-private struct SwitchWorkClipboardLine: View {
-    let entry: ClipboardHistoryEntry
-    let isHead: Bool
-    @State private var hovered = false
-    @State private var putBack = false
-
-    private static let clock: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm"
-        return formatter
-    }()
-
-    var body: some View {
-        HStack(alignment: isHead ? .top : .firstTextBaseline, spacing: 12) {
-            Text(Self.clock.string(from: entry.at))
-                .font(.system(size: 10.5, design: .monospaced))
-                .monospacedDigit()
-                .foregroundStyle(LightAnchorTheme.stageFaintInk)
-                .frame(width: 38, alignment: .leading)
-            // 头一行 = 当时的剪贴板：13px 可折行。
-            Text(entry.text)
-                .font(.system(size: isHead ? 13 : 12, design: .monospaced))
-                .foregroundStyle(LightAnchorTheme.ink)
-                .lineLimit(isHead ? 2 : 1)
-                .truncationMode(.tail)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            if !entry.sourceApplication.isEmpty {
-                Text(entry.sourceApplication)
-                    .font(LightAnchorTheme.supportingFont(size: 10.5))
-                    .foregroundStyle(isHead ? LightAnchorTheme.stageMutedInk : LightAnchorTheme.stageFaintInk)
-                    .lineLimit(1)
-                    .fixedSize()
-            }
-            Button(putBack ? tr("switch_strip_put_back_done") : tr("switch_strip_put_back")) {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(entry.text, forType: .string)
-                putBack = true
-            }
-            .buttonStyle(.plain)
-            .font(LightAnchorTheme.supportingFont(size: 11.5, weight: .semibold))
-            .foregroundStyle(LightAnchorTheme.accentInk)
-            .opacity(isHead || hovered ? 1 : 0)
-            .animation(.easeOut(duration: 0.12), value: hovered)
-        }
-        // 设计里这一行的行高是 1.55 倍字号（12 → 18.6、头一行 13 → 20.15），
-        // 上下各 2.5 的内边距；头一行底下再多 1.5 让「放回」那行透点气。
-        .frame(minHeight: isHead ? 20.15 : 18.6, alignment: .top)
-        .padding(.top, 2.5)
-        .padding(.bottom, isHead ? 4 : 2.5)
-        .onHover { hovered = $0 }
-    }
-}
-
-/// 纸条的描边：只描没撕的边——撕开那侧不封口，交给撕齿那排弧线。
-private struct SwitchWorkStripOutline: Shape {
-    var tornTop: Bool
-    var tornBottom: Bool
-
-    private static let corner: CGFloat = 4
-
-    func path(in rect: CGRect) -> Path {
-        let box = rect.insetBy(dx: 0.5, dy: 0.5)
-        let corner = Self.corner
-        var path = Path()
-        if !tornTop && !tornBottom {
-            path.addRoundedRect(in: box, cornerSize: CGSize(width: corner, height: corner))
-            return path
-        }
-        if tornTop && tornBottom {
-            // 两侧都撕：只剩左右两条竖线。
-            path.move(to: CGPoint(x: box.minX, y: box.minY))
-            path.addLine(to: CGPoint(x: box.minX, y: box.maxY))
-            path.move(to: CGPoint(x: box.maxX, y: box.minY))
-            path.addLine(to: CGPoint(x: box.maxX, y: box.maxY))
-            return path
-        }
-        if tornBottom {
-            // 撕下沿：左竖线到底 → 上沿两个圆角 → 右竖线到底。
-            path.move(to: CGPoint(x: box.minX, y: box.maxY))
-            path.addLine(to: CGPoint(x: box.minX, y: box.minY + corner))
-            path.addQuadCurve(
-                to: CGPoint(x: box.minX + corner, y: box.minY),
-                control: CGPoint(x: box.minX, y: box.minY)
-            )
-            path.addLine(to: CGPoint(x: box.maxX - corner, y: box.minY))
-            path.addQuadCurve(
-                to: CGPoint(x: box.maxX, y: box.minY + corner),
-                control: CGPoint(x: box.maxX, y: box.minY)
-            )
-            path.addLine(to: CGPoint(x: box.maxX, y: box.maxY))
-        } else {
-            // 撕上沿：左竖线到顶 → 下沿两个圆角 → 右竖线到顶。
-            path.move(to: CGPoint(x: box.minX, y: box.minY))
-            path.addLine(to: CGPoint(x: box.minX, y: box.maxY - corner))
-            path.addQuadCurve(
-                to: CGPoint(x: box.minX + corner, y: box.maxY),
-                control: CGPoint(x: box.minX, y: box.maxY)
-            )
-            path.addLine(to: CGPoint(x: box.maxX - corner, y: box.maxY))
-            path.addQuadCurve(
-                to: CGPoint(x: box.maxX, y: box.maxY - corner),
-                control: CGPoint(x: box.maxX, y: box.maxY)
-            )
-            path.addLine(to: CGPoint(x: box.maxX, y: box.minY))
-        }
-        return path
-    }
-}
-
-/// 撕齿：每 12pt 一个半径 5.4 的半圆弧线，圆心排在纸口上（rect 贴纸口的那条边），
-/// 弧尖探进两张纸之间的缝里。宿主用 .clipped() 裁掉右端没排满一格的弧。
-private struct SwitchWorkTornTeeth: Shape {
-    /// true = 弧尖朝下（纸的下沿），false = 朝上（纸的上沿）。
-    var pointsDown: Bool
-
-    private static let pitch: CGFloat = 12
-    private static let radius: CGFloat = 5.4
-
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        let edge = pointsDown ? rect.minY : rect.maxY
-        var x = rect.minX + Self.pitch / 2
-        while x - Self.pitch / 2 < rect.maxX {
-            path.move(to: CGPoint(x: x - Self.radius, y: edge))
-            path.addArc(
-                center: CGPoint(x: x, y: edge),
-                radius: Self.radius,
-                startAngle: .degrees(180),
-                endAngle: .degrees(0),
-                clockwise: pointsDown
-            )
-            x += Self.pitch
-        }
-        return path
     }
 }
 

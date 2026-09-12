@@ -331,13 +331,14 @@ struct AttentionSnapshot: Codable, Equatable {
         return episodes[currentEpisodeID]
     }
 
-    /// 「现在」只属于 进行中 / 回场 / 等待中 的段；
-    /// 放下（paused）的事住在边缘（今天条 / 最近的事），不占现在页。
+    /// 「现在」只属于 进行中 / 回场 的段；放下的事住在稍后清单里，不占现在页。
+    /// 等结果的事同样不占：**你在等的时候一定在做别的**，把它按在现在页上，
+    /// 那一页就成了一件你并没有在做的事。
     private static func occupiesNow(_ episode: AttentionEpisode) -> Bool {
-        episode.state == .active || episode.state == .returning || episode.state == .waiting
+        episode.state == .active || episode.state == .returning
     }
 
-    /// active 和 returning 都算专注；paused / waiting / ended 让时钟停下。
+    /// active 和 returning 都算专注；paused / ended 让时钟停下。
     private static func isFocusState(_ state: AttentionEpisodeState) -> Bool {
         state == .active || state == .returning
     }
@@ -426,6 +427,33 @@ struct AttentionSnapshot: Codable, Equatable {
         waitingItems.values
             .filter { $0.status == .ready }
             .sorted { ($0.completedAt ?? $0.startedAt) > ($1.completedAt ?? $1.startedAt) }
+    }
+
+    /// 还活着的事：没收起墓碑、也没做完/放弃的。期限只对它们有意义。
+    var activeTargets: [AttentionTarget] {
+        targets.values.filter { target in
+            guard target.retiredAt == nil else { return false }
+            // 每个目标最新那一段还开着，才算还活着。
+            guard let latest = episodes.values
+                .filter({ $0.targetID == target.id })
+                .max(by: { $0.updatedAt < $1.updatedAt })
+            else { return true }
+            return latest.state != .ended
+        }
+    }
+
+    /// 押了期限、且已经进了「还来得及」那个窗口的事。到期最紧的排前面。
+    func dueTargets(now: Date = Date()) -> [AttentionTarget] {
+        activeTargets
+            .filter { $0.countdown(now: now)?.isPressing == true }
+            .sorted { ($0.dueAt ?? .distantFuture) < ($1.dueAt ?? .distantFuture) }
+    }
+
+    /// 同上，但说的是别人欠你的那些。
+    func dueWaitingItems(now: Date = Date()) -> [WaitingItem] {
+        waitingItems.values
+            .filter { $0.status == .waiting && $0.countdown(now: now)?.isPressing == true }
+            .sorted { ($0.dueAt ?? .distantFuture) < ($1.dueAt ?? .distantFuture) }
     }
 
     /// 排定中的定时任务，按触发时间升序（最近的先来）。

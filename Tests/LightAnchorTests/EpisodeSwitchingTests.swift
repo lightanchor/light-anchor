@@ -6,7 +6,7 @@ import XCTest
 @MainActor
 final class EpisodeSwitchingTests: XCTestCase {
     private func makeWorkspace() -> AttentionWorkspace {
-        AttentionWorkspace(store: LocalEventStore(fileURL: temporaryFileURL()))
+        AttentionWorkspace(store: LocalEventStore(directoryURL: temporaryEventsDirectoryURL()))
     }
 
     /// 放下 A → 做 B → 回到 A：A 仍是同一段，段数不虚增。
@@ -61,7 +61,7 @@ final class EpisodeSwitchingTests: XCTestCase {
             files: [URL(fileURLWithPath: "/tmp/boundary-from-capture.md")]
         )
         let workspace = AttentionWorkspace(
-            store: LocalEventStore(fileURL: temporaryFileURL()),
+            store: LocalEventStore(directoryURL: temporaryEventsDirectoryURL()),
             contextCapture: { _, _ in boundary }
         )
         let held = try XCTUnwrap(workspace.createTarget(name: "手上这件"))
@@ -111,9 +111,9 @@ final class EpisodeSwitchingTests: XCTestCase {
         )
     }
 
-    private func temporaryFileURL() -> URL {
+    private func temporaryEventsDirectoryURL() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("episode-switching-\(UUID().uuidString)", isDirectory: true)
-            .appendingPathComponent("events.json")
+            .appendingPathComponent("events", isDirectory: true)
     }
 }

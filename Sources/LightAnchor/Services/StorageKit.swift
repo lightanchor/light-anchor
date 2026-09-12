@@ -23,8 +23,29 @@ enum LightAnchorStorage {
             .appendingPathComponent("LightAnchor", isDirectory: true)
     }
 
-    static func eventsURL(fileManager: FileManager = .default) -> URL {
-        rootURL(fileManager: fileManager).appendingPathComponent("events.json")
+    /// 事件日志目录（一条事件一个文件，见 `LocalEventStore`）。
+    static func eventsDirectoryURL(fileManager: FileManager = .default) -> URL {
+        rootURL(fileManager: fileManager).appendingPathComponent("events", isDirectory: true)
+    }
+
+    /// 数据根目录自带的 `.gitignore`：用户把这个目录 `git init` 就能直接用。
+    /// 列的都是可重建的缓存与本机状态；剪贴板历史与事件日志都是用户数据，入库。
+    static let gitIgnoreContents = """
+    # LightAnchor 数据目录。以下是缓存与本机状态，可重建，不入版本库。
+    memory-index.sqlite
+    memory-index.sqlite-*
+    diagnostics.log
+    launch-marker.json
+    *.lock
+    .DS_Store
+
+    """
+
+    static func ensureGitIgnore(in root: URL, fileManager: FileManager = .default) throws {
+        let url = root.appendingPathComponent(".gitignore")
+        guard !fileManager.fileExists(atPath: url.path) else { return }
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data(gitIgnoreContents.utf8).write(to: url, options: .atomic)
     }
 
     static func assetsURL(fileManager: FileManager = .default) -> URL {

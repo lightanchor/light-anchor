@@ -259,6 +259,10 @@ final class LocalizationTests: XCTestCase {
             "Sources/LightAnchor/Services/WaitingPresentationKit.swift",
             "Sources/LightAnchor/Services/WaitingNotifications.swift",
             "Sources/LightAnchor/Services/WorkHistoryKit.swift",
+            "Sources/LightAnchor/Services/SnapshotNote.swift",
+            "Sources/LightAnchor/Services/SnapshotController.swift",
+            "Sources/LightAnchor/Services/GitSnapshotService.swift",
+            "Sources/LightAnchor/Services/GitHubAuthService.swift",
         ]
         let literal = try NSRegularExpression(pattern: #""((?:[^"\\\n]|\\.)*)""#)
         var offenders: [String] = []

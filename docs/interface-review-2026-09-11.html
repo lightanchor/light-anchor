@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Light Anchor 界面审查报告 · 2026-09-11</title>
+<style>
+  :root {
+    --bg: #FBF8F3; --card: #FFFFFF; --ink: #3B3644; --ink2: #6E6879; --ink3: #8B889C;
+    --line: #E7E0D4; --accent: #2F7099; --accent-wash: #EAF3F8;
+    --high: #A84A43; --high-bg: #F9ECEA; --med: #7E6112; --med-bg: #FBF3DC;
+    --low-bg: #F3EFE7; --mono: ui-monospace, "SF Mono", Menlo, monospace;
+    /* —— 以下与 LightAnchorThemeModel 一致的实测 token —— */
+    --t-primary: #5BA7CE; --t-accent-ink: #2F7099; --t-on-action: #FFFFFF;
+    --t-stage-panel: #FDFCFA; --t-stage-faint: #B6B3C2; --t-stage-muted: #8B889C;
+    --t-muted-ink: #6E6879; --t-stage-accent-soft: #8FC4DD; --t-stage-wash: #EAF3F8;
+    --t-dark-bg: #211F28; --t-dark-stage-faint: #6F6C80; --t-dark-stage-muted: #A5A2B4;
+    --t-icon-amber: #F6E3AE; --t-warning: #7E6112; --t-disabled: #9A94A6;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 48px 24px 96px; background: var(--bg); color: var(--ink);
+    font: 15px/1.65 -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: 960px; margin: 0 auto; }
+  h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: -0.01em; }
+  h2 { font-size: 18px; margin: 48px 0 12px; padding-top: 24px; border-top: 1px solid var(--line); }
+  p { margin: 8px 0; }
+  .sub { color: var(--ink2); margin: 0 0 8px; }
+  .verdict {
+    display: inline-block; margin-top: 14px; padding: 6px 14px; border-radius: 8px;
+    background: var(--high-bg); color: var(--high); font-weight: 600; font-size: 14px;
+  }
+  .note {
+    margin-top: 20px; padding: 14px 18px; border-radius: 12px; background: var(--accent-wash);
+    border: 1px solid #CFE3EE; font-size: 14px;
+  }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; background: var(--card);
+    border: 1px solid var(--line); border-radius: 12px; overflow: hidden; font-size: 13.5px; }
+  th, td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: #FCFAF7; font-weight: 600; color: var(--ink2); font-size: 12.5px; }
+  tr:last-child td { border-bottom: none; }
+  code { font-family: var(--mono); font-size: 12.5px; background: var(--low-bg);
+    padding: 1px 5px; border-radius: 5px; }
+  .finding { background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 18px 22px; margin: 14px 0; }
+  .finding h3 { margin: 0 0 4px; font-size: 15.5px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .fid { font-family: var(--mono); font-size: 12px; font-weight: 700; padding: 2px 8px;
+    border-radius: 6px; letter-spacing: 0.02em; }
+  .fid.h { background: var(--high-bg); color: var(--high); }
+  .fid.m { background: var(--med-bg); color: var(--med); }
+  .domain { font-size: 12px; color: var(--ink2); font-weight: 400; }
+  .loc { font-family: var(--mono); font-size: 12px; color: var(--ink2); margin: 2px 0 10px; }
+  .ba { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 10px 0; }
+  .ba > div { border-radius: 10px; padding: 10px 14px; font-size: 13px; }
+  .before { background: #FAF6F0; border: 1px solid var(--line); }
+  .after { background: #F0F7EC; border: 1px solid #D8E8CF; }
+  .ba .tag { display: block; font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+    color: var(--ink3); margin-bottom: 4px; }
+  .after .tag { color: #4C7A3A; }
+  .ba pre { margin: 4px 0 0; font-family: var(--mono); font-size: 12px; line-height: 1.55;
+    white-space: pre-wrap; word-break: break-word; }
+  .why { font-size: 13.5px; color: var(--ink2); margin: 8px 0 0; }
+  .why b { color: var(--ink); font-weight: 600; }
+  .ratio { font-family: var(--mono); font-weight: 700; }
+  .fail { color: var(--high); } .pass { color: #2A7437; }
+  ul { margin: 6px 0; padding-left: 22px; } li { margin: 3px 0; }
+  footer { margin-top: 56px; padding-top: 16px; border-top: 1px solid var(--line);
+    color: var(--ink3); font-size: 12.5px; }
+
+  /* ===== 可视化对比 ===== */
+  .visual { margin: 14px 0 4px; border: 1px dashed #C9C0B0; border-radius: 12px; overflow: hidden; }
+  .visual .vhead { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: var(--ink3);
+    padding: 6px 14px; background: #FCFAF7; border-bottom: 1px dashed #C9C0B0; }
+  .vrow { display: grid; grid-template-columns: 1fr 1fr; }
+  .vcell { padding: 18px; position: relative; }
+  .vcell + .vcell { border-left: 1px dashed #C9C0B0; }
+  .vcell .vtag { position: absolute; top: 8px; right: 10px; font-size: 10.5px; font-weight: 700;
+    letter-spacing: 0.05em; color: var(--ink3); }
+  .vcell.vafter .vtag { color: #4C7A3A; }
+  .stage { background: var(--t-stage-panel); }
+  .dark { background: var(--t-dark-bg); }
+  .cratio { display: inline-block; margin-top: 10px; font-family: var(--mono); font-size: 11.5px;
+    font-weight: 700; padding: 2px 8px; border-radius: 6px; }
+  .cratio.bad { background: var(--high-bg); color: var(--high); }
+  .cratio.good { background: #E4F0DC; color: #2A7437; }
+
+  /* H1 按钮（还原 LightAnchorPrimaryButtonStyle：13pt medium、高 32、圆角 10、淡蓝投影） */
+  .demo-btn { display: inline-flex; align-items: center; height: 32px; padding: 0 16px;
+    border-radius: 10px; font-size: 13px; font-weight: 500; color: #fff; border: none; cursor: default; }
+  .demo-btn.b { background: var(--t-primary); box-shadow: 0 2px 4px rgba(91,167,206,.4); }
+  .demo-btn.a { background: var(--t-accent-ink); box-shadow: 0 2px 4px rgba(47,112,153,.4); }
+  .demo-btn.darkmode { background: #79C0E6; color: #142430; box-shadow: none; }
+
+  /* H4 步骤行交互demo */
+  .demo-row { display: flex; align-items: center; gap: 10px; padding: 6px 12px; border-radius: 11px;
+    font-size: 13.5px; cursor: default; user-select: none; }
+  .demo-row:hover { background: rgba(59,54,68,.04); }
+  .demo-row .dot { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--t-stage-muted); flex: none; }
+  .demo-row .name { color: var(--ink); }
+  .demo-row .sp { flex: 1; }
+  .demo-row .mins { font-size: 12px; color: var(--t-muted-ink); font-variant-numeric: tabular-nums; }
+  .inline-btn { font-size: 12px; font-weight: 500; color: var(--t-accent-ink); padding: 3px 10px;
+    border-radius: 7px; background: rgba(91,167,206,.14); border: none; white-space: nowrap; }
+  /* before：只有 hover 才出现 */
+  .demo-row.hover-only .inline-btn { visibility: hidden; }
+  .demo-row.hover-only:hover .inline-btn { visibility: visible; }
+  .demo-row.hover-only:hover .mins { visibility: hidden; }
+  /* after：淡色常显，hover 加强 */
+  .inline-btn.faint { color: var(--t-stage-muted); background: rgba(59,54,68,.05); }
+  .demo-row.always:hover .inline-btn.faint { color: var(--t-accent-ink); background: rgba(91,167,206,.16); }
+
+  /* M5 dock 按压demo */
+  .dock { display: flex; gap: 4px; justify-content: center; }
+  .dock-item { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 12px;
+    border-radius: 9px; font-size: 13px; font-weight: 500; color: var(--ink2); cursor: pointer;
+    user-select: none; border: none; background: transparent; }
+  .dock-item svg { color: #A9A2B5; }
+  .dock-item:hover { background: rgba(59,54,68,.05); }
+  .dock-item.pressable:active { transform: scale(0.98); background: rgba(59,54,68,.08);
+    transition: transform .1s ease-out, background .1s ease-out; }
+
+  /* M3 左缘示意 */
+  .edges { position: relative; height: 210px; margin: 4px 0 0; }
+  .edges .guide { position: absolute; top: 0; bottom: 0; width: 1px; background: #D8D0C0; }
+  .edges .guide.page { background: var(--t-accent-ink); opacity: .5; }
+  .edges .erow { position: absolute; left: 0; right: 0; height: 22px; }
+  .edges .erow .bar { position: absolute; top: 4px; height: 14px; border-radius: 4px; }
+  .edges .elabel { position: absolute; right: 6px; top: 3px; font-family: var(--mono); font-size: 10.5px; color: var(--ink3); }
+
+  /* M4 跳转链接 */
+  .jumplink { font-size: 12.5px; font-weight: 500; display: inline-flex; align-items: center; gap: 4px; }
+  .jumplink.on { color: var(--t-accent-ink); }
+  .jumplink.off-before { color: var(--t-accent-ink); }
+  .jumplink.off-after { color: var(--t-disabled); }
+
+  /* 积压小件 */
+  .minis { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .mini { border: 1px solid var(--line); border-radius: 12px; background: var(--card); overflow: hidden; }
+  .mini .mhead { font-size: 12px; font-weight: 700; padding: 8px 14px; background: #FCFAF7;
+    border-bottom: 1px solid var(--line); color: var(--ink2); }
+  .mini .mbody { display: grid; grid-template-columns: 1fr 1fr; }
+  .mini .mcell { padding: 14px; font-size: 12.5px; position: relative; }
+  .mini .mcell + .mcell { border-left: 1px dashed var(--line); }
+  .mini .mtag { font-size: 10px; font-weight: 700; color: var(--ink3); letter-spacing: .05em; display: block; margin-bottom: 6px; }
+  .notice-bar { display: flex; align-items: center; gap: 7px; padding: 7px 10px; border-radius: 8px;
+    border: 1px solid rgba(126,97,18,.35); background: #FBF8F3; font-size: 11.5px; color: var(--ink2); }
+  .focus-input { height: 30px; border-radius: 11px; background: #fff; width: 100%; }
+  .focus-input.b { border: 1px solid var(--t-stage-accent-soft); box-shadow: 0 0 0 3px var(--t-stage-wash); }
+  .focus-input.a { border: 1.5px solid var(--t-primary); }
+  .snav { padding: 6px; border-radius: 8px; background: #F5F1EA; }
+  .snav .glabel { font-size: 9.5px; font-weight: 600; color: var(--ink3); padding: 2px 6px; }
+  .snav .srow { height: 15px; border-radius: 5px; background: #EAE4D8; margin: 2px 4px; }
+  .snav .srow.on { background: #DCE9F2; }
+  .radii-demo { display: flex; justify-content: center; padding: 6px 0 2px; }
+  .radii-outer { padding: 12px; background: #F0EBE2; }
+  .radii-inner { width: 72px; height: 40px; background: #fff; border: 1px solid var(--line); }
+  .pill { height: 40px; border-radius: 16px; background: #fff; border: 1px solid rgba(59,54,68,.09);
+    display: flex; align-items: center; justify-content: center; font-size: 11.5px; color: var(--ink2); }
+  .pill.b { box-shadow: 0 6px 14px rgba(0,0,0,.10); }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Light Anchor 界面审查报告</h1>
+<p class="sub">2026-09-11 · better-interface 六域联合审查 · 审查全程只读，<b>尚未修改任何 Swift 代码</b> · 样式类发现附真实 token 渲染的前后对比，悬停/按压类可直接在demo上操作</p>
+<span class="verdict">结论：Block — 9 项 HIGH 待确认修复</span>
+
+<div class="note">
+  <b>怎么用这份报告：</b>每条发现有独立编号（H1–H9、M1–M6），样式类带「前后对比」区块——颜色、字号、间距均按代码里的真实值 1:1 渲染（1pt ≈ 1px）。回复你要落实的编号（可全选、可挑部分、可对 After 方案提意见），确认后我再改 Swift、跑 <code>swift test</code> 与打包验证。积压区 LOW 项默认不动，需要可点名。
+</div>
+
+<h2>审查范围与覆盖</h2>
+<p>范围为整个应用的界面层与文案层：<code>Sources/LightAnchor/Views/</code>（18 个视图文件全文）、<code>Sources/LightAnchor/Design/</code>（主题 token 全量）、<code>Sources/LightAnchor/App/</code>、<code>Sources/LightAnchor/Services/</code> 中用户可见输出，以及 <code>Resources/{zh-Hans,en}.lproj/Localizable.strings</code>（1289 对 key 全文）。项目约定文件：根目录 <code>AGENTS.md</code>（要求全部可见文案走 <code>tr()</code>）。栈：Swift 6 / SwiftUI / macOS 15。</p>
+<table>
+  <tr><th>领域</th><th>检查内容</th><th>结果</th></tr>
+  <tr><td>Accessibility</td><td>全部视图的可及名称、键盘可达、悬停专属控件、reduceMotion、破坏性操作确认</td><td>5 项发现（含 4 HIGH）</td></tr>
+  <tr><td>Layout</td><td>主流程 6 个视图全文：分组、对齐边缘、渐进披露、间距刻度</td><td>2 项发现</td></tr>
+  <tr><td>Writing</td><td>两张 strings 表全文 + 162 处中文字符串字面量逐一过筛</td><td>3 项发现（含 1 HIGH）</td></tr>
+  <tr><td>Typography</td><td>字体 token、裸写字号、截断可达性、等宽数字、字重下限</td><td>1 项发现（并入 H5）</td></tr>
+  <tr><td>Colors</td><td>全部 token 明暗两值，关键文字/背景对按 WCAG 公式实算对比度</td><td>3 项发现（全 HIGH）</td></tr>
+  <tr><td>UI polish</td><td>动画时长/曲线全清单、按下反馈、圆角同心、阴影语言</td><td>1 项发现</td></tr>
+</table>
+<p class="sub">等宽数字（70 处 <code>monospacedDigit()</code>）、字重下限（18px 以下无 light/thin）、每视图一个填充主动作、中英 key 一一对应（1289 = 1289）、绝大多数纯图标按钮的 <code>.accessibilityLabel</code> 与删除确认惯例——这些检查过且合格，未列入发现。</p>
+
+<h2>HIGH 发现（9 项）</h2>
+
+<div class="finding">
+  <h3><span class="fid h">H1</span>浅色模式主按钮白字对比度仅 2.67:1 <span class="domain">· Colors</span></h3>
+  <p class="loc">Sources/LightAnchor/Design/LightAnchorTheme.swift:569-572（LightAnchorPrimaryButtonStyle，全应用 30+ 处使用）</p>
+  <div class="visual">
+    <div class="vhead">前后对比 · 按真实 token 渲染（13pt medium / 高 32 / 圆角 10 / 淡蓝投影）</div>
+    <div class="vrow">
+      <div class="vcell stage"><span class="vtag">现在 · 浅色</span>
+        <span class="demo-btn b">开始记录</span><br>
+        <span class="cratio bad">2.67 : 1 ✗ 需 ≥ 4.5</span>
+      </div>
+      <div class="vcell stage vafter"><span class="vtag">建议 · 浅色</span>
+        <span class="demo-btn a">开始记录</span><br>
+        <span class="cratio good">5.39 : 1 ✓</span>
+      </div>
+    </div>
+    <div class="vrow" style="border-top:1px dashed #C9C0B0">
+      <div class="vcell dark"><span class="vtag">现在 · 深色</span>
+        <span class="demo-btn darkmode">开始记录</span><br>
+        <span class="cratio good">7.92 : 1 ✓</span>
+      </div>
+      <div class="vcell dark vafter"><span class="vtag">建议 · 深色（不变）</span>
+        <span class="demo-btn darkmode">开始记录</span><br>
+        <span class="cratio good">7.92 : 1 ✓ 不动</span>
+      </div>
+    </div>
+  </div>
+  <div class="ba">
+    <div class="before"><span class="tag">现在</span>
+      <pre>.foregroundStyle(LightAnchorTheme.onAction)   // #FFFFFF
+.background(LightAnchorTheme.primaryAction)      // 浅色 #5BA7CE</pre>
+    </div>
+    <div class="after"><span class="tag">建议</span>
+      浅色模式下主按钮填充改用加深档 <code>accentInk #2F7099</code>；品牌浅色 <code>#5BA7CE</code> 保留给点、描边等识别用途——主题文件自己的注释（LightAnchorTheme.swift:72-74）本就写着这条规则。深色不动。
+    </div>
+  </div>
+  <p class="why"><b>影响：</b>主操作按钮是全局最高频的填充强调色，浅色下标签发灰难读，属系统级对比度失败。</p>
+</div>
+
+<div class="finding">
+  <h3><span class="fid h">H2</span>切换工作面板四处把填充主色当文字色 <span class="domain">· Colors</span></h3>
+  <p class="loc">Sources/LightAnchor/Views/SwitchWorkPanel.swift:645（目标名 16pt）、:830（eyebrow 10.5pt）、:942（返回按钮）、:1660（搜索命中高亮）</p>
+  <div class="visual">
+    <div class="vhead">前后对比 · 舞台面板底 #FDFCFA（目标名 16pt semibold，带 #8FC4DD 下划线）</div>
+    <div class="vrow">
+      <div class="vcell stage"><span class="vtag">现在</span>
+        <div style="font-size:16px;font-weight:600;color:#5BA7CE;border-bottom:1.5px solid #8FC4DD;display:inline-block;padding-bottom:3px">「整理季度复盘」</div>
+        <div style="margin-top:10px;font-size:10.5px;font-weight:600;color:#5BA7CE;letter-spacing:.04em">正在处理</div>
+        <div style="margin-top:6px;font-size:13px;color:var(--ink)">…会上确认由<span style="color:#5BA7CE">整理季度复盘</span>的负责人…</div>
+        <br><span class="cratio bad">2.67 : 1 ✗</span>
+      </div>
+      <div class="vcell stage vafter"><span class="vtag">建议 · accentInk</span>
+        <div style="font-size:16px;font-weight:600;color:#2F7099;border-bottom:1.5px solid #8FC4DD;display:inline-block;padding-bottom:3px">「整理季度复盘」</div>
+        <div style="margin-top:10px;font-size:10.5px;font-weight:600;color:#2F7099;letter-spacing:.04em">正在处理</div>
+        <div style="margin-top:6px;font-size:13px;color:var(--ink)">…会上确认由<span style="color:#2F7099">整理季度复盘</span>的负责人…</div>
+        <br><span class="cratio good">5.39 : 1 ✓（深色 10.59 : 1 ✓）</span>
+      </div>
+    </div>
+  </div>
+  <div class="ba">
+    <div class="before"><span class="tag">现在</span>
+      <pre>.foregroundStyle(LightAnchorTheme.primary)
+// #5BA7CE on 面板底 #FDFCFA = 2.67:1</pre>
+    </div>
+    <div class="after"><span class="tag">建议</span>
+      四处全部改用现成 token <code>LightAnchorTheme.accentInk</code>。纯 token 平替，无新值。
+    </div>
+  </div>
+  <p class="why"><b>影响：</b>10.5–16pt 的小字/正文在暖白底上读不清；同一色相在同一面板里一身多义（既是识别色又是文字色）。</p>
+</div>
+
+<div class="finding">
+  <h3><span class="fid h">H3</span>舞台面板文字色阶不达标，深浅两套都有（系统性） <span class="domain">· Colors</span></h3>
+  <p class="loc">token 定义 Sources/LightAnchor/Design/LightAnchorThemeModel.swift:335-336, 397-398；使用点 SwitchWorkPanel.swift:234-240, 273-276, 945-947, 960-964, 1779-1783, 582, 634 等</p>
+  <div class="visual">
+    <div class="vhead">前后对比 · 浅色（面板底 #FDFCFA）· 计数 11pt / 提示 12.5pt</div>
+    <div class="vrow">
+      <div class="vcell stage"><span class="vtag">现在</span>
+        <div style="font-size:11px;color:#B6B3C2">命中 3 条 · 分组头</div>
+        <div style="margin-top:8px;font-size:12.5px;color:#8B889C">点一下划线可以改口径</div>
+        <br><span class="cratio bad">2.00 : 1 / 3.36 : 1 ✗</span>
+      </div>
+      <div class="vcell stage vafter"><span class="vtag">建议 · mutedInk</span>
+        <div style="font-size:11px;color:#6E6879">命中 3 条 · 分组头</div>
+        <div style="margin-top:8px;font-size:12.5px;color:#6E6879">点一下划线可以改口径</div>
+        <br><span class="cratio good">5.06 : 1 ✓</span>
+      </div>
+    </div>
+    <div class="vrow" style="border-top:1px dashed #C9C0B0">
+      <div class="vcell dark"><span class="vtag">现在 · 深色</span>
+        <div style="font-size:11px;color:#6F6C80">命中 3 条 · 分组头</div>
+        <br><span class="cratio bad">3.20 : 1 ✗</span>
+      </div>
+      <div class="vcell dark vafter"><span class="vtag">建议 · 深色 stageMuted</span>
+        <div style="font-size:11px;color:#A5A2B4">命中 3 条 · 分组头</div>
+        <br><span class="cratio good">6.53 : 1 ✓</span>
+      </div>
+    </div>
+  </div>
+  <div class="ba">
+    <div class="before"><span class="tag">现在</span>
+      <pre>stageFaint  #B6B3C2 = 2.00:1（深色 #6F6C80 = 3.20:1）
+stageMuted  #8B889C = 3.36:1（深色 #A5A2B4 = 6.53:1 ✓）</pre>
+      命中计数、分组头、时间、副标题、操作提示都在用这两档承载信息。
+    </div>
+    <div class="after"><span class="tag">建议</span>
+      承载信息的文字：浅色统一换 <code>mutedInk #6E6879</code>（5.06:1），深色用 <code>stageMuted #A5A2B4</code>（6.53:1）；<code>stageFaint</code> 深浅都只留 placeholder/纯装饰。一处 token 职责收敛，全局受益。
+    </div>
+  </div>
+  <p class="why"><b>影响：</b>浅色 2.0:1 已接近隐形；计数、时间、分组头都是要读的内容。注：深色若只提到 text4 档（#746D82）实测仅 3.29:1 仍不达标，所以深色直接收到 stageMuted 档。</p>
+</div>
+
+<div class="finding">
+  <h3><span class="fid h">H4</span>「切到这步 / 拷贝这条」只在悬停时出现，键盘与旁白完全不可达 <span class="domain">· Accessibility + Layout</span></h3>
+  <p class="loc">Sources/LightAnchor/Views/NowPageView.swift:838-840（步骤行）、:1550-1556（剪贴板行）</p>
+  <div class="visual">
+    <div class="vhead">可交互 demo · 把鼠标移上去试试（键盘 Tab 在「现在」一行永远到不了按钮）</div>
+    <div class="vrow">
+      <div class="vcell"><span class="vtag">现在 · 悬停才出现，还顶掉行尾文字</span>
+        <div class="demo-row hover-only">
+          <span class="dot"></span><span class="name">整理季度复盘</span><span class="sp"></span>
+          <span class="mins">专注 12 分钟</span>
+          <button class="inline-btn">切到这步</button>
+        </div>
+        <div class="demo-row hover-only">
+          <span class="dot"></span><span class="name">回一封邮件</span><span class="sp"></span>
+          <span class="mins">未开始</span>
+          <button class="inline-btn">切到这步</button>
+        </div>
+      </div>
+      <div class="vcell vafter"><span class="vtag">建议 · 淡色常显，悬停/聚焦加强</span>
+        <div class="demo-row always">
+          <span class="dot"></span><span class="name">整理季度复盘</span><span class="sp"></span>
+          <span class="mins">12 分钟</span>
+          <button class="inline-btn faint">切到这步</button>
+        </div>
+        <div class="demo-row always">
+          <span class="dot"></span><span class="name">回一封邮件</span><span class="sp"></span>
+          <button class="inline-btn faint">切到这步</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="ba">
+    <div class="before"><span class="tag">现在</span>
+      <pre>} else if hovered, !isDone {
+    Button(tr("switch_to_this_step"), action: onSwitch)</pre>
+      行本身不可点、不可聚焦；不悬停时按钮不在视图树里；悬停瞬间行尾文字换成按钮，宽度不同还会跳动。
+    </div>
+    <div class="after"><span class="tag">建议</span>
+      静息时常显一颗淡 tint 的 <code>LightAnchorInlineButtonStyle</code>，悬停/聚焦转正常墨色；分钟数挪到按钮左侧常显。步骤行与剪贴板行同改； SwiftUI 侧配合 <code>.accessibilityHidden</code> 三件套见 M6。
+    </div>
+  </div>
+  <p class="why"><b>影响：</b>指针悬停是这些动作的唯一入口——键盘 Tab 和 VoiceOver 用户在「现在」页无法切步、无法拷贝剪贴板条目。触发「指针可达而键盘不可达」红线。</p>
+</div>
+
+<div class="finding">
+  <h3><span class="fid h">H5</span>剪贴板条目截断后无处可看全文 <span class="domain">· Typography + Accessibility</span></h3>
+  <p class="loc">Sources/LightAnchor/Views/NowPageView.swift:1545-1548</p>
+  <div class="ba">
+    <div class="before"><span class="tag">现在</span>
+      <pre>Text(entry.text.replacingOccurrences(of: "\n", with: " "))
+    .lineLimit(1)
+// 无 .help、无 textSelection、行不可点</pre>
+    </div>
+    <div class="after"><span class="tag">建议</span>
+      补 <code>.help(entry.text)</code> + <code>.textSelection(.enabled)</code>——项目里 <code>SceneViews.swift:171-177</code> 的剪贴纸条已是这个写法，直接对齐。
+    </div>
+  </div>
+  <p class="why"><b>影响：</b>长内容换行被压平 + 尾截断后，剩余部分在 UI 里彻底丢失。触发「截断内容无途径看全文」红线。</p>
+</div>
+
+<div class="finding">
+  <h3><span class="fid h">H6</span>对话页助手消息的「复制」按钮缺可及名称 <span class="domain">· Accessibility</span></h3>
+  <p class="loc">Sources/LightAnchor/Views/MemoryChatView.swift:528-535</p>
+  <div class="ba">
+    <div class="before"><span class="tag">现在</span>
+      <pre>Button { copyToPasteboard(message.text) } label: {
+    Image(systemName: "doc.on.doc")
+}
+.buttonStyle(.plain)
+.help(tr("copy"))   // .help 只是 tooltip，不是可及名称</pre>
+    </div>
+    <div class="after"><span class="tag">建议</span>
+      补一行 <code>.accessibilityLabel(tr("copy"))</code>。同文件 :447-457 用户消息行的同款按钮已正确给出，此行为漏网。
+    </div>
+  </div>
+  <p class="why"><b>影响：</b>纯图标按钮无可及名称，VoiceOver 读出无名按钮。触发「交互控件无可及名称」红线。</p>
+</div>
+
+<div class="finding">
+  <h3><span class="fid h">H7</span>删除录制会话无确认、不可撤销 <span class="domain">· Accessibility</span></h3>
+  <p class="loc">Sources/LightAnchor/Views/RecordViews.swift:121-124（删除逻辑 AttentionWorkspace.swift:1946-1952，直接提交事件，无撤销）</p>
+  <div class="ba">
+    <div class="before"><span class="tag">现在</span>
+      <pre>Button(UserFacingCopy.delete, role: .destructive) {
+    _ = workspace.deleteRecordingSession(session.id)
+}</pre>
+    </div>
+    <div class="after"><span class="tag">建议</span>
+      复用 <code>MainWorkspaceView.swift:2500-2519</code> 删捕获的 <code>.alert</code> 模式：按钮只设 <code>@State sessionToDelete</code>，确认框内 destructive 按钮才真正执行。应用内删捕获/清对话/删全部数据均已有确认，此处是唯一漏网的不可逆删除。
+    </div>
+  </div>
+  <p class="why"><b>影响：</b>录制含语音与 trace 事实行，列表里误点一次即永久丢失。触发「破坏性操作无确认/撤销」红线。</p>
+</div>
+
+<div class="finding">
+  <h3><span class="fid h">H8</span>三处显式动画不尊重「减少动态效果」 <span class="domain">· Accessibility</span></h3>
+  <p class="loc">Sources/LightAnchor/Views/NowPageView.swift:229-234（章节跳转滚动）、Sources/LightAnchor/Views/MainWorkspaceView.swift:2254（被阻组展开）、Sources/LightAnchor/Views/SceneViews.swift:84（剪贴纸展开）</p>
+  <div class="ba">
+    <div class="before"><span class="tag">现在</span>
+      <pre>withAnimation(.easeOut(duration: 0.22)) {
+    scroller.scrollTo(chapter, anchor: .top)
+}
+// NowPageView 全文无 accessibilityReduceMotion</pre>
+    </div>
+    <div class="after"><span class="tag">建议</span>
+      各视图加 <code>@Environment(\.accessibilityReduceMotion)</code>，改为 <code>withAnimation(reduceMotion ? nil : …)</code>——<code>MainWorkspaceView.swift:875</code>、<code>MemoryChatView.swift:686</code> 已有现成惯例。
+    </div>
+  </div>
+  <p class="why"><b>影响：</b>长页面滚动与展开位移正是前庭敏感用户要关的动画。触发「动画忽略 prefers-reduced-motion」红线。</p>
+</div>
+
+<div class="finding">
+  <h3><span class="fid h">H9</span>用户可见文案绕过 tr() 硬编码中文（系统性，英文界面全盘中文） <span class="domain">· Writing</span></h3>
+  <p class="loc">Sources/LightAnchor/Services/IntelligenceKit.swift:1111, 1140, 1170, 1206, 1290, 1837, 1770, 2178, 2809-2812 · Services/LightAnchorAppIntents.swift:31-35 · App/AttentionWorkspace.swift:345, 348, 1097, 1121, 1061, 1442, 1694 · Services/EnvironmentSnapshot.swift:37-39 · Views/MainWorkspaceView.swift:2329, 2333, 3351, 4230</p>
+  <div class="ba">
+    <div class="before"><span class="tag">现在</span>
+      <pre>let name = "启发式（离线）"          // 渲染进 "Composed by %@"
+static let title: LocalizedStringResource = "捕获想法"  // 快捷指令任何语言都显示中文
+?? "新注意力目标"   // 与既有 key untitled_target 措辞还冲突</pre>
+      引擎名已证实会渲染进界面（PersonalViews.swift:509 → "Composed by 启发式（离线）"）。
+    </div>
+    <div class="after"><span class="tag">建议</span>
+      全部改为 <code>tr("…")</code> + 两张 strings 表补 key：引擎名（<code>engine_name_heuristic</code> 等）、启发式简报/错误串、<code>.missing(reason:)</code> 各原因、AppIntents 换稳定英文 key、默认名统一复用 <code>untitled_target</code>、环境草稿名 <code>scene_draft_name</code> + 系统日期格式。改动面较大，可单独成一个批次。
+    </div>
+  </div>
+  <p class="why"><b>影响：</b>违反 AGENTS.md「全部可见文案走 tr()」；降级引擎是新用户默认路径，英文用户看到的简报、错误、快捷指令、落盘标题全是中文。</p>
+</div>
+
+<h2>MEDIUM 发现（6 项）</h2>
+
+<div class="finding">
+  <h3><span class="fid m">M1</span>术语混用六组 <span class="domain">· Writing</span></h3>
+  <p class="loc">Resources/zh-Hans.lproj/Localizable.strings（en 表同步混用）+ 个别硬编码</p>
+  <ul>
+    <li><b>「稍后」箱三个名字</b>：稍后 / 收集箱（:1359，en 叫 inbox）/ 硬编码「稍后处理箱」→ 统一「稍后 / Later」</li>
+    <li><b>现场采集动词五种</b>：记录 / 收集 / 存下 / 采 / 记下 → 统一「记录」（用户主动保存才用「存」）</li>
+    <li><b>暂存箱 / 资料线索 / 资料</b> → 容器固定「暂存箱 / Staging box」，:935 改「%lld 条存入暂存箱」</li>
+    <li><b>目标 / 当前工作 / 这件事</b> → 用户界面统一「事/当前工作 / work」，「target」不外露</li>
+    <li><b>复制 / 拷贝</b>混用（:584 vs :1235/:1255/:1257）→ 统一「复制」</li>
+    <li><b>重开 / 重新打开 / 重启</b> → 统一「重新打开 / reopen」（「重启」在 Mac 上易误读为重启电脑）</li>
+  </ul>
+  <p class="why"><b>影响：</b>同一概念多种叫法，用户对「什么时候会存现场」形成不了稳定预期。改动为纯 strings 表修订，中英同步。</p>
+</div>
+
+<div class="finding">
+  <h3><span class="fid m">M2</span>一组错误文案只报错不给出路 <span class="domain">· Writing</span></h3>
+  <p class="loc">zh-Hans.lproj :828, :440, :646, :1303, :1324-1326, :818, :822</p>
+  <ul>
+    <li><code>update_service_returned_http</code>「更新服务返回 HTTP %lld。」→ 补「请检查更新地址，或稍后重试」</li>
+    <li><code>the_update_service_is_unreachable</code> → 补「检查网络与更新地址后重试」</li>
+    <li>备份已恢复但无法重载的两条（:646 / :1303）→ 补「重新打开轻锚即可载入」</li>
+    <li>GitHub 三条（:1324-1326）→ 参照同组 :1323 补「可重试连接」</li>
+    <li>备份兜底错误两条（:818 / :822）→ 补「可换个位置重试，或导出诊断排查」</li>
+  </ul>
+  <p class="why"><b>影响：</b>错误是一条指令，应说明怎么恢复。正面范例已在库里（:782、:832），按同一口径补齐即可。纯 strings 表修订。</p>
+</div>
+
+<div class="finding">
+  <h3><span class="fid m">M3</span>「现在」页同屏卡片正文左缘互相对不齐 <span class="domain">· Layout</span></h3>
+  <p class="loc">Sources/LightAnchor/Views/NowPageView.swift:721, 733, 485+1516, 375, 934, 1388</p>
+  <div class="visual">
+    <div class="vhead">前后对比 · 左缘位置示意（蓝线 = 页边距 30，刻度 1pt = 6px）</div>
+    <div class="vrow">
+      <div class="vcell"><span class="vtag">现在 · 五条左缘 34 / 44 / 46 / 48 / 52</span>
+        <div class="edges" style="width:300px">
+          <div class="guide page" style="left:0"></div>
+          <div class="erow" style="top:6px"><div class="bar" style="left:24px;width:110px;background:#D8E6F0"></div><span class="elabel">章头 34</span></div>
+          <div class="erow" style="top:40px"><div class="bar" style="left:96px;width:150px;background:#DDD6C8"></div><span class="elabel">网格行 44</span></div>
+          <div class="erow" style="top:74px"><div class="bar" style="left:108px;width:150px;background:#DDD6C8"></div><span class="elabel">卡头/步骤行 46</span></div>
+          <div class="erow" style="top:108px"><div class="bar" style="left:120px;width:130px;background:#E4D9CB"></div><span class="elabel">回来先看 48</span></div>
+          <div class="erow" style="top:142px"><div class="bar" style="left:132px;width:120px;background:#E4D9CB"></div><span class="elabel">总结卡 52</span></div>
+          <div class="erow" style="top:176px"><div class="bar" style="left:132px;width:120px;background:#E4D9CB"></div><span class="elabel">空卡 50（图略缩）</span></div>
+        </div>
+      </div>
+      <div class="vcell vafter"><span class="vtag">建议 · 两档：卡头 16 / 正文统一 20</span>
+        <div class="edges" style="width:300px">
+          <div class="guide page" style="left:0"></div>
+          <div class="erow" style="top:6px"><div class="bar" style="left:24px;width:110px;background:#D8E6F0"></div><span class="elabel">章头 34（不动）</span></div>
+          <div class="erow" style="top:40px"><div class="bar" style="left:96px;width:150px;background:#CFDFC4"></div><span class="elabel">网格行 44（不动）</span></div>
+          <div class="erow" style="top:74px"><div class="bar" style="left:108px;width:150px;background:#CFDFC4"></div><span class="elabel">卡头 46（16 档）</span></div>
+          <div class="erow" style="top:108px"><div class="bar" style="left:120px;width:130px;background:#C4D8B8"></div><span class="elabel">正文卡 50（20 档）</span></div>
+          <div class="erow" style="top:142px"><div class="bar" style="left:120px;width:120px;background:#C4D8B8"></div><span class="elabel">总结卡 50</span></div>
+          <div class="erow" style="top:176px"><div class="bar" style="left:120px;width:120px;background:#C4D8B8"></div><span class="elabel">空卡 50</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="ba">
+    <div class="before"><span class="tag">现在</span>
+      卡内边距 18 / 20 / 22 三个相邻值无任何 token 可归，纯属漂移。
+    </div>
+    <div class="after"><span class="tag">建议</span>
+      <code>LightAnchorDesign</code> 补 <code>cardBodyPadding: CGFloat = 20</code>，cue 卡（18）、总结卡（22）、空卡（20）统一到 20；卡头保持 16。
+    </div>
+  </div>
+  <p class="why"><b>影响：</b>垂直扫读一页时眼睛每次重新找左缘，是「看着不够精」的主要来源之一。</p>
+</div>
+
+<div class="finding">
+  <h3><span class="fid m">M4</span>禁用的 NowJumpLink 与可用状态长得一模一样 <span class="domain">· Layout</span></h3>
+  <p class="loc">Sources/LightAnchor/Views/NowPageView.swift:1209-1210（:756-785 实现从不读 \.isEnabled）；同型 MainWorkspaceView.swift:2271</p>
+  <div class="visual">
+    <div class="vhead">前后对比 · 「铺回 N 条」在 kept == 0 禁用时的外观</div>
+    <div class="vrow">
+      <div class="vcell stage"><span class="vtag">现在 · 禁用仍是蓝链，点了没反应</span>
+        <span class="jumplink on">铺回 3 条 →</span>
+        <span style="display:inline-block;width:24px"></span>
+        <span class="jumplink off-before">铺回 0 条 →</span>
+        <div style="font-size:11px;color:var(--ink3);margin-top:8px">左：可用　右：禁用——看起来一模一样</div>
+      </div>
+      <div class="vcell stage vafter"><span class="vtag">建议 · 禁用转 iconDisabledStrong</span>
+        <span class="jumplink on">铺回 3 条 →</span>
+        <span style="display:inline-block;width:24px"></span>
+        <span class="jumplink off-after">铺回 0 条 →</span>
+        <div style="font-size:11px;color:var(--ink3);margin-top:8px">禁用态灰色、无悬停变色，与全局 ButtonStyle 禁用语言一致</div>
+      </div>
+    </div>
+  </div>
+  <div class="ba">
+    <div class="before"><span class="tag">现在</span>
+      <pre>NowJumpLink(title: …, action: onRestore)
+    .disabled(kept == 0)
+// 文字仍是 accentInk 蓝色、箭头照常</pre>
+    </div>
+    <div class="after"><span class="tag">建议</span>
+      <code>NowJumpLink</code> 内加 <code>@Environment(\.isEnabled)</code>，禁用时前景转 <code>iconDisabledStrong</code>、去掉悬停变色。
+    </div>
+  </div>
+  <p class="why"><b>影响：</b>没有可铺回内容时入口依然呈现为可点蓝链，属误导性 affordance。</p>
+</div>
+
+<div class="finding">
+  <h3><span class="fid m">M5</span>「现在」页动作条四枚主操作没有任何按下反馈 <span class="domain">· UI polish</span></h3>
+  <p class="loc">Sources/LightAnchor/Views/NowPageView.swift:1838-1866（NowDockItem：换一件事 / 暂时放下 / 等结果 / 记录本次）</p>
+  <div class="visual">
+    <div class="vhead">可交互 demo · 按住按钮感受差异（右侧 = 全局 ButtonStyle 的 0.98 按压缩放）</div>
+    <div class="vrow">
+      <div class="vcell stage"><span class="vtag">现在 · 按下无反馈</span>
+        <div class="dock">
+          <button class="dock-item">⇄ 换一件事</button>
+          <button class="dock-item">↓ 暂时放下</button>
+          <button class="dock-item">◷ 等结果</button>
+          <button class="dock-item">✎ 记录本次</button>
+        </div>
+      </div>
+      <div class="vcell stage vafter"><span class="vtag">建议 · LightAnchorQuietButtonStyle(compact:)</span>
+        <div class="dock">
+          <button class="dock-item pressable">⇄ 换一件事</button>
+          <button class="dock-item pressable">↓ 暂时放下</button>
+          <button class="dock-item pressable">◷ 等结果</button>
+          <button class="dock-item pressable">✎ 记录本次</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="ba">
+    <div class="before"><span class="tag">现在</span>
+      <pre>.buttonStyle(.plain)
+.onHover { hovered = $0 }
+// 只有悬停填色；按下无 scale、无变暗</pre>
+    </div>
+    <div class="after"><span class="tag">建议</span>
+      换用现成的 <code>LightAnchorQuietButtonStyle(compact: true)</code>（静息无底、悬停软底、按下 0.98 scale + 0.16s），保留现有 34 高度与图标+文字布局。四枚一起换。
+    </div>
+  </div>
+  <p class="why"><b>影响：</b>这页最高频的四个动作按下手感「空」，「暂时放下」按下到弹窗之间有延迟时尤其明显。</p>
+</div>
+
+<div class="finding">
+  <h3><span class="fid m">M6</span>opacity(0) 的悬停按钮仍留在可及性树（且其中一处还挡点击） <span class="domain">· Accessibility</span></h3>
+  <p class="loc">Sources/LightAnchor/Views/SceneViews.swift:195-198（剪贴纸「放回去」，还缺 allowsHitTesting）、Sources/LightAnchor/Views/SnapshotTimelineViews.swift:86-89（快照「恢复」）</p>
+  <div class="ba">
+    <div class="before"><span class="tag">现在</span>
+      <pre>.opacity(showsPutBack ? 1 : 0)
+.accessibilityLabel(tr("put_back_on_clipboard"))
+// 不可见但仍可 Tab 到、可点到</pre>
+    </div>
+    <div class="after"><span class="tag">建议</span>
+      参照项目自己的正确范式 <code>WorkspaceSettingsView.swift:689-693</code> 三件套：补 <code>.allowsHitTesting(shows)</code> + <code>.accessibilityHidden(!shows)</code>；同时按 H4 方案给行本身提供常驻/聚焦可达的动作入口，避免矫枉过正把动作从旁白里拿走。
+    </div>
+  </div>
+  <p class="why"><b>影响：</b>键盘 Tab 会停在看不见的按钮上；快照时间线几十行时 VoiceOver 逐行多读一个隐形按钮。</p>
+</div>
+
+<h2>积压区（LOW，默认不动，可点名）· 样式项附对比</h2>
+
+<div class="minis">
+  <div class="mini">
+    <div class="mhead">iconAmber 浅色 1.20:1，表意图标基本不可见 · NowPageView.swift:887</div>
+    <div class="mbody">
+      <div class="mcell"><span class="mtag">现在 · #F6E3AE</span>
+        <div class="notice-bar">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#F6E3AE" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+          看的是旧段落，不是现场
+        </div>
+        <span class="cratio bad" style="margin-top:8px">1.20 : 1 ✗</span>
+      </div>
+      <div class="mcell"><span class="mtag">建议 · warning #7E6112（与描边同色同语义）</span>
+        <div class="notice-bar">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#7E6112" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+          看的是旧段落，不是现场
+        </div>
+        <span class="cratio good" style="margin-top:8px">5.50 : 1 ✓</span>
+      </div>
+    </div>
+  </div>
+  <div class="mini">
+    <div class="mhead">舞台搜索框焦点环过弱 · SwitchWorkPanel.swift:252-264</div>
+    <div class="mbody">
+      <div class="mcell stage"><span class="mtag">现在 · 1.84:1 描边 + 近同色外圈</span>
+        <div class="focus-input b"></div>
+      </div>
+      <div class="mcell stage"><span class="mtag">建议 · 与全局输入框一致：primary 1.5px</span>
+        <div class="focus-input a"></div>
+      </div>
+    </div>
+  </div>
+  <div class="mini">
+    <div class="mhead">侧栏两组导航组间距 = 组内距 · MainWorkspaceView.swift:348-352</div>
+    <div class="mbody">
+      <div class="mcell"><span class="mtag">现在 · 组间 2pt，连成一片</span>
+        <div class="snav">
+          <div class="glabel">注意力</div>
+          <div class="srow on"></div><div class="srow"></div>
+          <div class="glabel" style="margin-top:2px">工作台</div>
+          <div class="srow"></div><div class="srow"></div><div class="srow"></div>
+        </div>
+      </div>
+      <div class="mcell"><span class="mtag">建议 · 组间 10pt（或补注释承诺的发丝线）</span>
+        <div class="snav">
+          <div class="glabel">注意力</div>
+          <div class="srow on"></div><div class="srow"></div>
+          <div class="glabel" style="margin-top:10px">工作台</div>
+          <div class="srow"></div><div class="srow"></div><div class="srow"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="mini">
+    <div class="mhead">同心圆角：外 = 内 + padding（3 倍放大示意）· NowPageView.swift:1790 等 5 处</div>
+    <div class="mbody">
+      <div class="mcell"><span class="mtag">现在 · 外 14 ≠ 内 11 + 4（差 1pt）</span>
+        <div class="radii-demo"><div class="radii-outer" style="border-radius:42px"><div class="radii-inner" style="border-radius:33px"></div></div></div>
+      </div>
+      <div class="mcell"><span class="mtag">建议 · 外 15 = 内 11 + 4</span>
+        <div class="radii-demo"><div class="radii-outer" style="border-radius:45px"><div class="radii-inner" style="border-radius:33px"></div></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="mini">
+    <div class="mhead">动作条 pill 已不浮在内容上，仍带浮岛投影 · NowPageView.swift:1790-1799</div>
+    <div class="mbody">
+      <div class="mcell stage"><span class="mtag">现在 · 1px 描边 + 大投影</span>
+        <div class="pill b">换一件事 · 暂时放下 · 等结果 · 记录本次</div>
+      </div>
+      <div class="mcell stage"><span class="mtag">建议 · 只留描边（结构），去掉投影</span>
+        <div class="pill">换一件事 · 暂时放下 · 等结果 · 记录本次</div>
+      </div>
+    </div>
+  </div>
+  <div class="mini">
+    <div class="mhead">hover 反馈一半有 0.15s 过渡一半瞬变 · NowPageView.swift:1519 等</div>
+    <div class="mbody">
+      <div class="mcell"><span class="mtag">现在 · NowItemRow/NowStepRow 等瞬变</span>
+        同一张 NowCard 内：剪贴板行瞬变、步骤行瞬变，库级 hoverFill 却有 0.14s 缓动——相邻界面材质感不一致。
+      </div>
+      <div class="mcell"><span class="mtag">建议</span>
+        统一走 <code>lightAnchorHoverFill(cornerRadius: radiusRow)</code>，正好是这些行在替换 hover 背景的形状。
+      </div>
+    </div>
+  </div>
+</div>
+
+<table class="backlog" style="margin-top:20px">
+  <tr><th>领域</th><th>其余 LOW 条目（无视觉对比需求）</th><th>位置</th></tr>
+  <tr><td>Colors</td><td>裸写 .font(.system(design:.monospaced)) 绕过 monoFont 工厂（3 处）</td><td>NowPageView.swift:1542, DataManagementView.swift:499, MemoryChatView.swift:451/532/632</td></tr>
+  <tr><td>Colors</td><td>token 命名错位：primaryText 实为填充色却当边框用、LightAnchorDesign.primary 与主题 primary 含义相反；CaptureKind.accentColor 死代码</td><td>LightAnchorTheme.swift:1017 等, WorkspacePresentation.swift:287, 700-708</td></tr>
+  <tr><td>Colors</td><td>主按钮阴影写死浅色蓝不随主题；LightAnchorStageDim 硬编码；约 10 处散点阴影参数各异</td><td>LightAnchorTheme.swift:575, 1579 等</td></tr>
+  <tr><td>Layout</td><td>底部状态栏左右边距 22/18 不对称且不在刻度上</td><td>MainWorkspaceView.swift:1008-1009</td></tr>
+  <tr><td>Layout</td><td>「稍后」页组间距 14 &lt; 2× 组内 8</td><td>MainWorkspaceView.swift:2096-2134</td></tr>
+  <tr><td>UI</td><td>图标状态切换生硬替换 → .contentTransition(.symbolEffect(.replace))</td><td>NowPageView.swift:446, MainWorkspaceView.swift:3153</td></tr>
+  <tr><td>UI</td><td>岛工具行 SF 图标 14/13 混用</td><td>MainWorkspaceView.swift:844-894</td></tr>
+  <tr><td>A11y</td><td>智能引擎单选卡缺 .isSelected 可及特征（项目自己在 InboxTriageView 注释里指认过同类问题）</td><td>IntelligenceView.swift:80-123</td></tr>
+  <tr><td>A11y</td><td>快捷键清除钮对旁白不可达 → 给 recorderBox 加 .accessibilityHint</td><td>WorkspaceSettingsView.swift:679-693</td></tr>
+  <tr><td>A11y</td><td>定时任务删除无确认（可重建，stakes 低，与 H7 同类）</td><td>ScheduleViews.swift:165-168</td></tr>
+  <tr><td>A11y</td><td>近期经过标题截断无 .help</td><td>PersonalViews.swift:696-699</td></tr>
+  <tr><td>Writing</td><td>zh-Hans 表头注释是从 en 表复制且与 LocalizationKit 现行约定矛盾</td><td>zh-Hans.lproj:4-5, en.lproj:1-2</td></tr>
+  <tr><td>Writing</td><td>unit_minutes_full 英文与 short 版同为 "min"；无障碍标签里的硬编码全角逗号</td><td>en.lproj:730-731, WorkspaceSettingsView.swift:496, MainWorkspaceView.swift:537</td></tr>
+</table>
+
+<h2>验证情况</h2>
+<table>
+  <tr><th>检查</th><th>方式</th><th>结果</th></tr>
+  <tr><td>对比度数值</td><td>对 token 声明值按 WCAG 相对亮度公式实算（sRGB）</td><td>2.67 / 2.00 / 3.36 / 3.20 / 1.20 / 1.84:1 等均为计算值；抽测达标项（ink 11.03、secondaryInk 5.06、accentInk 5.39）复核无误</td></tr>
+  <tr><td>全部发现的代码引用</td><td>主代理对 H1–H9、M3–M6 的行号逐一 Read 复核（非仅凭子代理转述）</td><td>引用全部属实</td></tr>
+  <tr><td>key 完整性</td><td>脚本比对两张 strings 表</td><td>1289 = 1289，无缺失</td></tr>
+  <tr><td>渲染观感（圆角差、左缘漂移、hover 手感、VoiceOver 实际朗读）</td><td>本报告用真实 token 在 HTML 里 1:1 复刻做近似</td><td><b>部分替代验证</b>：App 本体未运行；修复落实后按 AGENTS.md 打包并截图核对修改页面</td></tr>
+</table>
+
+<footer>
+  Light Anchor · better-interface 六域审查 · 审查方法：accessibility → layout → writing → typography → colors → ui，按严重度与影响面排序，每根因一行。<br>
+  确认要落实的编号后，将按 AGENTS.md 执行 swift test → build-release → verify-release → 隔离数据冒烟，并交付本次产物路径与截图。
+</footer>
+
+</main>
+</body>
+</html>

@@ -28,6 +28,9 @@ enum LightAnchorTheme {
     static let sidebarHairline = LightAnchorThemeColor(.sidebarBorder)
     static let contentBackground = LightAnchorThemeColor(.background)
     static let surface = LightAnchorThemeColor(.card)
+    /// 卡片头与窗底状态栏那一条：暖白，比内容面亮半档。分带靠提亮不靠压深。
+    static let raisedBand = LightAnchorThemeColor(.cardHeader)
+    static let softHairline = LightAnchorThemeColor(.lineSoft)
     static let elevatedSurface = LightAnchorThemeColor(.popover)
     static let recessed = LightAnchorThemeColor(.muted)
     static let ink = LightAnchorThemeColor(.text1)
@@ -263,9 +266,10 @@ enum LightAnchorStatusDotForm: Equatable {
 
     init(_ state: AttentionEpisodeState) {
         switch state {
+        // 没有「等待中」这一档：等结果的事就是被放下了。虚线环（.waiting）
+        // 还在，但它现在归稍后清单「等着别人」那一组用，不再由状态推出来。
         case .active: self = .active
         case .paused: self = .paused
-        case .waiting: self = .waiting
         case .returning: self = .returning
         case .ended: self = .ended
         }
@@ -504,15 +508,6 @@ extension View {
             .shadow(color: lightAnchorStageShadowTint.opacity(0.10), radius: 22, y: 16)
     }
 
-    /// 邮票的投影（设计 drop-shadow：0 1px 1.5px .22 + 0 6px 14px .10）：
-    /// 贴在纸上的一张小票——一层紧贴的暗边 + 一层扩散。
-    /// 必须画在 mask 之外的一层，否则齿边会连着投影一起被剪掉。
-    func lightAnchorStampShadow() -> some View {
-        self
-            .shadow(color: lightAnchorStageShadowTint.opacity(0.22), radius: 0.75, y: 1)
-            .shadow(color: lightAnchorStageShadowTint.opacity(0.10), radius: 7, y: 6)
-    }
-
     /// 样机相纸 / 便笺纸边那种很浅的一层投影。
     func lightAnchorPaperEdgeShadow(radius: CGFloat = 2, y: CGFloat = 1) -> some View {
         shadow(color: .black.opacity(0.12), radius: radius, y: y)
@@ -587,6 +582,35 @@ struct LightAnchorPrimaryButtonStyle: ButtonStyle {
     }
 }
 
+/// 墨黑实心键（定稿 docs/now-page-scrollrail-2026-09-09.html）：一屏只许一枚。
+///
+/// 「现在」页的浮岛主键和「已放下」确认弹窗的主键用它。跟蓝色的
+/// `LightAnchorPrimaryButtonStyle` 的分工：蓝键是表单里的「保存」，
+/// 墨键是一整屏的那一个去处。
+struct LightAnchorSolidButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(LightAnchorTheme.controlFont(size: 13, weight: .semibold))
+            .foregroundStyle(LightAnchorTheme.onAction)
+            .padding(.horizontal, 15)
+            .frame(height: 34)
+            .background(
+                LightAnchorTheme.ink.opacity(configuration.isPressed ? 0.86 : 1),
+                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+/// 安静键：**静息态没有底**，只有字；悬停才浮出一层软底。
+///
+/// 它是全应用第二动作的默认形态（取消 / 添加一条 / 换个筛选 / 建议问句…），
+/// 用了六十多处——所以它一旦长着米灰药丸的底，每一页就都是一排灰药丸
+/// （用户 2026-09-09 指出：「页面太多类似这种按钮了，只在合适的位置上使用才对」）。
+/// 有底的形态留给真正需要自证可点的两处：**实心主键**（一屏一枚）和
+/// **凸起白面键**（`LightAnchorRaisedButtonStyle`，摆在米灰卡上时安静键会隐形）。
 struct LightAnchorQuietButtonStyle: ButtonStyle {
     /// 样机 .btn.sm：27 高 / 12.5 字号 / 圆角 8（菜单栏浮窗等紧凑场合）。
     var compact = false
@@ -598,21 +622,27 @@ struct LightAnchorQuietButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(LightAnchorTheme.controlFont(size: compact ? 12.5 : 13, weight: .medium))
-            .padding(.horizontal, compact ? 12 : 14)
+            .padding(.horizontal, compact ? 10 : 12)
             .frame(minHeight: compact ? 27 : 32)
             .controlSize(.regular)
-            .foregroundStyle(isEnabled ? LightAnchorTheme.ink : LightAnchorTheme.disabledInk)
+            .foregroundStyle(foreground(pressed: configuration.isPressed))
             .background(
                 configuration.isPressed
                     ? LightAnchorTheme.selectedFill.opacity(0.5)
-                    : (isHovered ? LightAnchorTheme.sidebarSelection : LightAnchorTheme.recessed),
+                    : (isHovered ? LightAnchorTheme.hoverFill : LightAnchorThemeColor.clear),
                 in: RoundedRectangle(cornerRadius: compact ? 8 : 10, style: .continuous)
             )
+            .contentShape(RoundedRectangle(cornerRadius: compact ? 8 : 10, style: .continuous))
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1)
-            .opacity(configuration.isPressed ? 0.85 : 1)
             .onHover { isHovered = $0 }
             .animation(.easeOut(duration: 0.15), value: isHovered)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: configuration.isPressed)
+    }
+
+    private func foreground(pressed: Bool) -> LightAnchorThemeColor {
+        guard isEnabled else { return LightAnchorTheme.disabledInk }
+        // 没有底的键靠字色说话：静息是次级墨，悬停/按下才变正墨。
+        return (isHovered || pressed) ? LightAnchorTheme.ink : LightAnchorTheme.secondaryInk
     }
 }
 
@@ -643,39 +673,6 @@ struct LightAnchorDestructiveQuietButtonStyle: ButtonStyle {
             )
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1)
             .opacity(configuration.isPressed ? 0.85 : 1)
-            .onHover { isHovered = $0 }
-            .animation(.easeOut(duration: 0.15), value: isHovered)
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: configuration.isPressed)
-    }
-}
-
-/// 完成/就绪类动作：与主按钮同一副实底家族，换成宜绿——「完成」和「开始」
-/// 同等分量、不同性格，几何、投影语言全部沿用主按钮，只换色相
-/// （灰底绿字、绿水洗药丸、白面绿描边三版都被否：前两版不像按钮，描边版发虚）。
-struct LightAnchorSuccessButtonStyle: ButtonStyle {
-    /// 样机 .btn.sm：27 高 / 12.5 字号 / 圆角 8（菜单栏浮窗等紧凑场合）。
-    var compact = false
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.isEnabled) private var isEnabled
-    @State private var isHovered = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(LightAnchorTheme.controlFont(size: compact ? 12.5 : 13, weight: .medium))
-            .padding(.horizontal, compact ? 12 : 14)
-            .frame(minHeight: compact ? 27 : 32)
-            .controlSize(.regular)
-            .foregroundStyle(LightAnchorTheme.onAction)
-            .background(
-                LightAnchorTheme.successBadge,
-                in: RoundedRectangle(cornerRadius: compact ? 8 : 10, style: .continuous)
-            )
-            // 与主按钮的淡蓝投影同构：宜绿（#3E9B4F）的一层淡绿投影。
-            .shadow(color: .init(red: 62/255, green: 155/255, blue: 79/255).opacity(0.35), radius: 4, y: 2)
-            .brightness(isHovered && isEnabled ? 0.05 : 0)
-            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1)
-            .opacity(isEnabled ? (configuration.isPressed ? 0.86 : 1) : 0.4)
             .onHover { isHovered = $0 }
             .animation(.easeOut(duration: 0.15), value: isHovered)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: configuration.isPressed)
@@ -1093,25 +1090,17 @@ struct LightAnchorOverflowMenu: View {
     }
 }
 
-struct LightAnchorDisclosure<Content: View>: View {
-    let title: String
-    @Binding var isExpanded: Bool
-    @ViewBuilder let content: () -> Content
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        DisclosureGroup(isExpanded: $isExpanded) {
-            content()
-                .padding(.top, 8)
-        } label: {
-            Text(title)
-                .font(LightAnchorTheme.interfaceFont(size: 12, weight: .semibold))
-                .foregroundStyle(LightAnchorTheme.mutedInk)
-        }
-        .padding(.horizontal, 2)
-        .padding(.vertical, 2)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isExpanded)
-    }
+/// 只有日子的人话写法：今天/明天说名字，一周内说星期几，再远说日期。
+/// 期限用它——「周五」比「9月11日 23:59」好读，那个 23:59 是实现细节。
+func lightAnchorFriendlyDate(_ date: Date, now: Date = Date()) -> String {
+    let calendar = Calendar.current
+    if calendar.isDateInToday(date) { return tr("due_day_today") }
+    if calendar.isDateInTomorrow(date) { return tr("due_day_tomorrow") }
+    let days = calendar.dateComponents(
+        [.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: date)
+    ).day ?? 0
+    if (2...6).contains(days) { return date.formatted(.dateTime.weekday(.wide)) }
+    return date.formatted(.dateTime.month(.abbreviated).day())
 }
 
 /// 「今天 14:30」「明天 09:00」，其余日子退回「8月24日 14:30」。
@@ -1132,61 +1121,117 @@ func lightAnchorFriendlyDateTime(_ date: Date) -> String {
 /// 铁灰边框和暖白卡面格格不入，改成与下拉字段同款的时/分弹出菜单。
 struct LightAnchorDateField: View {
     let title: String
-    @Binding var selection: Date
+    @Binding var storage: Date?
+    /// 非空 = **可留空的期限模式**：空着时字段自己说这句话（「不着急」），
+    /// 面板底下多一颗「撤掉期限」，而且只挑日子不挑时刻——押的是日期，
+    /// 「周五 23:51」里那个 23:51 是噪声。
+    ///
+    /// 这样「有没有期限」就不需要旁边再摆一个开关：**用户不定，就是没有。**
+    let placeholder: String?
+    /// 空着时打开面板默认落在哪天。
+    let fallback: Date
     let range: PartialRangeFrom<Date>?
+    /// 小药丸外观（和捕获窗底栏那排 chip 同款：凹陷底 + 发丝边 + 26 高）。
+    /// 期限是个**可选的交代**，不是一行表单——它该长得像底栏上的一颗 chip，
+    /// 而不是一个带边框的输入控件。
+    var chip = false
 
     @State private var isExpanded = false
     @State private var isHovered = false
     /// 月历当前翻到的月份（每次打开面板时回到所选日期所在月）。
     @State private var displayedMonth = Date()
 
+    /// 必填时刻（定时任务用）：连时分一起挑。
     init(
         _ title: String,
         selection: Binding<Date>,
         in range: PartialRangeFrom<Date>? = nil
     ) {
         self.title = title
-        _selection = selection
+        _storage = Binding(
+            get: { selection.wrappedValue },
+            set: { if let value = $0 { selection.wrappedValue = value } }
+        )
+        placeholder = nil
+        fallback = selection.wrappedValue
         self.range = range
     }
 
+    /// 可留空的期限：只挑日子，落在那天末尾（「周五要交」= 周五结束前）。
+    init(
+        _ title: String,
+        dueAt: Binding<Date?>,
+        placeholder: String,
+        defaultingTo fallback: Date,
+        in range: PartialRangeFrom<Date>? = nil,
+        chip: Bool = false
+    ) {
+        self.title = title
+        _storage = dueAt
+        self.placeholder = placeholder
+        self.fallback = fallback
+        self.range = range
+        self.chip = chip
+    }
+
+    private var isDueMode: Bool { placeholder != nil }
+    /// 期限模式且没押：文字是占位，用弱色。
+    private var isEmptyDue: Bool { isDueMode && storage == nil }
+
+    /// 面板里操作的那个日期：空着时用兜底值，别让月历没有落点。
+    private var selection: Date {
+        get { storage ?? fallback }
+        nonmutating set { storage = newValue }
+    }
+
     private var formattedSelection: String {
-        lightAnchorFriendlyDateTime(selection)
+        guard isDueMode else { return lightAnchorFriendlyDateTime(selection) }
+        guard let storage else { return placeholder ?? "" }
+        return lightAnchorFriendlyDate(storage)
     }
 
     var body: some View {
         Button {
             isExpanded.toggle()
         } label: {
-            HStack(spacing: 8) {
-                LightAnchorIcon("calendar-clock", size: 14)
-                    .foregroundStyle(LightAnchorTheme.iconSoft)
+            HStack(spacing: chip ? 6 : 8) {
+                LightAnchorIcon(chip ? "calendar" : "calendar-clock", size: chip ? 12 : 14)
+                    .foregroundStyle(
+                        isEmptyDue ? LightAnchorTheme.mutedInk : LightAnchorTheme.iconSoft
+                    )
                 Text(formattedSelection)
-                    .font(LightAnchorTheme.controlFont())
+                    .font(
+                        chip
+                            ? LightAnchorTheme.controlFont(size: 12, weight: .medium)
+                            : LightAnchorTheme.controlFont()
+                    )
                     .monospacedDigit()
                     .lineLimit(1)
-                    .foregroundStyle(LightAnchorTheme.ink)
-                LightAnchorIcon("chevron-up-down", size: 11)
-                    .foregroundStyle(LightAnchorTheme.iconSoft)
+                    .foregroundStyle(isEmptyDue ? LightAnchorTheme.mutedInk : LightAnchorTheme.ink)
+                LightAnchorIcon(chip ? "chevron-down" : "chevron-up-down", size: chip ? 8 : 11)
+                    .foregroundStyle(LightAnchorTheme.mutedInk)
             }
-            .padding(.horizontal, 10)
-            .frame(minHeight: 32)
+            .padding(.horizontal, chip ? 11 : 10)
+            .frame(minHeight: chip ? 26 : 32)
             .background(
-                LightAnchorTheme.elevatedSurface,
+                chip ? LightAnchorTheme.recessed : LightAnchorTheme.elevatedSurface,
                 in: RoundedRectangle(cornerRadius: 8, style: .continuous)
             )
             .overlay {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .strokeBorder(
-                        isHovered || isExpanded
-                            ? LightAnchorTheme.primaryText.opacity(0.38)
-                            : LightAnchorTheme.primaryText.opacity(0.18),
+                        chip
+                            ? LightAnchorTheme.sidebarHairline
+                            : (isHovered || isExpanded
+                                ? LightAnchorTheme.primaryText.opacity(0.38)
+                                : LightAnchorTheme.primaryText.opacity(0.18)),
                         lineWidth: 1
                     )
             }
             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
+        .fixedSize()
         .onHover { isHovered = $0 }
         .animation(.easeOut(duration: 0.15), value: isHovered)
         .popover(isPresented: $isExpanded, arrowEdge: .bottom) {
@@ -1210,24 +1255,33 @@ struct LightAnchorDateField: View {
 
             Divider()
 
-            HStack(spacing: 8) {
-                Text(tr("time"))
-                    .font(LightAnchorTheme.controlFont())
-                    .foregroundStyle(LightAnchorTheme.mutedInk)
-                Spacer(minLength: 8)
-                timeComponentMenu(
-                    values: Array(0...23),
-                    selected: selectedHour,
-                    accessibilityTitle: tr("hour")
-                ) { setTime(hour: $0) }
-                Text(":")
-                    .font(LightAnchorTheme.controlFont())
-                    .foregroundStyle(LightAnchorTheme.mutedInk)
-                timeComponentMenu(
-                    values: minuteOptions,
-                    selected: selectedMinute,
-                    accessibilityTitle: tr("minute")
-                ) { setTime(minute: $0) }
+            if isDueMode {
+                Button(tr("no_deadline_after_all")) {
+                    storage = nil
+                    isExpanded = false
+                }
+                .buttonStyle(LightAnchorInlineButtonStyle())
+                .disabled(storage == nil)
+            } else {
+                HStack(spacing: 8) {
+                    Text(tr("time"))
+                        .font(LightAnchorTheme.controlFont())
+                        .foregroundStyle(LightAnchorTheme.mutedInk)
+                    Spacer(minLength: 8)
+                    timeComponentMenu(
+                        values: Array(0...23),
+                        selected: selectedHour,
+                        accessibilityTitle: tr("hour")
+                    ) { setTime(hour: $0) }
+                    Text(":")
+                        .font(LightAnchorTheme.controlFont())
+                        .foregroundStyle(LightAnchorTheme.mutedInk)
+                    timeComponentMenu(
+                        values: minuteOptions,
+                        selected: selectedMinute,
+                        accessibilityTitle: tr("minute")
+                    ) { setTime(minute: $0) }
+                }
             }
         }
         .padding(14)
@@ -1367,16 +1421,15 @@ struct LightAnchorDateField: View {
     /// 换日子保留已选的时分；落在下限之前就贴到下限。
     private func pickDay(_ day: Date) {
         let calendar = Self.calendar
-        var next = calendar.date(
-            bySettingHour: selectedHour,
-            minute: selectedMinute,
-            second: 0,
-            of: day
-        ) ?? day
+        // 期限落在那天的末尾：「周五要交」是周五结束前，不是周五早上就过期。
+        var next = isDueMode
+            ? (calendar.date(bySettingHour: 23, minute: 59, second: 0, of: day) ?? day)
+            : (calendar.date(bySettingHour: selectedHour, minute: selectedMinute, second: 0, of: day) ?? day)
         if let range, next < range.lowerBound {
             next = range.lowerBound
         }
         selection = next
+        if isDueMode { isExpanded = false }
     }
 
     // MARK: - 时/分弹出菜单

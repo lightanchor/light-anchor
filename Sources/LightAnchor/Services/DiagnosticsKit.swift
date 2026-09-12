@@ -10,7 +10,6 @@ struct DiagnosticBundle: Codable, Equatable {
     let exportedAt: Date
     let appVersion: String
     let operatingSystem: String
-    let eventSchemaVersion: Int
     let releaseManifestVersion: Int
     let events: [DiagnosticEvent]
 }
@@ -93,7 +92,6 @@ final class LocalDiagnostics: @unchecked Sendable {
                 forInfoDictionaryKey: "CFBundleShortVersionString"
             ) as? String ?? "0.1.0",
             operatingSystem: ProcessInfo.processInfo.operatingSystemVersionString,
-            eventSchemaVersion: LightAnchorSchema.eventDocumentVersion,
             releaseManifestVersion: LightAnchorSchema.releaseManifestVersion,
             events: Array(events)
         )

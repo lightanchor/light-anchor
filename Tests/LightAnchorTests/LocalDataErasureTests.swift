@@ -47,7 +47,7 @@ final class LocalDataErasureTests: XCTestCase {
         // 附件目录、诊断日志各有自己的清理入口；锁文件刻意不删。
         let handledElsewhere: Set<String> = ["assets", "diagnostics.log"]
         let storageFiles = [
-            LightAnchorStorage.eventsURL(),
+            LightAnchorStorage.eventsDirectoryURL(),
             LightAnchorStorage.assetsURL(),
             LightAnchorStorage.diagnosticsURL(),
             LightAnchorStorage.launchMarkerURL(),
@@ -68,12 +68,17 @@ final class LocalDataErasureTests: XCTestCase {
     @MainActor
     func testDeleteAllDataRemovesEveryFileUnderTheDataRoot() throws {
         let root = try makeTemporaryRoot()
-        let eventsURL = root.appendingPathComponent("events.json")
-        let workspace = AttentionWorkspace(store: LocalEventStore(fileURL: eventsURL))
+        let eventsURL = root.appendingPathComponent("events", isDirectory: true)
+        let workspace = AttentionWorkspace(store: LocalEventStore(directoryURL: eventsURL))
         _ = workspace.createTarget(name: "写文档")
 
         for url in LocalDataErasure.fileURLs(in: root) {
-            try Data("{}".utf8).write(to: url)
+            if (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+                try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+                try Data("{}".utf8).write(to: url.appendingPathComponent("sample.json"))
+            } else {
+                try Data("{}".utf8).write(to: url)
+            }
         }
         let defaults = try makeScratchDefaults()
 
@@ -85,6 +90,11 @@ final class LocalDataErasureTests: XCTestCase {
                 "\(url.lastPathComponent) 删完还在"
             )
         }
+
+        let newTarget = try XCTUnwrap(workspace.createTarget(name: "重新开始"))
+        let reloaded = AttentionWorkspace(store: LocalEventStore(directoryURL: eventsURL))
+        XCTAssertEqual(Set(reloaded.snapshot.targets.keys), [newTarget.id])
+        XCTAssertNil(reloaded.lastError)
     }
 
     /// 云端 API Key 与保存的方案必须清空；同一个 blob 里的采集开关必须留下。
@@ -93,7 +103,7 @@ final class LocalDataErasureTests: XCTestCase {
     func testDeleteAllDataClearsCloudCredentialsButKeepsPrivacyToggles() throws {
         let root = try makeTemporaryRoot()
         let workspace = AttentionWorkspace(
-            store: LocalEventStore(fileURL: root.appendingPathComponent("events.json"))
+            store: LocalEventStore(directoryURL: root.appendingPathComponent("events", isDirectory: true))
         )
         let defaults = try makeScratchDefaults()
 
@@ -143,7 +153,7 @@ final class LocalDataErasureTests: XCTestCase {
     func testDeleteAllDataClearsContentKeysAndKeepsInterfacePreferences() throws {
         let root = try makeTemporaryRoot()
         let workspace = AttentionWorkspace(
-            store: LocalEventStore(fileURL: root.appendingPathComponent("events.json"))
+            store: LocalEventStore(directoryURL: root.appendingPathComponent("events", isDirectory: true))
         )
         let defaults = try makeScratchDefaults()
 

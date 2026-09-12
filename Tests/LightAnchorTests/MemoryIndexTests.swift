@@ -115,7 +115,7 @@ final class MemoryIndexTests: XCTestCase {
 
     @MainActor
     func testWorkspaceDerivedItemsIncludeCaptures() throws {
-        let workspace = AttentionWorkspace(store: LocalEventStore(fileURL: temporaryFileURL()))
+        let workspace = AttentionWorkspace(store: LocalEventStore(directoryURL: temporaryEventsDirectoryURL()))
         _ = workspace.captureText("蓝点重构要先改侧栏动画", now: Date(timeIntervalSinceNow: -600))
 
         let items = MemoryIndexSource.items(events: [], snapshot: workspace.snapshot)
@@ -152,7 +152,7 @@ final class MemoryIndexTests: XCTestCase {
 
     @MainActor
     func testChatContextMergesIndexHitsWithLiveFacts() async throws {
-        let workspace = AttentionWorkspace(store: LocalEventStore(fileURL: temporaryFileURL()))
+        let workspace = AttentionWorkspace(store: LocalEventStore(directoryURL: temporaryEventsDirectoryURL()))
         _ = workspace.captureText("蓝点重构要先改侧栏动画", now: Date(timeIntervalSinceNow: -600))
 
         let index = temporaryIndex(embedding: UnavailableEmbedding())
@@ -208,9 +208,9 @@ final class MemoryIndexTests: XCTestCase {
         return MemoryIndex(fileURL: url, embedding: embedding)
     }
 
-    private func temporaryFileURL() -> URL {
+    private func temporaryEventsDirectoryURL() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("memory-index-tests-\(UUID().uuidString)")
-            .appendingPathComponent("events.json")
+            .appendingPathComponent("events", isDirectory: true)
     }
 }

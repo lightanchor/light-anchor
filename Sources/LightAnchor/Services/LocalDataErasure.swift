@@ -21,7 +21,8 @@ enum LocalDataErasure {
     /// `LocalDiagnostics.removeAllData()` 负责，都不在这里重复。
     static var fileNames: [String] {
         [
-            LightAnchorStorage.eventsURL(),
+            // 事件日志目录（整个目录一起移除）。
+            LightAnchorStorage.eventsDirectoryURL(),
             LightAnchorStorage.launchMarkerURL(),
             LightAnchorStorage.memoryChatURL(),
             // 检索索引是缓存，但里面装着捕获与问答的全文，删数据必须一并清。
@@ -30,7 +31,13 @@ enum LocalDataErasure {
             LightAnchorStorage.recordingsURL(),
             // 跟随事情的剪贴板历史目录：里面是用户复制过的原文，必须一并清。
             LightAnchorStorage.clipboardHistoryURL()
-        ].map(\.lastPathComponent)
+        ].map(\.lastPathComponent) + [
+            // 版本库装着数据的全部历史。「删除全部本地数据」宣称删干净，
+            // 留着 .git 等于什么都没删。
+            ".git",
+            // 版本库的 .gitignore 是应用生成的，一并清。
+            ".gitignore"
+        ]
     }
 
     /// 上面这些文件在给定数据根目录下的位置。
@@ -55,7 +62,13 @@ enum LocalDataErasure {
             // 更新链配置：manifest 地址是用户填的，一并清。
             "lightanchor.updateChecksEnabled",
             "lightanchor.updateManifestURL",
-            "lightanchor.updateLastCheckedAt"
+            "lightanchor.updateLastCheckedAt",
+            // 远端备份地址可能内嵌访问令牌（PAT），属于凭据，必须清。
+            GitSnapshotService.remoteURLKey,
+            GitSnapshotService.lastPushDateKey,
+            // 同步状态与错误文本（错误里可能带远端地址），一并清。
+            GitSnapshotService.lastSyncDateKey,
+            GitSnapshotService.lastSyncErrorKey
         ] + PrivacyPermissionCache.allCacheKeys
     }
 

@@ -26,7 +26,7 @@ final class WaitingPresentationTests: XCTestCase {
     }
 
     func testWaitingSurfacePutsReadyResultsBeforeActiveWaits() throws {
-        let workspace = AttentionWorkspace(store: LocalEventStore(fileURL: temporaryFileURL()))
+        let workspace = AttentionWorkspace(store: LocalEventStore(directoryURL: temporaryEventsDirectoryURL()))
         let target = try XCTUnwrap(workspace.createTarget(name: "等待状态测试"))
         let episode = try XCTUnwrap(workspace.startEpisode(targetID: target.id))
         let ready = try XCTUnwrap(workspace.beginWaiting(
@@ -53,7 +53,7 @@ final class WaitingPresentationTests: XCTestCase {
     }
 
     func testWaitingSurfaceUsesFallbackTargetName() throws {
-        let workspace = AttentionWorkspace(store: LocalEventStore(fileURL: temporaryFileURL()))
+        let workspace = AttentionWorkspace(store: LocalEventStore(directoryURL: temporaryEventsDirectoryURL()))
         let target = try XCTUnwrap(workspace.createTarget(name: "稍后删除的目标"))
         let episode = try XCTUnwrap(workspace.startEpisode(targetID: target.id))
         let waiting = try XCTUnwrap(workspace.beginWaiting(
@@ -70,10 +70,10 @@ final class WaitingPresentationTests: XCTestCase {
         XCTAssertEqual(projection.items.first?.targetTitle, "未命名目标")
     }
 
-    private func temporaryFileURL() -> URL {
+    private func temporaryEventsDirectoryURL() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("LightAnchorWaitingPresentationTests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString)
-            .appendingPathComponent("events.json")
+            .appendingPathComponent("events", isDirectory: true)
     }
 }

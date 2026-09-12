@@ -7,13 +7,13 @@ import XCTest
 @MainActor
 final class SwitchWorkFlowTests: XCTestCase {
     private func makeWorkspace() -> AttentionWorkspace {
-        AttentionWorkspace(store: LocalEventStore(fileURL: temporaryFileURL()))
+        AttentionWorkspace(store: LocalEventStore(directoryURL: temporaryEventsDirectoryURL()))
     }
 
-    private func temporaryFileURL() -> URL {
+    private func temporaryEventsDirectoryURL() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("switch-work-\(UUID().uuidString)", isDirectory: true)
-            .appendingPathComponent("events.json")
+            .appendingPathComponent("events", isDirectory: true)
     }
 
     private let draft = URL(fileURLWithPath: "/tmp/draft.md")
@@ -81,8 +81,10 @@ final class SwitchWorkFlowTests: XCTestCase {
 
         XCTAssertTrue(workspace.setAsideCurrent(.wait("CI 跑完"), returnCue: ""))
 
+        // 球交到别人手里 = 这件事被放下了；它归「等着别人」是因为身上挂着
+        // 一条没等到的结果，不是因为有个叫「等待中」的状态。
         let waiting = try XCTUnwrap(workspace.snapshot.episodes[episode.id])
-        XCTAssertEqual(waiting.state, .waiting)
+        XCTAssertEqual(waiting.state, .paused)
         let item = try XCTUnwrap(workspace.snapshot.activeWaitingItems.first)
         XCTAssertEqual(item.episodeID, episode.id)
         XCTAssertEqual(item.description, "CI 跑完")

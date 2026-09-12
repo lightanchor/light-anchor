@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>轻锚 · 浮层重设计 r2（六处 · 基于真实实现）2026-09-11 — PROTOTYPE / 用完即弃</title>
+<!-- ==========================================================================
+  原型 r2 · 用完即弃（不是生产代码）
+  与 r1 的区别：r1 只换皮；r2 基于真实代码（EnvironmentViews / ScheduleViews /
+  WorkspaceToolCluster / NowPageView / CaptureView / StartWorkView）重新决定
+  「显示什么、怎么显示」。每个面的取舍写在右下角「设计说明」面板里。
+  覆盖的六处：
+    ① 新环境表单      ② 开始一件事便笺    ③ 新建定时表单
+    ④ 录制胶囊        ⑤ 详情页「现场」卡  ⑥ 捕获想法小窗
+  入口：工具栏 闹钟=新建定时 · 圆点=录制 · 方笔=捕获想法 · ＋=开始一件事；
+        侧栏「环境」页有「新环境」。Esc / 点遮罩关闭。深链：#sheetEnv #sheetTimer
+        #dlgStart #popCap #rec #sceneFull #env #notes
+========================================================================== -->
+<style>
+:root{
+  --desk:#DAD5CD; --sidebar:#F5F1EA; --sidebar-sel:#EBE4D8; --sidebar-line:#EEE8DD;
+  --content:#FBF8F3; --card:#FFFFFF; --line:#EDE7DC; --line-soft:#F2EDE4;
+  --ink:#242220; --ink-1:#3B3833; --ink-2:#6E6B62; --ink-3:#A6A39A;
+  --lav:#6E5BD0; --lav-bg:#EFEBFB; --lav-line:#DDD3F5;
+  --red:#C0453D; --red-bg:#FDECEA; --red-line:#F2CFCB;
+  --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC",sans-serif;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--desk);font-family:var(--sans);color:var(--ink-1);
+     -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;
+     min-height:100vh;display:grid;place-items:center;padding:26px}
+button{font-family:inherit;color:inherit;background:none;border:none;cursor:pointer}
+input,textarea{font-family:inherit;color:inherit}
+:focus-visible{outline:2px solid rgba(110,91,208,.45);outline-offset:2px;border-radius:6px}
+[hidden]{display:none!important}
+
+/* ---------- 窗口骨架（沿用软件现状） ---------- */
+.win{width:min(1240px,96vw);height:min(880px,92vh);position:relative;display:flex;
+     background:var(--sidebar);border-radius:12px;
+     box-shadow:0 1px 2px rgba(30,28,50,.06),0 26px 70px rgba(30,28,50,.20)}
+.traffic{position:absolute;left:16px;top:16px;display:flex;gap:9px;z-index:6}
+.traffic i{width:11px;height:11px;border-radius:50%;display:block}
+.traffic i:nth-child(1){background:#E8695E}.traffic i:nth-child(2){background:#E5B33F}.traffic i:nth-child(3){background:#5FC257}
+.sidebar{width:228px;flex:none;padding:46px 12px 14px;display:flex;flex-direction:column}
+.navgroup{font:500 11px/1 var(--sans);letter-spacing:.05em;color:var(--ink-2);padding:12px 10px 8px}
+.nav{display:flex;align-items:center;gap:10px;height:32px;padding:0 10px;border-radius:10px;
+     font:450 13.5px/1 var(--sans);color:var(--ink-1);margin-bottom:2px;cursor:pointer;transition:background-color .14s}
+.nav .ico{width:16px;height:16px;flex:none;opacity:.66;display:grid;place-items:center}
+.nav .cnt{margin-left:auto;font:500 11.5px/1 var(--sans);color:var(--ink-2)}
+.nav:not(.on):hover{background:rgba(59,54,68,.05)}
+.nav.on{background:var(--sidebar-sel);color:var(--ink);font-weight:600}
+.recent{padding:2px 10px 6px;cursor:pointer;border-radius:8px;transition:background-color .14s}
+.recent:hover{background:rgba(59,54,68,.05)}
+.recent .n{display:block;font:450 12.5px/1.5 var(--sans);color:var(--ink-1);
+          overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.recent .s{display:block;font:400 10.5px/1.5 var(--sans);color:var(--ink-3)}
+.sidenow{margin-top:auto;display:flex;align-items:center;gap:10px;padding:12px 10px 2px;border-top:1px solid var(--sidebar-line)}
+.sidenow .av{width:22px;height:22px;border-radius:7px;background:#EDE6DA;flex:none;display:grid;place-items:center}
+.sidenow .av i{width:7px;height:7px;border-radius:50%;background:#5BA7CE;box-shadow:0 0 0 3px rgba(91,167,206,.20)}
+.sidenow .n{display:block;font:500 12px/1.4 var(--sans);color:var(--ink-1)}
+.sidenow .s{display:block;font:400 11px/1.4 var(--sans);color:var(--ink-2)}
+.isle{flex:1;min-width:0;padding:10px 10px 10px 0;display:flex}
+.island{flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden;position:relative;
+        background:var(--content);border:1px solid var(--sidebar-line);border-radius:14px}
+.topbar{height:54px;flex:none;display:flex;align-items:center;gap:4px;padding:0 14px 0 22px;
+        border-bottom:1px solid var(--line-soft)}
+.topbar .crumb{font:600 15px/1 var(--sans);color:var(--ink)}
+.topbar .sp{flex:1}
+.tool{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;color:var(--ink-2);
+      transition:background-color .14s,color .14s,transform .1s;position:relative}
+.tool:hover{background:rgba(59,54,68,.06);color:var(--ink-1)}
+.tool:active{transform:scale(.96)}
+.tool svg{width:17px;height:17px}
+.tool.rec.on{color:var(--red)}
+.tool.rec.on::after{content:"";position:absolute;top:5px;right:5px;width:7px;height:7px;border-radius:50%;
+                    background:var(--red);border:1.5px solid var(--content)}
+.page{flex:1;overflow:auto;padding:26px 34px 20px}
+.p-title{font:700 22px/1.3 var(--sans);color:var(--ink)}
+.p-meta{font:400 12px/1 var(--sans);color:var(--ink-3);margin-top:6px}
+.block{background:var(--card);border:1px solid var(--line-soft);border-radius:12px;
+       padding:14px 16px;margin-top:14px;box-shadow:0 1px 2px rgba(58,50,40,.04)}
+.block .b-h{font:600 12px/1 var(--sans);color:var(--ink-2);letter-spacing:.02em;margin-bottom:8px}
+.block p{font:400 13px/1.75 var(--sans);color:var(--ink-1)}
+.mut{color:var(--ink-3)}
+.actionbar{flex:none;display:flex;align-items:center;gap:10px;padding:12px 22px;border-top:1px solid var(--line-soft)}
+.statusbar{flex:none;display:flex;gap:18px;padding:9px 22px;border-top:1px solid var(--line-soft);
+           font:400 11px/1 var(--sans);color:var(--ink-3)}
+.statusbar .r{margin-left:auto}
+
+/* ---------- 共用控件（新按钮体系：墨黑主键 / 白发丝次键 / 灰文字键） ---------- */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;white-space:nowrap;
+     height:34px;padding:0 16px;border-radius:10px;font:600 13px/1 var(--sans);
+     transition-property:transform,box-shadow,background-color,border-color,color,opacity;transition-duration:.14s}
+.btn:not(.static):active{transform:scale(.96)}
+.btn[disabled]{opacity:.38;pointer-events:none}
+.btn.pri{background:var(--ink);color:#FDFCFA;box-shadow:0 1px 2px rgba(36,34,32,.26)}
+.btn.pri:hover{background:#000;box-shadow:0 3px 10px rgba(36,34,32,.24)}
+.btn.pri .kbd{background:rgba(255,255,255,.14);color:rgba(255,255,255,.75)}
+.btn.gho{background:#fff;border:1px solid #E2DFD6;color:var(--ink-1);font-weight:550}
+.btn.gho:hover{border-color:#C4C1B6;background:#FDFCF9}
+.btn.txt{height:auto;padding:4px 8px;color:var(--ink-2);font-weight:500;border-radius:7px}
+.btn.txt:hover{color:var(--ink);background:rgba(59,54,45,.05)}
+.btn.dan{background:#fff;border:1px solid var(--red-line);color:var(--red)}
+.btn.dan:hover{background:var(--red-bg)}
+.kbd{font:500 10.5px/1 var(--mono);padding:2px 5px;border-radius:5px}
+.chip{display:inline-flex;align-items:center;gap:6px;font:500 12px/1 var(--sans);cursor:pointer;
+      border:1px solid #E2DFD6;background:#fff;border-radius:999px;padding:7px 12px;color:var(--ink-1);
+      transition:background-color .14s,border-color .14s,color .14s,transform .1s}
+.chip:hover{border-color:#C4C1B6}
+.chip:active{transform:scale(.96)}
+.chip.on{background:var(--ink);border-color:var(--ink);color:#FDFCFA}
+.chip.lav{background:var(--lav-bg);border-color:var(--lav-line);color:var(--lav)}
+.seg{display:inline-flex;background:#F0EDE5;border-radius:10px;padding:3px;gap:2px}
+.seg button{padding:7px 12px;border-radius:8px;font:500 12px/1 var(--sans);color:var(--ink-2);cursor:pointer;
+            transition:background-color .14s,color .14s,box-shadow .14s;display:inline-flex;align-items:center;gap:6px}
+.seg button.on{background:#fff;color:var(--ink);font-weight:600;box-shadow:0 1px 3px rgba(58,50,40,.12)}
+.seg .d{width:5px;height:5px;border-radius:50%}
+.input{width:100%;background:#fff;border:1px solid #E2DFD6;border-radius:10px;padding:9px 12px;
+       font:400 13.5px/1.4 var(--sans);transition:border-color .14s,box-shadow .14s}
+.input::placeholder{color:var(--ink-3)}
+.input:focus{outline:none;border-color:#B7A9E8;box-shadow:0 0 0 3px rgba(110,91,208,.13)}
+.pad{width:100%;border:none;background:transparent;resize:none;font:400 15px/1.6 var(--sans);color:var(--ink)}
+.pad:focus{outline:none}
+.pad::placeholder{color:var(--ink-3)}
+.switch{width:36px;height:22px;border-radius:999px;background:#DFDCD3;position:relative;flex:none;cursor:pointer;
+        transition:background-color .16s}
+.switch::after{content:"";position:absolute;top:2.5px;left:2.5px;width:17px;height:17px;border-radius:50%;
+               background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.22);transition:transform .18s cubic-bezier(.2,0,0,1)}
+.switch.on{background:var(--ink)}
+.switch.on::after{transform:translateX(14px)}
+.iconbtn{display:inline-grid;place-items:center;width:30px;height:30px;border-radius:8px;color:var(--ink-2);
+         cursor:pointer;transition:background-color .14s,color .14s,transform .1s}
+.iconbtn:hover{background:rgba(59,54,45,.06);color:var(--ink-1)}
+.iconbtn:active{transform:scale(.96)}
+.iconbtn svg{width:15px;height:15px}
+.iconbtn.on{background:var(--lav-bg);color:var(--lav)}
+
+/* ---------- 浮层机制 ---------- */
+.ovl{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;padding:24px;
+     opacity:0;visibility:hidden;transition:opacity .18s ease-out,visibility 0s linear .18s}
+.ovl.open{opacity:1;visibility:visible;transition:opacity .18s ease-out}
+.ovl .scrim{position:absolute;inset:0;background:rgba(64,58,46,.16)}
+.ovl .panel{position:relative;display:flex;flex-direction:column;overflow:hidden;
+            background:#fff;border:1px solid #ECE9E1;border-radius:16px;
+            box-shadow:0 2px 4px rgba(64,58,46,.05),0 20px 50px rgba(64,58,46,.13);
+            transform:translateY(10px);transition:transform .22s cubic-bezier(.2,0,0,1)}
+.ovl.open .panel{transform:none}
+.ovl .p-body{flex:1;overflow:auto;min-height:0}
+.ovl.open .stag{animation:secIn .4s cubic-bezier(.2,0,0,1) both}
+.ovl.open .stag:nth-child(2){animation-delay:.07s}
+.ovl.open .stag:nth-child(3){animation-delay:.14s}
+@keyframes secIn{from{opacity:0;transform:translateY(7px)}}
+.p-head{padding:22px 24px 4px}
+.p-title2{font:700 19px/1.3 var(--sans);color:var(--ink)}
+.p-sub{font:400 12.5px/1.6 var(--sans);color:var(--ink-2);margin-top:3px}
+.p-foot{flex:none;display:flex;align-items:center;gap:10px;padding:13px 20px;
+        border-top:1px solid #F0EEE7;background:#FBFAF7;border-radius:0 0 16px 16px}
+.p-foot .grow{flex:1}
+.hint{font:400 11px/1.5 var(--sans);color:var(--ink-3)}
+.f-row{display:flex;align-items:center;gap:10px}
+.f-label{font:550 12.5px/1 var(--sans);color:var(--ink-2)}
+.dot-pulse{animation:pulse 1.6s ease-out infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(192,69,61,.45)}70%{box-shadow:0 0 0 7px rgba(192,69,61,0)}100%{box-shadow:0 0 0 0 rgba(192,69,61,0)}}
+</style>
+<style>
+/* ---------- ⑤ 现场卡（详情页内） ---------- */
+.scene-card{background:#fff;border:1px solid var(--line-soft);border-radius:14px;
+            padding:14px 18px;margin-top:14px;box-shadow:0 1px 2px rgba(58,50,40,.04)}
+.scene-h{display:flex;align-items:center;gap:10px}
+.scene-h .t{font:650 13.5px/1 var(--sans);color:var(--ink)}
+.scene-h .cnt{font:450 12px/1 var(--sans);color:var(--ink-3)}
+.scene-h .sp{flex:1}
+.scene-h .lnk{font:500 12px/1 var(--sans);color:var(--ink-2);cursor:pointer;padding:4px 2px;border-radius:6px}
+.scene-h .lnk:hover{color:var(--ink)}
+.scene-empty{display:flex;align-items:center;gap:12px;padding:12px 0 4px}
+.scene-empty .msg{font:400 12.5px/1.5 var(--sans);color:var(--ink-3)}
+.scene-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 22px;margin-top:8px}
+.scene-item{display:flex;align-items:center;gap:9px;padding:7px 2px;cursor:pointer;border-radius:7px;
+            font:450 12.5px/1.4 var(--sans);color:var(--ink-1)}
+.scene-item:hover{background:#FAF8F2}
+.scene-item .k{width:22px;height:22px;flex:none;border-radius:6px;background:#F3F1EA;display:grid;place-items:center;color:var(--ink-2)}
+.scene-item .k svg{width:12px;height:12px}
+.scene-item .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.scene-item .wh{margin-left:auto;flex:none;font:400 10.5px/1 var(--sans);color:var(--ink-3)}
+.scene-item .dot{width:7px;height:7px;flex:none;border-radius:50%}
+.scene-item.take .dot{background:#5BA7CE}
+.scene-item.drop{color:var(--ink-3)}
+.scene-item.drop .nm{text-decoration:line-through}
+.scene-item.drop .dot{background:transparent;border:1.5px solid #CFCBC0}
+.scene-clip{margin-top:10px;border-top:1px solid var(--line-soft);padding-top:10px;
+            display:flex;align-items:center;gap:10px;font:400 12px/1.5 var(--sans);color:var(--ink-2)}
+
+/* ---------- ④ 录制胶囊 ---------- */
+.recpill{position:fixed;right:34px;bottom:62px;z-index:60;
+  display:flex;align-items:center;gap:12px;padding:8px 8px 8px 14px;border-radius:999px;
+  background:#fff;border:1px solid #ECE9E1;box-shadow:0 2px 6px rgba(64,58,46,.07),0 14px 34px rgba(64,58,46,.12);
+  transform:translateY(8px);opacity:0;visibility:hidden;
+  transition:transform .2s cubic-bezier(.2,0,0,1),opacity .18s,visibility 0s linear .2s}
+.recpill.on{transform:none;opacity:1;visibility:visible;transition:transform .2s cubic-bezier(.2,0,0,1),opacity .18s}
+.recpill .rd{width:9px;height:9px;border-radius:50%;background:var(--red)}
+.recpill.paused .rd{background:transparent;border:1.5px solid var(--red);animation:none}
+.recpill .tm{font:600 13px/1 var(--mono);color:var(--ink);letter-spacing:.02em}
+.recpill .tt{font:400 11px/1 var(--sans);color:var(--ink-3);max-width:150px;
+             overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.recpill .divider{width:1px;height:18px;background:var(--line)}
+
+/* ---------- ① 新环境：动作直选排 + 动作行 ---------- */
+.act-picker{display:flex;flex-wrap:wrap;gap:8px}
+.act-row{display:flex;align-items:center;gap:10px;padding:9px 2px;border-top:1px solid var(--line-soft)}
+.act-row:first-child{border-top:none}
+.act-row .ty{flex:none;display:inline-flex;align-items:center;gap:6px;font:550 12px/1 var(--sans);
+             color:var(--ink-2);background:#F5F3EC;border-radius:7px;padding:5px 8px}
+.act-row .val{flex:1;min-width:0}
+.act-row .ops{display:flex;gap:2px;opacity:0;transition:opacity .14s}
+.act-row:hover .ops{opacity:1}
+.act-row .ops .iconbtn{width:26px;height:26px}
+
+/* ---------- 捕获小窗的「在等的」条 ---------- */
+.waitbar{display:flex;align-items:center;gap:8px;padding:10px 18px 0;flex-wrap:wrap}
+.waitbar .lb{font:450 11.5px/1 var(--sans);color:var(--ink-3);flex:none}
+.wait-chip{display:inline-flex;align-items:center;gap:6px;font:500 12px/1 var(--sans);
+           background:var(--lav-bg);border:1px solid var(--lav-line);color:#5749A8;
+           border-radius:999px;padding:7px 12px;cursor:pointer;transition:opacity .2s,background-color .14s}
+.wait-chip:hover{background:#E6DFF9}
+.wait-chip.done{opacity:.45;text-decoration:line-through;pointer-events:none}
+
+/* ---------- 设计说明面板（原型 meta-UI） ---------- */
+.notes{position:fixed;top:0;right:0;bottom:0;width:340px;z-index:80;background:#FDFCF9;
+       border-left:1px solid #E7E3D9;box-shadow:-18px 0 50px rgba(64,58,46,.10);
+       transform:translateX(100%);transition:transform .24s cubic-bezier(.2,0,0,1);
+       display:flex;flex-direction:column}
+.notes.open{transform:none}
+.notes header{padding:18px 20px 10px;border-bottom:1px solid #F0EEE7}
+.notes header b{font:700 15px/1.3 var(--sans);color:var(--ink)}
+.notes header span{display:block;font:400 11.5px/1.5 var(--sans);color:var(--ink-3);margin-top:4px}
+.notes .n-body{flex:1;overflow:auto;padding:12px 20px 24px}
+.notes h3{font:650 13px/1.4 var(--sans);color:var(--ink);margin:16px 0 6px}
+.notes li{font:400 12px/1.7 var(--sans);color:var(--ink-1);margin-left:16px;margin-bottom:3px}
+.notes li b{font-weight:650}
+.notes .del{color:var(--red)}
+.notes .add{color:#2F7099}
+.notes-toggle{position:fixed;right:16px;bottom:16px;z-index:81;height:34px;padding:0 14px;border-radius:999px;
+  background:#17141D;color:#E8E2D6;font:600 12px/1 var(--sans);display:flex;align-items:center;gap:7px;
+  box-shadow:0 8px 26px rgba(10,8,16,.4);cursor:pointer;transition:transform .1s}
+.notes-toggle:active{transform:scale(.96)}
+.proto-hint{position:fixed;left:16px;bottom:16px;z-index:81;font:400 11px/1.5 var(--sans);
+  color:var(--ink-2);background:rgba(253,252,249,.9);border:1px solid #E7E3D9;border-radius:8px;
+  padding:6px 10px;max-width:290px}
+</style>
+</head>
+<body>
+
+<div class="win">
+  <div class="traffic"><i></i><i></i><i></i></div>
+
+  <aside class="sidebar">
+    <div class="navgroup">轻锚</div>
+    <div class="nav on" data-page="now"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2"/></svg></span>现在</div>
+    <div class="nav" data-page=""><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3h12v18l-6-4-6 4z"/></svg></span>稍后<span class="cnt">15</span></div>
+    <div class="nav" data-page="env"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span>环境</div>
+    <div class="nav" data-page=""><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5"/></svg></span>使用回顾</div>
+    <div class="nav" data-page=""><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a8 8 0 0 1-8 8H4l2-3a8 8 0 1 1 15-5z"/></svg></span>对话</div>
+    <div class="navgroup">最近的事</div>
+    <div class="recent"><span class="n">摘录音 01 的要点</span><span class="s">刚刚放下</span></div>
+    <div class="recent"><span class="n">整理访谈材料</span><span class="s">放下 2 分钟</span></div>
+    <div class="recent"><span class="n">发布 1.4</span><span class="s">放下 4 小时 3 分</span></div>
+    <div class="recent"><span class="n">季度复盘…</span><span class="s">放下 5 小时 28 分</span></div>
+    <div class="recent"><span class="n">回复 Lena 的合同…</span><span class="s">放下 1 天</span></div>
+    <div class="sidenow"><span class="av"><i></i></span><span class="tx"><span class="n">摘录音 01 的要点</span><span class="s">已专注 0 分钟</span></span></div>
+  </aside>
+
+  <div class="isle"><div class="island">
+    <div class="topbar">
+      <span class="crumb" id="crumb">现在</span>
+      <span class="sp"></span>
+      <button class="tool" id="btnTimer" title="新建定时（原型入口）">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M5 3 2 6m20 0-3-3"/></svg>
+      </button>
+      <button class="tool rec" id="btnRec" title="录制（原型入口）">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none"/></svg>
+      </button>
+      <button class="tool" id="btnCap" title="捕获想法（原型入口）">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+      </button>
+      <button class="tool" id="btnPlus" title="开始一件事（原型入口）">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+      <button class="tool" title="搜索（非原型范围）">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+      </button>
+    </div>
+
+    <!-- 「现在」详情页：⑤ 现场卡 在页内 -->
+    <main class="page" id="pageNow">
+      <div class="p-meta" style="margin:0 0 4px">正在进行 · 19:38 开始 · 累计 27 分钟 · 3 段 · 上次 9月9日</div>
+      <div class="p-title">摘录音 01 的要点</div>
+
+      <div class="block"><div class="b-h">回来先看 · 写一句</div>
+        <p class="mut">还没写「回来先看」。下次离开前留一句，回来时少花五分钟重新找线头。</p></div>
+
+      <div class="block"><div class="b-h">「整理访谈材料」的步骤 · 0 / 2</div>
+        <p>① 摘录音 01 的要点 <span class="mut">— 当前</span><br>② 对照上周提纲补缺口 <span class="mut">— 还没开始</span></p></div>
+
+      <div class="block"><div class="b-h">上次做到哪 · 9月9日 19:42 存下的</div>
+        <p>这一段还没整理成总结。现场告诉你东西在哪，总结告诉你「当时在干什么、卡在哪」——隔几天回来，前者不够。</p></div>
+
+      <!-- ⑤ 现场卡：空态一行话一个动作；满态报数 + 网格 + 剪贴板条 -->
+      <section class="scene-card" id="sceneCard">
+        <div class="scene-h">
+          <span class="t">现场</span>
+          <span class="cnt" id="sceneCnt" hidden>9 样 · 带走 7 样</span>
+          <span class="sp"></span>
+          <span id="sceneActions" hidden>
+            <button class="lnk">全不带</button> <button class="lnk">全带上</button>
+            <button class="lnk" style="color:var(--ink);font-weight:600">铺回桌面 · 7 样 ›</button>
+          </span>
+          <button class="chip lav" id="aiFilter" title="两档口径：AI 筛选 / 全部保存">≡ AI 筛选 ▾</button>
+        </div>
+        <div class="scene-empty" id="sceneEmpty">
+          <span class="msg" id="sceneMsg">还没有记录。</span>
+          <button class="btn gho" id="btnSceneCap" style="height:30px;padding:0 13px;font-size:12px">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>
+            记录当前现场</button>
+        </div>
+        <div id="sceneFull" hidden>
+          <div class="scene-grid">
+            <div class="scene-item take"><span class="dot"></span><span class="k"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m4 17 6-6-6-6M12 19h8"/></svg></span><span class="nm">终端 · 发布脚本.sh</span><span class="wh">build 411</span></div>
+            <div class="scene-item take"><span class="dot"></span><span class="k"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18z"/></svg></span><span class="nm">Safari · PR #42</span><span class="wh">github.com</span></div>
+            <div class="scene-item drop"><span class="dot"></span><span class="k"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg></span><span class="nm">备忘录 · 访谈提纲.md</span><span class="wh">判为无关</span></div>
+            <div class="scene-item take"><span class="dot"></span><span class="k"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M3 9h18"/></svg></span><span class="nm">备忘录（应用）</span><span class="wh">前台</span></div>
+          </div>
+          <div class="scene-clip">
+            <span>📋 当时的剪贴板 · 3 条</span><span class="sp" style="flex:1"></span>
+            <button class="btn txt" style="font-size:12px">全部复制</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- 「环境」页：① 的入口 -->
+    <main class="page" id="pageEnv" hidden>
+      <div class="f-row" style="justify-content:space-between;align-items:flex-end">
+        <div>
+          <div class="p-title">环境</div>
+          <div class="p-meta">需要时一键准备好一套应用、链接和文件</div>
+        </div>
+        <div class="f-row">
+          <button class="btn gho">存下当前现场</button>
+          <button class="btn pri" id="btnNewEnv">新环境</button>
+        </div>
+      </div>
+      <div class="block" style="margin-top:20px">
+        <div class="recent" style="padding:10px 4px"><span class="n" style="font-size:13.5px;font-weight:550">写作工作台</span><span class="s">3 个动作 · 只允许 备忘录、Safari · 上周用过 4 次</span></div>
+        <div class="recent" style="padding:10px 4px"><span class="n" style="font-size:13.5px;font-weight:550">发布流程</span><span class="s">5 个动作 · 不限应用 · 昨天用过</span></div>
+        <div class="recent" style="padding:10px 4px"><span class="n" style="font-size:13.5px;font-weight:550">访谈整理</span><span class="s">2 个动作 · 不限应用 · 两周前建的</span></div>
+      </div>
+    </main>
+
+    <div class="actionbar">
+      <span class="seg"><button>换一件事</button><button>暂时放下</button><button>等待结果</button></span>
+      <span style="flex:1"></span>
+      <button class="btn pri static">✓ 完成这件事</button>
+    </div>
+    <div class="statusbar"><span>可以动 5</span><span>等着别人 1</span><span>没归的 9</span>
+      <span class="r">今天专注 2 小时 50 分 · 7 段 · 做完 1 件</span></div>
+  </div></div>
+</div>
+
+<!-- ============ ① 新环境：名称优先，空态即选择器，限制默认收起 ============ -->
+<div class="ovl" id="sheetEnv" role="dialog" aria-label="新环境">
+  <div class="scrim" data-close></div>
+  <div class="panel" style="width:560px;max-height:calc(92vh - 60px)">
+    <header class="p-head">
+      <div class="p-title2">新环境</div>
+      <div class="p-sub">需要时一键准备好一套应用、链接和文件。</div>
+    </header>
+    <div class="p-body" style="padding:14px 24px 20px;display:flex;flex-direction:column;gap:20px">
+      <div class="stag">
+        <input class="input" id="envName" style="font-size:15px;padding:11px 13px" placeholder="给它一个好认的名字，例如：写作工作台" autofocus>
+      </div>
+      <div class="stag">
+        <div class="f-row" style="justify-content:space-between;margin-bottom:8px">
+          <span class="f-label">动作 <span class="hint" id="actCnt"></span></span>
+        </div>
+        <div id="actionList"></div>
+        <div class="act-picker" id="actPicker">
+          <button class="chip" data-act="打开应用" data-kind="app">▦ 打开应用</button>
+          <button class="chip" data-act="打开链接" data-kind="text">↗ 打开链接</button>
+          <button class="chip" data-act="打开文件" data-kind="file">📄 打开文件</button>
+          <button class="chip" data-act="运行快捷指令" data-kind="text">✦ 运行快捷指令</button>
+          <button class="chip" data-act="运行命令" data-kind="text">⌨ 运行命令</button>
+          <button class="chip" data-act="隐藏应用" data-kind="app">— 隐藏应用</button>
+        </div>
+        <div class="hint" id="actHint" style="margin-top:8px">点一种，加上第一个动作；也可以先保存空环境，之后再补。</div>
+      </div>
+      <div class="stag">
+        <button class="f-row" id="limitToggle" style="width:100%;justify-content:space-between;cursor:pointer;padding:2px 0">
+          <span class="f-label" style="color:var(--ink-3)">⌧ 限制只允许某些应用 <span class="hint">可选</span></span>
+          <span class="hint" id="limitArrow">展开 ›</span>
+        </button>
+        <div id="limitBody" hidden style="margin-top:10px">
+          <div class="f-row" style="flex-wrap:wrap;gap:8px">
+            <button class="chip on">备忘录 ✕</button>
+            <button class="chip on">Safari ✕</button>
+            <button class="chip">＋ 选择应用</button>
+          </div>
+          <div class="hint" style="margin-top:8px">准备现场时只拉起这些应用，其余的留在原处。</div>
+        </div>
+      </div>
+    </div>
+    <footer class="p-foot">
+      <span class="grow"></span>
+      <button class="btn txt" data-close>取消</button>
+      <button class="btn pri" id="envSave" disabled>保存环境</button>
+    </footer>
+  </div>
+</div>
+
+<!-- ============ ② 开始一件事：写字板 + 底排安静 chip ============ -->
+<div class="ovl" id="dlgStart" role="dialog" aria-label="开始一件事">
+  <div class="scrim" data-close></div>
+  <div class="panel" style="width:520px">
+    <div class="p-body" style="padding:18px 20px 6px">
+      <textarea class="pad" rows="2" placeholder="开始一件事——说清要做什么，例如：整理访谈记录" autofocus></textarea>
+      <div id="noteRow" hidden style="margin-top:2px">
+        <input class="input" placeholder="备注（可选）" style="border:none;padding:6px 0;font-size:13px">
+      </div>
+    </div>
+    <footer class="p-foot" style="border-top:none;background:transparent;padding-top:6px">
+      <button class="chip" id="dueChip">📅 不着急 ▾</button>
+      <button class="chip" id="envChip">▦ 不准备现场 ▾</button>
+      <button class="iconbtn" id="noteBtn" title="加备注">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"/></svg>
+      </button>
+      <span class="grow"></span>
+      <button class="btn pri" data-close>开始 <span class="kbd">⌘↵</span></button>
+    </footer>
+  </div>
+</div>
+
+<!-- ============ ③ 新建定时：一列表单，可选的收起来 ============ -->
+<div class="ovl" id="sheetTimer" role="dialog" aria-label="新建定时">
+  <div class="scrim" data-close></div>
+  <div class="panel" style="width:540px">
+    <header class="p-head">
+      <div class="p-title2">新建定时</div>
+      <div class="p-sub">到点它来找你。</div>
+    </header>
+    <div class="p-body" style="padding:12px 24px 20px;display:flex;flex-direction:column;gap:18px">
+      <div class="stag">
+        <input class="input" style="font-size:15px;padding:11px 13px" placeholder="到点要做什么——例如：回来继续改发布脚本">
+        <div id="noteToggleRow" style="margin-top:6px">
+          <button class="btn txt" id="noteToggle" style="font-size:12px">＋ 加注释</button>
+        </div>
+        <input class="input" id="noteInput" hidden placeholder="注释（可选）" style="margin-top:6px">
+      </div>
+      <div class="stag">
+        <div class="f-row" style="flex-wrap:wrap">
+          <button class="chip" style="font-weight:600">🕐 今天 20:40 ✎</button>
+          <span class="seg" id="repeatSeg">
+            <button class="on">单次</button><button>每天</button><button>工作日</button><button>每周</button><button>每月</button>
+          </span>
+        </div>
+        <div style="margin-top:8px"><button class="btn txt" style="font-size:12px" id="calLink">从日历选时间 ›</button></div>
+      </div>
+      <div class="stag f-row" style="justify-content:space-between">
+        <span class="f-label" style="font-weight:450;color:var(--ink-1)">到点顺手收一份现场</span>
+        <span class="switch" id="timerSceneSw" role="switch" aria-checked="false" tabindex="0"></span>
+      </div>
+    </div>
+    <footer class="p-foot">
+      <span class="grow"></span>
+      <button class="btn txt" data-close>取消</button>
+      <button class="btn pri" data-close>保存定时</button>
+    </footer>
+  </div>
+</div>
+
+<!-- ============ ⑥ 捕获想法：呼出即写，其余全是安静的 ============ -->
+<div class="ovl" id="popCap" role="dialog" aria-label="捕获想法" style="align-items:flex-start;padding-top:12vh">
+  <div class="scrim" data-close></div>
+  <div class="panel" style="width:560px">
+    <div class="waitbar" id="waitbar">
+      <span class="lb">这是我在等的：</span>
+      <button class="wait-chip">等 CI 跑完 build 412</button>
+      <button class="wait-chip">设计稿 v2</button>
+      <button class="wait-chip">Lena 的回复</button>
+    </div>
+    <div class="p-body" style="padding:14px 20px 4px">
+      <textarea class="pad" rows="3" placeholder="写一行就走，别的都可选…" autofocus></textarea>
+      <div class="hint" id="capNote" style="padding-bottom:6px">未授权辅助功能，只保存应用事实，不保存窗口事实。</div>
+    </div>
+    <footer class="p-foot" style="border-top:none;background:transparent;padding-top:4px">
+      <button class="iconbtn" title="链接"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg></button>
+      <button class="iconbtn" title="文件"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 12-9 9a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.9 1.9 0 0 1-2.6-2.6l7.8-7.8"/></svg></button>
+      <button class="iconbtn" title="截图"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 7V5a2 2 0 0 1 2-2h2m10 0h2a2 2 0 0 1 2 2v2m0 10v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="12" r="3.5"/></svg></button>
+      <button class="iconbtn" title="语音"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 19v3"/></svg></button>
+      <button class="chip" style="margin-left:4px">● 稍后 ▾</button>
+      <button class="chip"># 标签</button>
+      <span class="grow"></span>
+      <button class="btn pri static" title="收下 ⌘↵" style="width:36px;padding:0;border-radius:50%">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5m-7 7 7-7 7 7"/></svg>
+      </button>
+    </footer>
+  </div>
+</div>
+
+<!-- ============ ④ 录制胶囊：时长是主角，补上暂停/继续 ============ -->
+<div class="recpill" id="recPill">
+  <span class="rd dot-pulse"></span>
+  <span class="tm" id="recTime">00:00</span>
+  <span class="tt" id="recTitle">摘录音 01 的要点</span>
+  <span class="divider"></span>
+  <button class="iconbtn" id="btnPauseRec" title="暂停">
+    <svg id="icoPause" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+    <svg id="icoPlay" viewBox="0 0 24 24" fill="currentColor" hidden><path d="M8 5.5v13l11-6.5z"/></svg>
+  </button>
+  <button class="btn dan" id="btnStopRec" style="height:30px;padding:0 13px;font-size:12px;border-radius:999px">停止</button>
+</div>
+
+<!-- ============ 设计说明（原型 meta-UI） ============ -->
+<div class="notes" id="notes">
+  <header><b>设计说明 · 每个面改了什么</b>
+    <span>基于真实代码（EnvironmentViews / ScheduleViews / WorkspaceToolCluster / NowPageView / CaptureView / StartWorkView）做的取舍。</span></header>
+  <div class="n-body">
+    <h3>① 新环境</h3>
+    <li><b class="del">删</b> 装饰图标、三张分区卡、每区一段说明、「还没有动作」空盒子</li>
+    <li><b class="add">改</b> 名称提到第一位直接聚焦；「+ 添加动作」按钮和空态合并成一排六种类型直选——空态即选择器</li>
+    <li><b class="add">收</b> 应用限制默认收起成一行「可选」（代码里默认就是不限制，不必常驻一整个分区）</li>
+    <li><b class="add">议</b> 环境列表建议补「删除」——现在代码里连 deleteEnvironment 都没有</li>
+    <h3>② 开始一件事</h3>
+    <li><b class="del">删</b> 装饰头图、「这是必填项；现场、期限和备注都是可选的」说明行</li>
+    <li><b class="add">改</b> 整块就是写字板，光标直接落笔；期限/环境/备注收成底排安静的 chip，回车即开始（原本就支持）</li>
+    <h3>③ 新建定时</h3>
+    <li><b class="del">删</b> 三个分区卡 + 三段说明、「收集现场」的长解释</li>
+    <li><b class="add">收</b> 注释收进「＋ 加注释」；日历授权一整行收成「从日历选时间 ›」</li>
+    <li><b class="add">并</b> 时间和重复并排一行——它们本来就是同一个决定</li>
+    <h3>④ 录制胶囊</h3>
+    <li><b class="del">删</b> 「录制中 · N 分钟」与标题行的重复（标题本来就是「19:40 开始的录制」）</li>
+    <li><b class="add">改</b> 时长升为主信息：mono 秒表；标题缩成一行次要文字</li>
+    <li><b class="add">增</b> 暂停/继续钮——引擎本来就会 pause/resume，UI 一直没给入口（胶囊早就能显示「已暂停」）</li>
+    <h3>⑤ 现场卡</h3>
+    <li><b class="del">删</b> 空态的解释长句和虚线大盒子</li>
+    <li><b class="add">改</b> 空态只剩一行「还没有记录。」+ 一个动作；反馈（权限/空结果/失败）就地替换这行话</li>
+    <li><b class="add">并</b> 满态把报数、全不带/全带上、铺回桌面收进章头一行；剪贴板收成一条</li>
+    <h3>⑥ 捕获想法</h3>
+    <li><b class="del">删</b> 取消钮（Esc / 点外面就够）——维持「呼出即写」的原设计意图</li>
+    <li><b class="add">改</b> 「这是我在等的」从按钮行改成 chip 条，点一颗 = 销账完成；权限提示只在未授权时出现</li>
+  </div>
+</div>
+<button class="notes-toggle" id="notesToggle">设计说明</button>
+<div class="proto-hint">原型入口：工具栏 闹钟＝新建定时 · 圆点＝录制 · 方笔＝捕获想法 · ＋＝开始一件事；侧栏「环境」页有「新环境」。Esc / 点遮罩关闭。</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const open  = id => $(id).classList.add('open');
+const close = el => el.classList.remove('open');
+document.querySelectorAll('[data-close]').forEach(b =>
+  b.addEventListener('click', () => close(b.closest('.ovl'))));
+addEventListener('keydown', e => {
+  if(e.key === 'Escape') document.querySelectorAll('.ovl.open').forEach(close);
+});
+$('btnTimer').onclick = () => open('sheetTimer');
+$('btnPlus').onclick  = () => open('dlgStart');
+$('btnCap').onclick   = () => open('popCap');
+$('btnNewEnv').onclick = () => open('sheetEnv');
+
+/* 页切换 */
+const crumb = $('crumb');
+document.querySelectorAll('.nav[data-page]').forEach(n => n.addEventListener('click', () => {
+  if(!n.dataset.page) return;
+  document.querySelectorAll('.nav').forEach(x => x.classList.remove('on'));
+  n.classList.add('on');
+  const isEnv = n.dataset.page === 'env';
+  $('pageEnv').hidden = !isEnv;
+  $('pageNow').hidden = isEnv;
+  crumb.textContent = isEnv ? '环境' : '现在';
+}));
+
+/* ① 新环境 */
+$('envName').addEventListener('input', e => $('envSave').disabled = !e.target.value.trim());
+const actKindCtl = {
+  app:  '<button class="btn gho" style="height:28px;padding:0 11px;font-size:12px">选择应用…</button>',
+  file: '<button class="btn gho" style="height:28px;padding:0 11px;font-size:12px">选择文件…</button>',
+  text: '<input class="input" placeholder="填内容" style="height:30px;font-size:12.5px">'
+};
+$('actPicker').addEventListener('click', e => {
+  const c = e.target.closest('.chip'); if(!c) return;
+  const row = document.createElement('div');
+  row.className = 'act-row';
+  row.innerHTML = `<span class="ty">${c.dataset.act}</span><span class="val">${actKindCtl[c.dataset.kind]}</span>
+    <span class="ops">
+      <button class="iconbtn" title="上移"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m18 15-6-6-6 6"/></svg></button>
+      <button class="iconbtn" title="删除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+    </span>
+    <span class="switch on" role="switch" aria-checked="true" tabindex="0"></span>`;
+  row.querySelector('[title=删除]').onclick = () => { row.remove(); syncAct(); };
+  row.querySelector('.switch').onclick = ev => ev.currentTarget.classList.toggle('on');
+  $('actionList').appendChild(row);
+  syncAct();
+});
+function syncAct(){
+  const n = $('actionList').children.length;
+  $('actCnt').textContent = n ? `· ${n} 个` : '';
+  $('actHint').style.display = n ? 'none' : '';
+}
+$('limitToggle').onclick = () => {
+  const body = $('limitBody'), show = body.hidden;
+  body.hidden = !show;
+  $('limitArrow').textContent = show ? '收起 ›' : '展开 ›';
+};
+$('limitBody').addEventListener('click', e => {
+  const c = e.target.closest('.chip'); if(c && c.textContent.includes('✕')) c.classList.toggle('on');
+});
+
+/* ② 开始一件事 */
+const dues = ['📅 不着急 ▾','📅 明天 ▾','📅 周五 ▾','📅 下周一 ▾'];
+$('dueChip').onclick = () => $('dueChip').textContent = dues[(dues.indexOf($('dueChip').textContent)+1)%dues.length];
+const envs = ['▦ 不准备现场 ▾','▦ 写作工作台 ▾','▦ 发布流程 ▾'];
+$('envChip').onclick = () => $('envChip').textContent = envs[(envs.indexOf($('envChip').textContent)+1)%envs.length];
+$('noteBtn').onclick = () => { $('noteRow').hidden = false; $('noteRow input').focus(); };
+
+/* ③ 新建定时 */
+$('noteToggle').onclick = () => { $('noteToggleRow').hidden = true; $('noteInput').hidden = false; $('noteInput').focus(); };
+$('repeatSeg').addEventListener('click', e => {
+  const b = e.target.closest('button'); if(!b) return;
+  $('repeatSeg').querySelectorAll('button').forEach(x => x.classList.remove('on'));
+  b.classList.add('on');
+});
+$('timerSceneSw').onclick = ev => ev.currentTarget.classList.toggle('on');
+
+/* ④ 录制 */
+let recSec = 0, recTimer = null, paused = false;
+const fmt = s => String(Math.floor(s/60)).padStart(2,'0') + ':' + String(s%60).padStart(2,'0');
+function setRec(on){
+  $('recPill').classList.toggle('on', on);
+  $('btnRec').classList.toggle('on', on);
+  clearInterval(recTimer); recSec = 0; paused = false;
+  $('recTime').textContent = '00:00';
+  $('recPill').classList.remove('paused');
+  $('icoPause').hidden = false; $('icoPlay').hidden = true;
+  $('btnPauseRec').title = '暂停';
+  if(on) recTimer = setInterval(() => { if(!paused) $('recTime').textContent = fmt(++recSec); }, 1000);
+}
+$('btnRec').onclick = () => setRec(!$('recPill').classList.contains('on'));
+$('btnStopRec').onclick = () => setRec(false);
+$('btnPauseRec').onclick = () => {
+  paused = !paused;
+  $('recPill').classList.toggle('paused', paused);
+  $('icoPause').hidden = paused; $('icoPlay').hidden = !paused;
+  $('btnPauseRec').title = paused ? '继续' : '暂停';
+  $('recTitle').textContent = paused ? '已暂停' : '摘录音 01 的要点';
+};
+
+/* ⑤ 现场卡 */
+$('btnSceneCap').onclick = () => {
+  $('sceneMsg').textContent = '正在记录…';
+  setTimeout(() => {
+    $('sceneEmpty').hidden = true;
+    $('sceneFull').hidden = false;
+    $('sceneCnt').hidden = false;
+    $('sceneActions').hidden = false;
+  }, 450);
+};
+document.querySelectorAll('.scene-item').forEach(it =>
+  it.onclick = () => { it.classList.toggle('take'); it.classList.toggle('drop'); });
+
+/* ⑥ 捕获想法 */
+document.querySelectorAll('.wait-chip').forEach(c =>
+  c.onclick = () => { c.classList.add('done'); c.textContent = '✓ ' + c.textContent; });
+
+/* 说明面板 */
+$('notesToggle').onclick = () => $('notes').classList.toggle('open');
+
+/* 深链演示态 */
+const h = location.hash.slice(1);
+if(['sheetEnv','sheetTimer','dlgStart','popCap'].includes(h)) open(h);
+if(h === 'rec') setRec(true);
+if(h === 'sceneFull') $('btnSceneCap').click();
+if(h === 'env') document.querySelector('.nav[data-page="env"]').click();
+if(h === 'notes') $('notes').classList.add('open');
+if(h === 'sheetEnvFull'){
+  open('sheetEnv');
+  $('envName').value = '写作工作台'; $('envSave').disabled = false;
+  document.querySelector('[data-act="打开应用"]').click();
+  document.querySelector('[data-act="打开链接"]').click();
+  $('limitToggle').click();
+}
+</script>
+</body>
+</html>

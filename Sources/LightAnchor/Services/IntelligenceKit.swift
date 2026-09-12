@@ -339,6 +339,9 @@ struct IntelligencePreferences: Codable, Equatable, Sendable {
     /// 跟随工作自动录制过程：开始一件事就起一份过程记录，放下暂停、
     /// 结束收尾。默认关——录制是扩展能力，不改变既有流程。
     var autoRecordEpisodes: Bool
+    /// 放下或做完一件事时自动整理这一段的总结（「上次做到哪」）。默认开：
+    /// 它要在你回来之前就写好，事后手点等于没有。用户改过的那份不会被覆盖。
+    var autoSummarizeEpisodes: Bool
     /// 云端配置方案。列表顺序即界面顺序，初始化时保证至少有一套。
     var cloudProfiles: [CloudProviderProfile]
     /// 使用中的方案。设置页里「选中」和「使用中」是同一件事，
@@ -371,6 +374,7 @@ struct IntelligencePreferences: Codable, Equatable, Sendable {
         inboxAutoOrganize: Bool,
         adhdFriendlyOutput: Bool = true,
         autoRecordEpisodes: Bool = false,
+        autoSummarizeEpisodes: Bool = true,
         cloudProfiles: [CloudProviderProfile] = [],
         activeCloudProfileID: UUID? = nil
     ) {
@@ -384,6 +388,7 @@ struct IntelligencePreferences: Codable, Equatable, Sendable {
         self.inboxAutoOrganize = inboxAutoOrganize
         self.adhdFriendlyOutput = adhdFriendlyOutput
         self.autoRecordEpisodes = autoRecordEpisodes
+        self.autoSummarizeEpisodes = autoSummarizeEpisodes
         // 不变量在这里立起来：至少一套方案，且使用中的那套一定在列表里。
         // 否则「云端」引擎会指向一套不存在的配置，界面也没有可选中的行。
         let normalized = cloudProfiles.isEmpty
@@ -398,7 +403,7 @@ struct IntelligencePreferences: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case engine, sceneFilterDefault, saveTerminalCommands, saveClipboardContent
         case saveWindowScreenshot, generateReturnCue, checkSceneStaleness, inboxAutoOrganize
-        case adhdFriendlyOutput, autoRecordEpisodes
+        case adhdFriendlyOutput, autoRecordEpisodes, autoSummarizeEpisodes
         case cloudProfiles, activeCloudProfileID
     }
 
@@ -427,6 +432,8 @@ struct IntelligencePreferences: Codable, Equatable, Sendable {
                 ?? fallback.adhdFriendlyOutput,
             autoRecordEpisodes: try container.decodeIfPresent(Bool.self, forKey: .autoRecordEpisodes)
                 ?? fallback.autoRecordEpisodes,
+            autoSummarizeEpisodes: try container.decodeIfPresent(Bool.self, forKey: .autoSummarizeEpisodes)
+                ?? fallback.autoSummarizeEpisodes,
             cloudProfiles: try container.decodeIfPresent([CloudProviderProfile].self, forKey: .cloudProfiles)
                 ?? [],
             activeCloudProfileID: try container.decodeIfPresent(UUID.self, forKey: .activeCloudProfileID)
@@ -573,6 +580,12 @@ protocol IntelligenceEngineProtocol: Sendable {
     /// 叙事回顾：把一个周期的事实写成一段平实的中文。只用给定事实。
     func generateNarrative(_ input: NarrativeInput) async -> String?
 
+    /// 段落总结：把**一段工作**的事实写成「当时在干什么 / 卡在哪」。
+    /// 与 answerMemoryQuestion 同语义：**不可用或失败必须抛错**（带上服务端原文），
+    /// 绝不静默兜底、不冒名降级——把事实按序拼一段话不是总结，署上名也是假的。
+    /// 调用方按场合处置：自动跑的那次只记下失败原因摆在卡上，不弹窗。
+    func summarizeEpisode(_ input: EpisodeSummaryInput) async throws -> String
+
     /// 问记忆：依据检索出的事实行回答一个自然语言问题（「对话」页）。
     /// 与其他能力不同：不可用或失败时必须抛错（带上服务端原文），
     /// 由调用方把错误原样亮给用户——不做任何静默兜底或冒名降级（用户定）。
@@ -703,6 +716,21 @@ struct InboxTriageProposal: Sendable, Equatable, Identifiable {
 /// 叙事输入：周期标题 + 一组事实句（模型只许复述这些）。
 struct NarrativeInput: Sendable, Equatable {
     var periodTitle: String
+    var factLines: [String]
+}
+
+// MARK: - 段落总结
+
+/// 段落总结的输入：这一段是哪件事的哪一段 + 一组本机事实句。
+/// 事实来自这一段自己的采集（现场条目、剪贴板、捕获、等待、步骤），
+/// 模型只许复述它们。
+struct EpisodeSummaryInput: Sendable, Equatable {
+    var targetName: String
+    var targetNote: String
+    /// 这一段的座标：「9 月 6 日 15:30 那一段 · 专注 28 分」。
+    var periodTitle: String
+    /// 用户离开前留下的「回来先看」（有就带上，它是唯一一句人话）。
+    var returnCue: String
     var factLines: [String]
 }
 
@@ -873,6 +901,34 @@ enum IntelligencePrompts {
     static func narrativeUser(_ input: NarrativeInput) -> String {
         (["周期：\(input.periodTitle)", "事实："] + input.factLines.map { "- \($0)" })
             .joined(separator: "\n")
+    }
+
+    /// 段落总结：两小节的固定骨架。骨架是固定的，因为读它的人是几天后
+    /// 回到这件事的自己——他要的永远是同两件事：那会儿在干什么、为什么停下。
+    static let episodeSummaryInstructions = """
+        你是工作段落的记录员。把给出的事实写成这一段工作的总结，只有两小节，
+        小标题原样照抄，不要加第三节、不要写标题和前言：
+        ## 当时在干什么
+        1 到 3 句，说清这一段动了哪些东西、做到哪一步。文件名、命令、页面原样照抄。
+        ## 卡在哪
+        1 到 2 句，说清这一段为什么停下、下一步卡在什么上。
+        事实里看不出卡点就写「事实里看不出卡在哪」，不要编。
+        全篇简体中文、平实像日志，130 到 220 字。只能复述给出的事实：
+        不推断原因、不评价好坏、不给建议、不写打气话、不用感叹号。
+        """
+
+    static func episodeSummaryUser(_ input: EpisodeSummaryInput) -> String {
+        var lines = ["这件事：\(input.targetName)"]
+        if !input.targetNote.isEmpty {
+            lines.append("这件事的备注：\(input.targetNote)")
+        }
+        lines.append("这一段：\(input.periodTitle)")
+        if !input.returnCue.isEmpty {
+            lines.append("离开前留的话：\(input.returnCue)")
+        }
+        lines.append("事实：")
+        lines.append(contentsOf: input.factLines.map { "- \($0)" })
+        return lines.joined(separator: "\n")
     }
 
     static let memoryChatInstructions = """
@@ -1136,6 +1192,13 @@ struct HeuristicIntelligenceEngine: IntelligenceEngineProtocol {
         return "\(input.periodTitle)：" + input.factLines.joined(separator: "；") + "。"
     }
 
+    func summarizeEpisode(_ input: EpisodeSummaryInput) async throws -> String {
+        // 总结这件事没有确定性版本：把事实按序拼成两小节，读起来像总结，
+        // 其实一个字也没提炼——「当时在干什么」变成事实清单，「卡在哪」只能复述
+        // 用户自己留的话。那是冒名降级，用户定：宁可没有，也不要假的。
+        throw MemoryAnswerError.engineUnavailable(tr("episode_summary_needs_an_engine"))
+    }
+
     func answerMemoryQuestion(_ input: MemoryQuestionInput) async -> String {
         // 确定性复述：不理解问题，只把检索到的事实按序摆出来。
         // 这是透明的规则输出，UI 会如实署名「启发式（离线）」。永不失败。
@@ -1370,6 +1433,22 @@ struct FoundationModelsIntelligenceEngine: IntelligenceEngineProtocol {
         } catch {
             return await fallback.generateNarrative(input)
         }
+    }
+
+    func summarizeEpisode(_ input: EpisodeSummaryInput) async throws -> String {
+        // 不静默兜底：不可用或失败直接抛错，由调用方如实说明。
+        guard isAvailable else {
+            throw MemoryAnswerError.engineUnavailable(tr("the_on_device_model_is_unavailable"))
+        }
+        let session = LanguageModelSession(instructions: IntelligencePrompts.styled(
+            IntelligencePrompts.episodeSummaryInstructions, adhdFriendly: adhdFriendlyOutput
+        ))
+        let response = try await session.respond(
+            to: IntelligencePrompts.episodeSummaryUser(input)
+        )
+        let text = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { throw MemoryAnswerError.emptyAnswer }
+        return text
     }
 
     func answerMemoryQuestion(_ input: MemoryQuestionInput) async throws -> String {
@@ -2015,6 +2094,24 @@ struct CloudIntelligenceEngine: IntelligenceEngineProtocol {
         } catch {
             return await fallback.generateNarrative(input)
         }
+    }
+
+    func summarizeEpisode(_ input: EpisodeSummaryInput) async throws -> String {
+        // 不静默兜底：配置不全或请求失败直接抛错（带服务端原文）。
+        guard isAvailable else {
+            throw MemoryAnswerError.engineUnavailable(tr("the_cloud_engine_is_not_configured"))
+        }
+        let content = try await chat(
+            system: IntelligencePrompts.styled(
+                IntelligencePrompts.episodeSummaryInstructions, adhdFriendly: adhdFriendlyOutput
+            ),
+            user: IntelligencePrompts.episodeSummaryUser(input),
+            jsonSchemaName: nil,
+            jsonSchema: nil
+        )
+        let text = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { throw MemoryAnswerError.emptyAnswer }
+        return text
     }
 
     func answerMemoryQuestion(_ input: MemoryQuestionInput) async throws -> String {

@@ -6,7 +6,7 @@ import XCTest
 final class ScheduledTaskTests: XCTestCase {
     // MARK: - 辅助
 
-    private func temporaryFileURL() -> URL {
+    private func temporaryEventsDirectoryURL() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("LightAnchorScheduledTaskTests-\(UUID().uuidString).json")
     }
@@ -16,7 +16,7 @@ final class ScheduledTaskTests: XCTestCase {
         contextCapture: ((IntelligencePreferences, SceneCapturePreferences) -> ContextCapsule)? = nil
     ) -> AttentionWorkspace {
         AttentionWorkspace(
-            store: LocalEventStore(fileURL: fileURL ?? temporaryFileURL()),
+            store: LocalEventStore(directoryURL: fileURL ?? temporaryEventsDirectoryURL()),
             contextCapture: contextCapture
         )
     }
@@ -85,7 +85,7 @@ final class ScheduledTaskTests: XCTestCase {
     // MARK: - 事件回放与持久化
 
     func testCreateEditAndDeletePersistAcrossReload() throws {
-        let fileURL = temporaryFileURL()
+        let fileURL = temporaryEventsDirectoryURL()
         let workspace = makeWorkspace(fileURL: fileURL)
         let fireAt = Date().addingTimeInterval(3600)
 
@@ -103,14 +103,14 @@ final class ScheduledTaskTests: XCTestCase {
         edited.title = "去开周会"
         XCTAssertTrue(workspace.updateScheduledTask(edited))
 
-        let reloaded = AttentionWorkspace(store: LocalEventStore(fileURL: fileURL))
+        let reloaded = AttentionWorkspace(store: LocalEventStore(directoryURL: fileURL))
         let persisted = try XCTUnwrap(reloaded.snapshot.scheduledTasks[created.id])
         XCTAssertEqual(persisted.title, "去开周会")
         XCTAssertEqual(persisted.calendarEventTitle, "周会")
         XCTAssertTrue(persisted.collectSceneOnFire)
 
         XCTAssertTrue(reloaded.deleteScheduledTask(created.id))
-        let reloadedAgain = AttentionWorkspace(store: LocalEventStore(fileURL: fileURL))
+        let reloadedAgain = AttentionWorkspace(store: LocalEventStore(directoryURL: fileURL))
         XCTAssertNil(reloadedAgain.snapshot.scheduledTasks[created.id])
     }
 

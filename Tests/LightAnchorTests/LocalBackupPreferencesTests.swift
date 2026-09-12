@@ -98,13 +98,42 @@ final class LocalBackupPreferencesTests: XCTestCase {
         }
         XCTAssertEqual(try Data(contentsOf: existingMarker), Data("keep".utf8))
         XCTAssertFalse(
-            FileManager.default.fileExists(atPath: workspace.root.appendingPathComponent("events.json").path)
+            FileManager.default.fileExists(atPath: workspace.root.appendingPathComponent("events", isDirectory: true).path)
         )
+    }
+
+    func testRestoreRejectsMalformedEventsBeforeReplacingDataOrPreferences() throws {
+        let workspace = try makeWorkspaceDirectory()
+        let defaults = try makeScratchDefaults()
+        let eventsDirectory = workspace.root.appendingPathComponent("events", isDirectory: true)
+        let day = eventsDirectory.appendingPathComponent("2026-09-11", isDirectory: true)
+        try FileManager.default.createDirectory(at: day, withIntermediateDirectories: true)
+        let recordURL = day.appendingPathComponent("120000-00000000-\(UUID().uuidString).json")
+        try Data("{\"event\":{}}".utf8).write(to: recordURL)
+        defaults.set(Data("archived preferences".utf8), forKey: NarrativeStore.storageKey)
+        let service = LocalDataArchiveService(rootURL: workspace.root, defaults: defaults)
+        try service.createArchive(at: workspace.archive)
+
+        try FileManager.default.removeItem(at: eventsDirectory)
+        let event = AttentionEvent.targetChanged(AttentionTarget(name: "保留当前数据"))
+        let store = LocalEventStore(directoryURL: eventsDirectory)
+        try store.save(events: [event])
+        let currentPreferences = Data("current preferences".utf8)
+        defaults.set(currentPreferences, forKey: NarrativeStore.storageKey)
+
+        XCTAssertThrowsError(try service.restoreArchive(from: workspace.archive)) { error in
+            guard case LocalDataArchiveError.restoreFailed(let message) = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+            XCTAssertFalse(message.isEmpty)
+        }
+        XCTAssertEqual(try store.load(), [event])
+        XCTAssertEqual(defaults.data(forKey: NarrativeStore.storageKey), currentPreferences)
     }
 
     /// 恢复前会先解一遍事件日志，所以夹具必须是合法的空日志，而不是随便一串字节。
     private func writeEmptyEventLog(in root: URL) throws {
-        try LocalEventStore(fileURL: root.appendingPathComponent("events.json")).save(events: [])
+        try LocalEventStore(directoryURL: root.appendingPathComponent("events", isDirectory: true)).save(events: [])
     }
 
     // MARK: - 工具

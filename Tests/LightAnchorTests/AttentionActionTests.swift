@@ -5,7 +5,7 @@ import XCTest
 @MainActor
 final class AttentionActionTests: XCTestCase {
     func testCaptureActionUsesTheAttachedWorkspace() throws {
-        let workspace = AttentionWorkspace(store: LocalEventStore(fileURL: temporaryFileURL()))
+        let workspace = AttentionWorkspace(store: LocalEventStore(directoryURL: temporaryEventsDirectoryURL()))
         AttentionActionRouter.shared.attach(workspace: workspace)
 
         let result = AttentionActionRouter.shared.perform(
@@ -20,7 +20,7 @@ final class AttentionActionTests: XCTestCase {
     }
 
     func testManualWaitingActionRequiresAndUsesCurrentEpisode() throws {
-        let workspace = AttentionWorkspace(store: LocalEventStore(fileURL: temporaryFileURL()))
+        let workspace = AttentionWorkspace(store: LocalEventStore(directoryURL: temporaryEventsDirectoryURL()))
         AttentionActionRouter.shared.attach(workspace: workspace)
         let target = try XCTUnwrap(workspace.createTarget(name: "快捷动作测试"))
         let episode = try XCTUnwrap(workspace.startEpisode(targetID: target.id))
@@ -34,13 +34,15 @@ final class AttentionActionTests: XCTestCase {
             return XCTFail("Expected a waiting result, got \(result)")
         }
         XCTAssertEqual(workspace.snapshot.waitingItems[waitingID]?.episodeID, episode.id)
-        XCTAssertEqual(workspace.currentEpisode?.state, .waiting)
+        // 交出去之后它就不占「现在」页了——你在等的时候一定在做别的。
+        XCTAssertNil(workspace.currentEpisode)
+        XCTAssertEqual(workspace.snapshot.episodes[episode.id]?.state, .paused)
     }
 
-    private func temporaryFileURL() -> URL {
+    private func temporaryEventsDirectoryURL() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("LightAnchorActionTests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString)
-            .appendingPathComponent("events.json")
+            .appendingPathComponent("events", isDirectory: true)
     }
 }

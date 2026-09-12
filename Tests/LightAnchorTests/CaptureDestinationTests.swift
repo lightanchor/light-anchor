@@ -8,8 +8,8 @@ final class CaptureDestinationTests: XCTestCase {
     private func makeWorkspace() -> AttentionWorkspace {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("capture-destination-\(UUID().uuidString)", isDirectory: true)
-            .appendingPathComponent("events.json")
-        return AttentionWorkspace(store: LocalEventStore(fileURL: url))
+            .appendingPathComponent("events", isDirectory: true)
+        return AttentionWorkspace(store: LocalEventStore(directoryURL: url))
     }
 
     func testDefaultCaptureLandsInLater() throws {

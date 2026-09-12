@@ -82,7 +82,7 @@ final class FocusLedgerTests: XCTestCase {
 
     /// 固定在「昨天 hour:minute」的工作区，避免跨越现在或未来。
     private func makeWorkspace(hour: Int, minute: Int = 0) -> (AttentionWorkspace, Date) {
-        let workspace = AttentionWorkspace(store: LocalEventStore(fileURL: temporaryFileURL()))
+        let workspace = AttentionWorkspace(store: LocalEventStore(directoryURL: temporaryEventsDirectoryURL()))
         let yesterday = calendar.date(byAdding: .day, value: -1, to: Date()) ?? Date()
         var components = calendar.dateComponents([.year, .month, .day], from: yesterday)
         components.hour = hour
@@ -91,9 +91,9 @@ final class FocusLedgerTests: XCTestCase {
         return (workspace, anchor)
     }
 
-    private func temporaryFileURL() -> URL {
+    private func temporaryEventsDirectoryURL() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("FocusLedgerTests-\(UUID().uuidString)", isDirectory: true)
-            .appendingPathComponent("events.json")
+            .appendingPathComponent("events", isDirectory: true)
     }
 }

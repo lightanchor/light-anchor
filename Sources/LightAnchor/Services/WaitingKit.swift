@@ -1,87 +1,44 @@
 import Foundation
 
-enum WaitingDetectionError: LocalizedError {
-    case invalidConfiguration
-
-    var errorDescription: String? {
-        switch self {
-        case .invalidConfiguration:
-            tr("the_wait_detection_setup_is_incomplete")
-        }
-    }
-}
-
-/// 定时等待：睡到约定时刻即算结果到了。手动等待没有探测器，不会被挂上监视。
-struct DateWaitingDetector: Sendable {
-    func wait(for configuration: WaitingMonitorConfiguration) async throws -> String {
-        guard let date = configuration.date else {
-            throw WaitingDetectionError.invalidConfiguration
-        }
-        let interval = date.timeIntervalSinceNow
-        if interval > 0 {
-            try await Task.sleep(for: .seconds(interval))
-        }
-        return "等待时间已到达。"
-    }
-}
-
+/// 期限守望：盯着押了日期的事（你自己的和别人欠你的），在**还来得及的时候**
+/// 开口一次。
+///
+/// 它以前干的是另一件事——睡到约定时刻，然后把等待标成「结果到了」，推一条
+/// 「你在等的一个结果到了」。可什么都没到，只是闹钟响了。软件看不见你的邮箱，
+/// 就永远判断不了结果到没到；但它只要一块表，就能百分百判断快到期了。
+/// 所以这里只做后者：到期催你，不替你宣布结果。
 @MainActor
 final class WaitingCoordinator {
     private weak var workspace: AttentionWorkspace?
-    /// The token identifies which detector owns the entry. A finishing detector
-    /// must not evict the replacement that a cancel-then-restart already
-    /// installed, or two detectors end up running for the same wait.
-    private var tasks: [UUID: (token: UUID, task: Task<Void, Never>)] = [:]
+    /// 下一次醒来的闹钟。只留一个：每次落盘后重算最近的那个期限。
+    private var wakeUp: Task<Void, Never>?
 
     init(workspace: AttentionWorkspace) {
         self.workspace = workspace
     }
 
     deinit {
-        tasks.values.forEach { $0.task.cancel() }
+        wakeUp?.cancel()
     }
 
-    func startMonitoring(_ waiting: WaitingItem) {
-        guard let monitor = waiting.monitor,
-              monitor.kind != .manual,
-              waiting.status == .waiting
-        else { return }
+    /// 把该催的催掉，然后睡到下一个期限进入窗口的时刻。
+    func startMonitoringDueDates(now: Date = Date()) {
+        guard let workspace else { return }
+        workspace.deliverDueNudges(now: now)
 
-        // Background maintenance runs repeatedly. Keep an active detector alive;
-        // only a new waiting item or an explicit cancellation should replace it.
-        guard tasks[waiting.id] == nil else { return }
-        let token = UUID()
-        tasks[waiting.id] = (token, Task { [weak self] in
-            do {
-                let evidence = try await DateWaitingDetector().wait(for: monitor)
-                guard !Task.isCancelled else { return }
-                self?.workspace?.completeWaiting(waiting.id, evidence: evidence)
-            } catch {
-                guard !Task.isCancelled else { return }
-                self?.workspace?.cancelWaiting(
-                    waiting.id,
-                    evidence: error.localizedDescription
-                )
-            }
-            if self?.tasks[waiting.id]?.token == token {
-                self?.tasks.removeValue(forKey: waiting.id)
-            }
-        })
-    }
-
-    /// 启动与维护循环的补挂入口：把日志里仍在等待、带定时监视器的项重新挂上。
-    func startMonitoringActiveWaits() {
-        workspace?.snapshot.activeWaitingItems
-            .filter { $0.status == .waiting }
-            .forEach(startMonitoring)
-    }
-
-    func cancelMonitoring(_ waitingID: UUID) {
-        tasks.removeValue(forKey: waitingID)?.task.cancel()
+        wakeUp?.cancel()
+        wakeUp = nil
+        guard let next = workspace.nextNudgeDate(after: now) else { return }
+        let interval = max(1, next.timeIntervalSince(now))
+        wakeUp = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(interval))
+            guard !Task.isCancelled else { return }
+            self?.startMonitoringDueDates()
+        }
     }
 
     func cancelAllMonitoring() {
-        tasks.values.forEach { $0.task.cancel() }
-        tasks.removeAll()
+        wakeUp?.cancel()
+        wakeUp = nil
     }
 }

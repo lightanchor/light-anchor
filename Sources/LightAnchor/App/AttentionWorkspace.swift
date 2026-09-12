@@ -10,25 +10,26 @@ final class AttentionWorkspace: ObservableObject {
     @Published private(set) var snapshot: AttentionSnapshot
     @Published private(set) var lastError: String?
     @Published private(set) var lastNotice: String?
-    /// 刚放下并存好现场的一件事（仅会话内，不落盘）：「现在」页据此出确认卡，
+    /// 刚放下的一件事（仅会话内，不落盘）：「现在」页据此出确认卡，
     /// 让用户看到保存了什么、能逐条剔除，由用户点掉。
     @Published private(set) var recentSetAside: RecentSetAside?
 
     struct RecentSetAside: Equatable, Identifiable {
         let targetID: UUID
         let targetName: String
-        let snapshotID: UUID
+        /// 现场快照要等异步采集落盘才有，所以是可选的：放下那一刻先把确认卡亮出来
+        /// （趁记忆还热写「回来先看」），清单随后自己长出来。等采完再弹的话，用户
+        /// 早已开始下一件事，那张卡看着就像凭空冒出来的。
+        var snapshotID: UUID?
         let at: Date
 
-        var id: UUID { snapshotID }
+        /// 一件事同时只有一张确认卡：身份认目标，好让补上 snapshotID 时弹窗不重开。
+        var id: UUID { targetID }
     }
 
     private let store: LocalEventStore
     private let assetStore: LocalAssetStore
     private var events: [AttentionEvent]
-    /// Writing is an atomic replace of the whole log, so while the file on disk
-    /// cannot be read the in-memory history is not a safe base to write from:
-    /// committing would replace the unreadable file and discard everything.
     private var isEventLogReadable = true
     private lazy var waitingCoordinator = WaitingCoordinator(workspace: self)
     private lazy var scheduledTaskCoordinator = ScheduledTaskCoordinator(workspace: self)
@@ -44,6 +45,8 @@ final class AttentionWorkspace: ObservableObject {
         }
     )
     private let contextCapture: (IntelligencePreferences, SceneCapturePreferences) -> ContextCapsule
+    /// 测试注入的智能引擎；为 nil 时按偏好现造一套。
+    private let injectedIntelligenceEngine: IntelligenceEngineProtocol?
     private let clipboardHistoryStore: ClipboardHistoryStore
     /// 测试注入的剪贴板读取；为 nil 时读系统剪贴板。
     private let injectedClipboardSample: (() -> ClipboardSample)?
@@ -78,8 +81,10 @@ final class AttentionWorkspace: ObservableObject {
         recordingTraceStore: RecordingTraceStore? = nil,
         clipboardHistoryStore: ClipboardHistoryStore? = nil,
         clipboardSample: (() -> ClipboardSample)? = nil,
-        contextCapture: ((IntelligencePreferences, SceneCapturePreferences) -> ContextCapsule)? = nil
+        contextCapture: ((IntelligencePreferences, SceneCapturePreferences) -> ContextCapsule)? = nil,
+        intelligenceEngine: IntelligenceEngineProtocol? = nil
     ) {
+        self.injectedIntelligenceEngine = intelligenceEngine
         self.store = store
         self.assetStore = assetStore ?? LocalAssetStore()
         self.recordingTraceStore = recordingTraceStore ?? RecordingTraceStore()
@@ -620,22 +625,22 @@ final class AttentionWorkspace: ObservableObject {
             }
             // 同理：先丢内存里的剪贴板历史，免得停跟随时再把文件写回刚删的目录。
             clipboardHistoryCoordinator.discardAll()
-            if FileManager.default.fileExists(atPath: store.fileURL.path) {
-                try FileManager.default.removeItem(at: store.fileURL)
-            }
-            // Drop the in-memory history as soon as its file is gone. If a later
-            // step fails, the next commit must not write the deleted events back.
-            events = []
-            snapshot = AttentionSnapshot()
-            isEventLogReadable = true
-            try assetStore.removeAll()
-            let fileManager = FileManager.default
             // 数据根目录取自事件存储本身：位置可注入，照默认路径删会删到别处。
-            let dataRoot = store.fileURL.deletingLastPathComponent()
+            let dataRoot = store.directoryURL.deletingLastPathComponent()
+            let fileManager = FileManager.default
+            // 事件目录、旧的整份日志以及其余数据文件都在 LocalDataErasure 清单里。
             for url in LocalDataErasure.fileURLs(in: dataRoot)
             where fileManager.fileExists(atPath: url.path) {
                 try fileManager.removeItem(at: url)
             }
+            // Drop the in-memory history as soon as its files are gone. If a later
+            // step fails, the next commit must not write the deleted events back.
+            events = []
+            snapshot = AttentionSnapshot()
+            isEventLogReadable = false
+            _ = try store.load()
+            isEventLogReadable = true
+            try assetStore.removeAll()
             // 索引文件已经 unlink，但 actor 手里的句柄还能读到全部旧行；关掉它。
             Task.detached(priority: .utility) { await MemoryIndex.shared.removeAll() }
             // 每次恢复备份留下的整目录旧副本也算「这台 Mac 上的数据」。
@@ -645,6 +650,8 @@ final class AttentionWorkspace: ObservableObject {
             }
             // 云端凭据住在保留下来的偏好 blob 里，单独抹。
             IntelligencePreferences.eraseCloudConfiguration(in: defaults)
+            // GitHub 令牌住在 Keychain，不在 UserDefaults 清单里，单独抹。
+            GitHubAuthService.eraseStoredToken()
             intelligencePreferences = .load(from: defaults)
             LocalDiagnostics.shared.removeAllData()
             lastError = nil
@@ -661,6 +668,7 @@ final class AttentionWorkspace: ObservableObject {
         name: String,
         note: String = "",
         environmentProfileID: UUID? = nil,
+        dueAt: Date? = nil,
         now: Date = Date()
     ) -> AttentionTarget? {
         let target = AttentionTarget(
@@ -668,10 +676,12 @@ final class AttentionWorkspace: ObservableObject {
             note: note,
             createdAt: now,
             updatedAt: now,
-            environmentProfileID: environmentProfileID
+            environmentProfileID: environmentProfileID,
+            dueAt: dueAt
         )
         guard target.isValid else { return nil }
         guard commit([.targetChanged(target, at: now)]) else { return nil }
+        if dueAt != nil { waitingCoordinator.startMonitoringDueDates() }
         return target
     }
 
@@ -684,7 +694,7 @@ final class AttentionWorkspace: ObservableObject {
         now: Date = Date()
     ) -> Bool {
         // 改字段而不是重建：目标身上还有别的记忆（现场筛选偏好、步骤归属、
-        // 收起墓碑），重建会把没列出来的字段悄悄抹掉。
+        // 收起墓碑、期限），重建会把没列出来的字段悄悄抹掉。
         guard var target = snapshot.targets[targetID] else { return false }
         target.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         target.note = note.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -692,6 +702,19 @@ final class AttentionWorkspace: ObservableObject {
         target.updatedAt = now
         guard target.isValid else { return false }
         return commit([.targetChanged(target, at: now)])
+    }
+
+    /// 改一件事的期限。传 nil 就是撤掉——撤掉之后它只是一笔账，不再打扰你。
+    /// 改期会把「已经催过」一并清掉：新期限是新的承诺，到点该重新催一次。
+    @discardableResult
+    func setTargetDueDate(_ targetID: UUID, to dueAt: Date?, now: Date = Date()) -> Bool {
+        guard var target = snapshot.targets[targetID], target.dueAt != dueAt else { return false }
+        target.dueAt = dueAt
+        target.nudgedAt = nil
+        target.updatedAt = now
+        guard commit([.targetChanged(target, at: now)]) else { return false }
+        waitingCoordinator.startMonitoringDueDates()
+        return true
     }
 
     // MARK: - 步骤（大任务里的小步骤）
@@ -795,15 +818,7 @@ final class AttentionWorkspace: ObservableObject {
         let previousEpisode = currentEpisode
         let resumable = unfinishedEpisode(for: targetID)
         var events: [AttentionEvent] = []
-        var transitionNotifications: [WaitingItem] = []
         var shouldCapturePreviousScene = false
-        for waiting in snapshot.readyWaitingItems
-            where waiting.restorePolicy == .nextTransition && !waiting.notificationSent {
-            var notifiedWaiting = waiting
-            notifiedWaiting.notificationSent = true
-            events.append(.waitingChanged(notifiedWaiting, at: now))
-            transitionNotifications.append(notifiedWaiting)
-        }
         // 手上那件放下并存现场——除非要接着做的就是它本身。
         if let currentEpisode,
            currentEpisode.id != resumable?.id,
@@ -859,9 +874,6 @@ final class AttentionWorkspace: ObservableObject {
            previousEpisode.id != episode.id {
             scheduleSceneAutoCapture(for: previousEpisode.id, announcingSetAside: true)
         }
-        transitionNotifications.forEach {
-            WaitingNotificationService().notifyIfAllowed($0, isTransition: true)
-        }
         return episode
     }
 
@@ -904,6 +916,7 @@ final class AttentionWorkspace: ObservableObject {
         if changed {
             handleRecordingOnEpisodePause(episodeID, now: now)
             scheduleSceneAutoCapture(for: episodeID, announcingSetAside: true)
+            scheduleEpisodeSummary(for: episodeID)
         }
         return changed
     }
@@ -936,7 +949,6 @@ final class AttentionWorkspace: ObservableObject {
         for var waiting in snapshot.waitingItems.values
             .filter({ $0.episodeID == episodeID && ($0.status == .waiting || $0.status == .ready) })
             .sorted(by: { $0.startedAt < $1.startedAt }) {
-            waitingCoordinator.cancelMonitoring(waiting.id)
             let wasReady = waiting.status == .ready
             waiting.status = wasReady ? .resolved : .cancelled
             waiting.completedAt = waiting.completedAt ?? now
@@ -968,6 +980,7 @@ final class AttentionWorkspace: ObservableObject {
         if committed {
             handleRecordingOnEpisodeEnd(episodeID, now: now)
             scheduleSceneAutoCapture(for: episodeID)
+            scheduleEpisodeSummary(for: episodeID)
         }
         return committed
     }
@@ -994,6 +1007,7 @@ final class AttentionWorkspace: ObservableObject {
         if committed {
             handleRecordingOnEpisodeEnd(episodeID, now: now)
             scheduleSceneAutoCapture(for: episodeID)
+            scheduleEpisodeSummary(for: episodeID)
         }
         return committed
     }
@@ -1388,14 +1402,6 @@ final class AttentionWorkspace: ObservableObject {
         let previousEpisode = currentEpisode
         var shouldCapturePreviousScene = false
         var events: [AttentionEvent] = [.targetChanged(target, at: now)]
-        var transitionNotifications: [WaitingItem] = []
-        for waiting in snapshot.readyWaitingItems
-            where waiting.restorePolicy == .nextTransition && !waiting.notificationSent {
-            var notifiedWaiting = waiting
-            notifiedWaiting.notificationSent = true
-            events.append(.waitingChanged(notifiedWaiting, at: now))
-            transitionNotifications.append(notifiedWaiting)
-        }
         // 与 startEpisode 同一条不变量：任何激活新一段的入口，都要把手上那件
         // 先固定现场再放下。`.returning`（刚回场、还没接着做）也是手上那件——
         // 漏掉它会留下一段永远停在回场态、却已经不是当前工作的孤儿。
@@ -1428,9 +1434,6 @@ final class AttentionWorkspace: ObservableObject {
         if shouldCapturePreviousScene, let previousEpisode {
             scheduleSceneAutoCapture(for: previousEpisode.id, announcingSetAside: true)
         }
-        transitionNotifications.forEach {
-            WaitingNotificationService().notifyIfAllowed($0, isTransition: true)
-        }
         return target
     }
 
@@ -1439,8 +1442,7 @@ final class AttentionWorkspace: ObservableObject {
         _ captureID: UUID,
         episodeID: UUID? = nil,
         completionCondition: String = "用户确认已到达",
-        restorePolicy: WaitingRestorePolicy = .manual,
-        monitor: WaitingMonitorConfiguration? = nil,
+        dueAt: Date? = nil,
         now: Date = Date()
     ) -> WaitingItem? {
         guard let capture = snapshot.captures[captureID], capture.status == .inbox,
@@ -1456,12 +1458,13 @@ final class AttentionWorkspace: ObservableObject {
             description: description,
             completionCondition: completionCondition,
             startedAt: now,
-            restorePolicy: restorePolicy,
-            monitor: monitor,
+            dueAt: dueAt,
             originalContext: episode.context
         )
         guard waiting.isValid else { return nil }
-        episode.state = .waiting
+        // 球交到别人手里 = 这件事被放下了。没有单独的「等待中」状态：
+        // 它归哪一组由「身上有没有一条还没等到的结果」决定。
+        episode.state = .paused
         episode.updatedAt = now
         episode.waitingIDs.append(waiting.id)
         var archivedCapture = capture
@@ -1471,9 +1474,7 @@ final class AttentionWorkspace: ObservableObject {
             .waitingChanged(waiting, at: now),
             .captureArchived(archivedCapture, at: now)
         ]) else { return nil }
-        if let persistedWaiting = snapshot.waitingItems[waiting.id] {
-            waitingCoordinator.startMonitoring(persistedWaiting)
-        }
+        waitingCoordinator.startMonitoringDueDates()
         return waiting
     }
 
@@ -1524,8 +1525,7 @@ final class AttentionWorkspace: ObservableObject {
         episodeID: UUID,
         description: String,
         completionCondition: String = "",
-        restorePolicy: WaitingRestorePolicy = .manual,
-        monitor: WaitingMonitorConfiguration? = nil,
+        dueAt: Date? = nil,
         now: Date = Date()
     ) -> WaitingItem? {
         guard var episode = snapshot.episodes[episodeID],
@@ -1541,22 +1541,21 @@ final class AttentionWorkspace: ObservableObject {
             description: description,
             completionCondition: completionCondition,
             startedAt: now,
-            restorePolicy: restorePolicy,
-            monitor: monitor,
+            dueAt: dueAt,
             originalContext: episode.context
         )
         guard waiting.isValid else { return nil }
 
-        episode.state = .waiting
+        // 球交到别人手里 = 这件事被放下了。它离开「现在」页，你顺手挑下一件——
+        // 你在等的时候本来就一定在做别的。
+        episode.state = .paused
         episode.updatedAt = now
         episode.waitingIDs.append(waiting.id)
         guard commit([
             .episodeChanged(episode, at: now),
             .waitingChanged(waiting, at: now)
         ]) else { return nil }
-        if let persistedWaiting = snapshot.waitingItems[waiting.id] {
-            waitingCoordinator.startMonitoring(persistedWaiting)
-        }
+        waitingCoordinator.startMonitoringDueDates()
         recordingNote(
             kind: .waiting,
             title: waiting.description,
@@ -1582,14 +1581,11 @@ final class AttentionWorkspace: ObservableObject {
         waiting.status = .ready
         waiting.completedAt = now
         waiting.evidence = evidence.trimmingCharacters(in: .whitespacesAndNewlines)
-        if waiting.restorePolicy == .notify {
-            waiting.notificationSent = true
-        }
-        waitingCoordinator.cancelMonitoring(waitingID)
+        // 不再推「你在等的一个结果到了」——**是你自己说它到了的**，
+        // 再回头通知你一遍是自说自话。软件只在「快到期了」时开口。
         let committed = commit([
             .waitingChanged(waiting, at: now)
         ])
-        if committed { WaitingNotificationService().notifyIfAllowed(waiting) }
         if committed {
             recordingNote(
                 kind: .waiting,
@@ -1610,20 +1606,66 @@ final class AttentionWorkspace: ObservableObject {
         waiting.status = .cancelled
         waiting.completedAt = now
         waiting.evidence = evidence.trimmingCharacters(in: .whitespacesAndNewlines)
-        waitingCoordinator.cancelMonitoring(waitingID)
-        var events: [AttentionEvent] = [
-            .waitingChanged(waiting, at: now)
-        ]
-        if var episode = snapshot.episodes[waiting.episodeID], episode.state == .waiting {
-            episode.state = .paused
-            episode.updatedAt = now
-            events.append(.episodeChanged(episode, at: now))
-        }
-        return commit(events)
+        // 球回到你手里：这条从「等着别人」挪进「可以动」。那段工作本来就是
+        // 放下状态，不用再改——归属只看还有没有没等到的结果。
+        return commit([.waitingChanged(waiting, at: now)])
     }
 
+    /// 启动与维护循环的入口：把还没催过的期限重新挂上表。
     func startActiveWaitingMonitors() {
-        waitingCoordinator.startMonitoringActiveWaits()
+        waitingCoordinator.startMonitoringDueDates()
+    }
+
+    // MARK: - 到期来找你
+
+    /// 把已经进了窗口、还没催过的都催一遍，然后盖上「催过了」。
+    ///
+    /// **一件事到期只说一次**，说完就过去了——不累积愧疚，不隔天又冒出来。
+    /// 你要是选了「算了」，撤掉期限，它就真的算了。
+    func deliverDueNudges(now: Date = Date()) {
+        var events: [AttentionEvent] = []
+
+        for target in snapshot.dueTargets(now: now) where target.needsNudge(now: now) {
+            var nudged = target
+            nudged.nudgedAt = now
+            events.append(.targetChanged(nudged, at: now))
+            DueNudgeNotification(
+                kind: .ownWork,
+                title: target.name,
+                dueLabel: UserFacingCopy.dueDayLabel(target.dueAt ?? now, now: now),
+                countdown: DueCountdown(due: target.dueAt ?? now, now: now)
+            ).post(identifier: "light-anchor.due.target.\(target.id.uuidString)")
+        }
+
+        for waiting in snapshot.dueWaitingItems(now: now) where waiting.needsNudge(now: now) {
+            var nudged = waiting
+            nudged.nudgedAt = now
+            events.append(.waitingChanged(nudged, at: now))
+            DueNudgeNotification(
+                kind: .waitingOnOthers,
+                title: waiting.description,
+                dueLabel: UserFacingCopy.dueDayLabel(waiting.dueAt ?? now, now: now),
+                countdown: DueCountdown(due: waiting.dueAt ?? now, now: now)
+            ).post(identifier: "light-anchor.due.waiting.\(waiting.id.uuidString)")
+        }
+
+        guard !events.isEmpty else { return }
+        _ = commit(events)
+    }
+
+    /// 下一次该醒来的时刻：最近一个还没进窗口的期限，减去提前量。
+    /// 已经进了窗口的这一轮就催掉了，不用再等。
+    func nextNudgeDate(after now: Date = Date()) -> Date? {
+        let lead = Double(DueCountdown.leadDays) * 86_400
+        var candidates: [Date] = []
+        for target in snapshot.activeTargets where target.dueAt != nil {
+            candidates.append(target.dueAt!.addingTimeInterval(-lead))
+        }
+        for waiting in snapshot.waitingItems.values
+        where waiting.status == .waiting && waiting.dueAt != nil {
+            candidates.append(waiting.dueAt!.addingTimeInterval(-lead))
+        }
+        return candidates.filter { $0 > now }.min()
     }
 
     @discardableResult
@@ -2034,7 +2076,7 @@ final class AttentionWorkspace: ObservableObject {
     @Published private(set) var intelligencePreferences: IntelligencePreferences = .load()
 
     var intelligenceEngine: IntelligenceEngineProtocol {
-        IntelligenceEngineFactory.make(preferences: intelligencePreferences)
+        injectedIntelligenceEngine ?? IntelligenceEngineFactory.make(preferences: intelligencePreferences)
     }
 
     var currentSceneSnapshot: SceneSnapshot? {
@@ -2113,8 +2155,11 @@ final class AttentionWorkspace: ObservableObject {
 
     /// 切换/暂停/等待时自动捕获现场。fire-and-forget，不阻塞状态流转。
     /// 无 AI 时引擎立即返回（相关性不猜、全部保留），不会在测试环境挂起。
-    /// announcingSetAside：这次捕获属于「放下」——存好后把结果亮给用户
+    /// announcingSetAside：这次捕获属于「放下」——把结果亮给用户
     /// （「现在」页的已放下确认卡），而不是只在背后默默存一份。
+    ///
+    /// 确认卡在**放下那一刻**就置好（此时上面那道 `hasSceneContent` 已经保证有东西
+    /// 可收），采集落盘后只是回来补一个 snapshotID。
     private func scheduleSceneAutoCapture(
         for episodeID: UUID,
         announcingSetAside: Bool = false
@@ -2123,21 +2168,26 @@ final class AttentionWorkspace: ObservableObject {
               snapshot.episodes[episodeID]?.context.hasSceneContent == true
         else { return }
         let announcingSetAside = announcingSetAside && !isSwitchingQuietly
+        if announcingSetAside,
+           let episode = snapshot.episodes[episodeID],
+           let target = snapshot.targets[episode.targetID] {
+            recentSetAside = RecentSetAside(
+                targetID: target.id,
+                targetName: target.name,
+                snapshotID: nil,
+                at: Date()
+            )
+        }
         Task { [weak self] in
             guard let self else { return }
             let captured = await self.captureSceneSnapshot(for: episodeID)
             guard announcingSetAside,
                   let captured,
-                  !captured.restorableItems.isEmpty || !captured.clipboardText.isEmpty,
-                  let episode = self.snapshot.episodes[episodeID],
-                  let target = self.snapshot.targets[episode.targetID]
+                  let pending = self.recentSetAside,
+                  pending.targetID == captured.targetID
             else { return }
-            self.recentSetAside = RecentSetAside(
-                targetID: target.id,
-                targetName: target.name,
-                snapshotID: captured.id,
-                at: Date()
-            )
+            // 卡还在（用户没点掉、也没回到这件事），把刚存好的那份挂上去。
+            self.recentSetAside?.snapshotID = captured.id
         }
     }
 
@@ -2237,16 +2287,6 @@ final class AttentionWorkspace: ObservableObject {
     }
     #endif
 
-    /// 从一份现场快照删除一条（「已放下」确认卡 / 现场卡里的手动剔除）。
-    @discardableResult
-    func removeSceneItem(_ snapshotID: UUID, itemID: UUID, now: Date = Date()) -> Bool {
-        guard var sceneSnapshot = snapshot.sceneSnapshots[snapshotID] else { return false }
-        let countBefore = sceneSnapshot.items.count
-        sceneSnapshot.items.removeAll { $0.id == itemID }
-        guard sceneSnapshot.items.count < countBefore else { return false }
-        return commit([.sceneSnapshotChanged(sceneSnapshot, at: now)])
-    }
-
     @discardableResult
     func updateSceneFilterMode(
         for targetID: UUID,
@@ -2282,6 +2322,220 @@ final class AttentionWorkspace: ObservableObject {
         guard let index = sceneSnapshot.items.firstIndex(where: { $0.id == itemID }) else { return false }
         sceneSnapshot.items[index].isRelevant.toggle()
         return commit([.sceneSnapshotChanged(sceneSnapshot, at: now)])
+    }
+
+    // MARK: - 这一段的总结（「上次做到哪」）
+    //
+    // 现场答「东西在哪」，总结答「当时在干什么、卡在哪」。总结必须在你回来
+    // 之前就写好——放下和做完的那一刻自动整理（偏好可关），所以它是 fire-and-forget：
+    // 失败只记诊断，不在用户放下一件事时弹错误。用户改过的那份不会被自动覆盖。
+
+    /// 正在整理的段：UI 据此显示「正在整理…」，也防同一段并发跑两遍。
+    @Published private(set) var summarizingEpisodeIDs: Set<UUID> = []
+
+    /// 总结的署名：云端报模型名（用户看得出是哪套写的），端侧/离线报引擎名。
+    var intelligenceCreditName: String {
+        if let injectedIntelligenceEngine { return injectedIntelligenceEngine.name }
+        switch intelligencePreferences.engine {
+        case .cloud:
+            let model = intelligencePreferences.activeCloudProfile.model
+            return model.isEmpty ? intelligenceEngine.name : model
+        case .onDevice:
+            return intelligenceEngine.name
+        }
+    }
+
+    /// 组装某一段的总结输入：全部是这一段自己的本机事实。
+    /// 事实不足（没现场、没剪贴板、没捕获、没留话）时返回 nil——
+    /// 无话可说时不该生出一段像模像样的空话。
+    func makeEpisodeSummaryInput(
+        episodeID: UUID,
+        now: Date = Date()
+    ) -> EpisodeSummaryInput? {
+        guard let episode = snapshot.episodes[episodeID],
+              let target = snapshot.targets[episode.targetID]
+        else { return nil }
+
+        var facts: [String] = []
+
+        let minutes = snapshot.focusMinutes(of: episodeID, now: now)
+        if minutes >= 1 {
+            facts.append(String(
+                format: tr("fact_episode_focused"),
+                UserFacingCopy.focusDuration(minutes)
+            ))
+        }
+
+        // 现场条目：这一段落盘的那份优先，没有就用段上的上下文现算一份。
+        let sceneItems: [SceneItem] = snapshot.sceneSnapshots.values
+            .filter { $0.episodeID == episodeID }
+            .max { $0.capturedAt < $1.capturedAt }
+            .map(\.restorableItems)
+            ?? SceneSnapshotBuilder.items(from: episode.context)
+        for item in sceneItems.prefix(12) {
+            let place = item.detail.isEmpty ? item.sourceApplication : item.detail
+            facts.append(place.isEmpty
+                ? "[\(item.kind.title)] \(item.title)"
+                : "[\(item.kind.title)] \(item.title) · \(place)")
+        }
+
+        // 这一段复制过的文字：最能说明「当时在动哪句话」的证据。
+        for entry in clipboardHistory(for: episodeID).suffix(8) {
+            facts.append(String(
+                format: tr("fact_episode_copied"),
+                Self.clockLabel(entry.at),
+                String(entry.text.prefix(60))
+            ))
+        }
+
+        // 这一段里捕获的想法。
+        let captures = snapshot.captures.values
+            .filter { capture in
+                if capture.attachedEpisodeID == episodeID { return true }
+                guard capture.capturedAt >= episode.startedAt else { return false }
+                return capture.capturedAt <= (episode.endedAt ?? episode.updatedAt)
+            }
+            .sorted { $0.capturedAt < $1.capturedAt }
+        for capture in captures.prefix(5) {
+            let text = capture.title?.isEmpty == false ? (capture.title ?? "") : capture.body
+            facts.append("[\(capture.kind.title)] \(String(text.prefix(60)))")
+        }
+
+        // 这一段交出去的结果：为什么停下，常常就写在这里。
+        for waiting in snapshot.waitingItems.values
+            .filter({ $0.episodeID == episodeID })
+            .sorted(by: { $0.startedAt < $1.startedAt }) {
+            facts.append(String(format: tr("fact_episode_waiting"), waiting.description))
+        }
+
+        // 步骤：这一段在大任务里的位置。
+        if let parentID = target.parentTargetID,
+           let parent = snapshot.targets[parentID] {
+            let steps = snapshot.steps(of: parentID)
+            if let index = steps.firstIndex(where: { $0.id == target.id }) {
+                facts.append(String(
+                    format: tr("fact_episode_step_of"),
+                    parent.name, index + 1, steps.count
+                ))
+            }
+        } else if let progress = snapshot.stepProgress(of: target.id) {
+            facts.append(String(
+                format: tr("fact_episode_step_progress"),
+                progress.done, progress.total
+            ))
+        }
+
+        guard facts.count >= 2 else { return nil }
+        return EpisodeSummaryInput(
+            targetName: target.name,
+            targetNote: target.note,
+            periodTitle: Self.episodePeriodTitle(episode, minutes: minutes),
+            returnCue: episode.returnCue,
+            factLines: facts
+        )
+    }
+
+    /// 「9 月 6 日 15:30 那一段 · 专注 28 分」。
+    private static func episodePeriodTitle(_ episode: AttentionEpisode, minutes: Int) -> String {
+        let when = episode.startedAt.formatted(
+            .dateTime.month(.abbreviated).day().hour().minute()
+        )
+        guard minutes >= 1 else {
+            return String(format: tr("episode_period_title_short"), when)
+        }
+        return String(
+            format: tr("episode_period_title"),
+            when,
+            UserFacingCopy.focusDuration(minutes)
+        )
+    }
+
+    private static func clockLabel(_ date: Date) -> String {
+        date.formatted(date: .omitted, time: .shortened)
+    }
+
+    /// 每一段上次整理失败的原因（引擎没配、服务端报错、返回空）。
+    /// 失败不静默：这一段的总结卡上如实写出来，用户看得见为什么没有总结。
+    @Published private(set) var summaryFailures: [UUID: String] = [:]
+
+    /// 整理某一段的总结。`force` 是用户点「重新整理」：连他自己改过的那份也重写。
+    ///
+    /// 失败**不降级**：没有可用引擎、服务端报错、模型返回空，都只记下原因，
+    /// 绝不用「把事实按序拼一段话」冒充一份总结（用户定）。
+    @discardableResult
+    func summarizeEpisode(
+        _ episodeID: UUID,
+        force: Bool = false,
+        now: Date = Date()
+    ) async -> Bool {
+        guard let episode = snapshot.episodes[episodeID] else { return false }
+        if !force, let existing = episode.summary, existing.isEdited { return false }
+        guard !summarizingEpisodeIDs.contains(episodeID) else { return false }
+        guard let input = makeEpisodeSummaryInput(episodeID: episodeID, now: now) else { return false }
+
+        summarizingEpisodeIDs.insert(episodeID)
+        summaryFailures[episodeID] = nil
+        let engine = intelligenceEngine
+        let credit = intelligenceCreditName
+        let text: String
+        do {
+            text = try await engine.summarizeEpisode(input)
+        } catch {
+            summarizingEpisodeIDs.remove(episodeID)
+            let message = error.localizedDescription
+            summaryFailures[episodeID] = message
+            LocalDiagnostics.shared.record(
+                operation: "episode.summarize",
+                message: "engine \(engine.name): \(message)"
+            )
+            return false
+        }
+        summarizingEpisodeIDs.remove(episodeID)
+
+        // 重取一遍：等模型的这段时间里这一段可能已经变了（用户接着做、又放下）。
+        guard var latest = snapshot.episodes[episodeID] else { return false }
+        latest.summary = EpisodeSummary(
+            text: text,
+            engineName: credit,
+            factCount: input.factLines.count,
+            generatedAt: now
+        )
+        return commit([.episodeChanged(latest, at: now)])
+    }
+
+    /// 用户改过的总结：原样存下，并盖上「改过」的记号。
+    @discardableResult
+    func updateEpisodeSummary(
+        _ episodeID: UUID,
+        text: String,
+        now: Date = Date()
+    ) -> Bool {
+        guard var episode = snapshot.episodes[episodeID] else { return false }
+        summaryFailures[episodeID] = nil
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            guard episode.summary != nil else { return false }
+            episode.summary = nil
+        } else {
+            episode.summary = EpisodeSummary(
+                text: trimmed,
+                engineName: episode.summary?.engineName ?? intelligenceCreditName,
+                factCount: episode.summary?.factCount ?? 0,
+                generatedAt: episode.summary?.generatedAt ?? now,
+                isEdited: true
+            )
+        }
+        return commit([.episodeChanged(episode, at: now)])
+    }
+
+    /// 放下 / 做完 / 放弃时自动整理这一段。fire-and-forget，不阻塞状态流转。
+    /// 现场那份快照是异步存的，这里刻意不等它——事实取自段上的上下文，
+    /// 同一批采集，不多绕一道。
+    private func scheduleEpisodeSummary(for episodeID: UUID) {
+        guard intelligencePreferences.autoSummarizeEpisodes else { return }
+        Task { [weak self] in
+            await self?.summarizeEpisode(episodeID)
+        }
     }
 
     /// 更新智能偏好。
@@ -2442,12 +2696,11 @@ final class AttentionWorkspace: ObservableObject {
 
     // MARK: - 一键重返
 
-    /// 执行现场恢复。只恢复用户选中的条目类别。
+    /// 执行现场恢复。只恢复用户选中的条目。
     /// 如果恢复来自等待结果（waitingID 非空），同时把等待标记为已解决、episode 恢复为 active。
     @discardableResult
     func restoreScene(
         _ snapshotID: UUID,
-        selectedKinds: Set<SceneItemKind>? = nil,
         selectedItemIDs: Set<UUID>? = nil,
         resolvingWaitingID: UUID? = nil,
         now: Date = Date()
@@ -2456,13 +2709,10 @@ final class AttentionWorkspace: ObservableObject {
             return ContextRestoreReport()
         }
         // 现场既已恢复，「已放下」确认卡的使命就结束了。
-        if recentSetAside?.snapshotID == snapshotID {
+        if let aside = recentSetAside, aside.targetID == sceneSnapshot.targetID {
             recentSetAside = nil
         }
         var items = sceneSnapshot.restorableItems
-        if let selectedKinds {
-            items = items.filter { selectedKinds.contains($0.kind) }
-        }
         // 「换一件事」现场页里逐条划掉的不开。
         if let selectedItemIDs {
             items = items.filter { selectedItemIDs.contains($0.id) }
@@ -2509,6 +2759,8 @@ final class AttentionWorkspace: ObservableObject {
             return false
         }
         let proposedEvents = events + newEvents
+        // 旧 snapshot 留一份给 note 用：新事件还没回放时才分得清「新建」和「改动」。
+        let priorSnapshot = snapshot
 
         do {
             try store.save(events: proposedEvents)
@@ -2516,6 +2768,14 @@ final class AttentionWorkspace: ObservableObject {
             events = persistedEvents
             snapshot = AttentionSnapshot.replay(persistedEvents)
             lastError = nil
+            let note = SnapshotNote.summarize(newEvents, before: priorSnapshot)
+            // 快照控制器监听这一通知去做去抖提交；这里只负责发出，不碰 git。
+            // note 是给这批事件的一句话（用旧 snapshot 解析名字：新事件还没回放）。
+            NotificationCenter.default.post(
+                name: .lightAnchorEventsChanged,
+                object: self,
+                userInfo: ["note": note]
+            )
             if newEvents.contains(where: { $0.kind == .episodeChanged }) {
                 syncClipboardHistory(now: newEvents.last?.occurredAt ?? Date())
             }

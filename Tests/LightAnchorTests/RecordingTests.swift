@@ -6,7 +6,7 @@ import XCTest
 final class RecordingTests: XCTestCase {
     // MARK: - 辅助
 
-    private func temporaryFileURL() -> URL {
+    private func temporaryEventsDirectoryURL() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("LightAnchorRecordingTests-\(UUID().uuidString).json")
     }
@@ -20,7 +20,7 @@ final class RecordingTests: XCTestCase {
         contextCapture: ((IntelligencePreferences, SceneCapturePreferences) -> ContextCapsule)? = nil
     ) -> AttentionWorkspace {
         AttentionWorkspace(
-            store: LocalEventStore(fileURL: temporaryFileURL()),
+            store: LocalEventStore(directoryURL: temporaryEventsDirectoryURL()),
             recordingTraceStore: RecordingTraceStore(directoryURL: temporaryDirectoryURL()),
             contextCapture: contextCapture ?? { _, _ in ContextCapsule() }
         )

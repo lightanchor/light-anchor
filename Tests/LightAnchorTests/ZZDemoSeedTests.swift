@@ -151,6 +151,8 @@ final class ZZDemoSeedTests: XCTestCase {
             name: "整理访谈材料",
             note: "先把三段录音的要点摘出来，再对照上周的提纲。"
         ))
+        // 押个期限：「现在」页那一行安静的到期小字要有东西可看。
+        _ = workspace.setTargetDueDate(interview.id, to: now.addingTimeInterval(28 * 60 * 60))
         // 步骤：一步已完成（有自己的段和计时）、一步还没动（换一件事的「步骤」组）。
         let stepDone = try XCTUnwrap(workspace.addStep(named: "摘录音 01 的要点", to: interview.id))
         let stepDoneEpisode = try XCTUnwrap(workspace.startEpisode(
@@ -158,6 +160,12 @@ final class ZZDemoSeedTests: XCTestCase {
         ))
         _ = workspace.endEpisode(stepDoneEpisode.id, now: now.addingTimeInterval(-70 * 60))
         _ = try XCTUnwrap(workspace.addStep(named: "对照上周提纲补缺口", to: interview.id))
+        // 更早的一段：昨天做过一阵并做完收束——「现在」页的「上一段 / 下一段」
+        // 和它自己那份总结、那份现场都要有东西可看。
+        let earlierEpisode = try XCTUnwrap(workspace.startEpisode(
+            targetID: interview.id, now: now.addingTimeInterval(-26 * 60 * 60)
+        ))
+        _ = workspace.endEpisode(earlierEpisode.id, now: now.addingTimeInterval(-25 * 60 * 60))
         let episode = try XCTUnwrap(workspace.startEpisode(
             targetID: interview.id, now: now.addingTimeInterval(-43 * 60)
         ))
@@ -180,8 +188,64 @@ final class ZZDemoSeedTests: XCTestCase {
             ClipboardHistoryEntry(at: now.addingTimeInterval(-2 * 60), text: "预算部分再核一遍", sourceApplication: "备忘录")
         ], for: episode.id)
 
+        // 手上这件也有一份现场：「现在」页第三节（东西在哪 + 当时的剪贴板）
+        // 要有东西可看。
+        scenes.append(SceneSnapshot(
+            targetID: interview.id,
+            episodeID: episode.id,
+            items: [
+                SceneItem(kind: .application, title: "Safari", address: "com.apple.Safari", sourceApplication: "Safari"),
+                SceneItem(kind: .application, title: "Figma", address: "com.figma.Desktop", sourceApplication: "Figma"),
+                SceneItem(kind: .application, title: "Messages", address: "com.apple.MobileSMS", sourceApplication: "Messages", isRelevant: false),
+                SceneItem(kind: .link, title: "访谈记录 · Notion", address: "https://example.com/interview-notes", sourceApplication: "Safari"),
+                SceneItem(kind: .file, title: "README.md", address: home + "/Developer/light-anchor/README.md", sourceApplication: "Visual Studio Code"),
+                SceneItem(kind: .file, title: "Package.swift", address: home + "/Developer/light-anchor/Package.swift", sourceApplication: "Visual Studio Code"),
+                SceneItem(kind: .terminal, title: "light-anchor", address: "file://" + home + "/Developer/light-anchor", sourceApplication: "终端", detail: "swift test")
+            ],
+            filterMode: .saveAll,
+            returnCue: "先核预算那段，再对第 4 题",
+            clipboardText: "预算部分再核一遍",
+            screenshotAssetURL: try? LocalAssetStore().save(data: Self.desktopShotPNG(), fileExtension: "png"),
+            capturedAt: now.addingTimeInterval(-2 * 60)
+        ))
+        // 更早那一段的现场与总结：总结挂在段上（episode.summary），
+        // 和现场是同一段的两面。
+        scenes.append(SceneSnapshot(
+            targetID: interview.id,
+            episodeID: earlierEpisode.id,
+            items: [
+                SceneItem(kind: .application, title: "Obsidian", address: "md.obsidian", sourceApplication: "Obsidian"),
+                SceneItem(kind: .file, title: "访谈提纲 v3.md", address: home + "/Developer/light-anchor/README.md", sourceApplication: "Obsidian")
+            ],
+            filterMode: .saveAll,
+            returnCue: "第 4 题问得太宽，下次拆成两问",
+            capturedAt: now.addingTimeInterval(-25 * 60 * 60)
+        ))
+
+        var extra: [AttentionEvent] = []
+        if var summarized = workspace.snapshot.episodes[earlierEpisode.id] {
+            summarized.summary = EpisodeSummary(
+                text: """
+                    ## 当时在干什么
+                    把访谈录音 01、02 的要点摘进 `访谈提纲 v3.md`，逐条对到上周的提纲上。\
+                    录音 03 只转写完、还没摘。
+
+                    ## 卡在哪
+                    第 4 题问得太宽，三位受访者答的不是一件事，摘不出可比的要点。
+                    """,
+                engineName: "gpt-5.6",
+                factCount: 23,
+                generatedAt: now.addingTimeInterval(-25 * 60 * 60)
+            )
+            extra.append(.episodeChanged(summarized, at: now.addingTimeInterval(-25 * 60 * 60)))
+        }
+
         // ---- 现场快照落盘（必须在所有 workspace 操作之后）----
-        try store.save(events: try store.load() + scenes.map { .sceneSnapshotChanged($0, at: $0.capturedAt) })
+        try store.save(
+            events: try store.load()
+                + extra
+                + scenes.map { .sceneSnapshotChanged($0, at: $0.capturedAt) }
+        )
     }
 
     /// 一张假桌面：深色底加两块亮窗，缩到 168×96 就是设计里那张缩略图的样子。

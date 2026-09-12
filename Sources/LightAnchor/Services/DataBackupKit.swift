@@ -209,15 +209,15 @@ struct LocalDataArchiveService: @unchecked Sendable {
         try validateContents(at: restoredRoot, relativePath: "", totalBytes: &extractedBytes)
         // 事件日志先在临时目录里解一遍：坏文件应当在这里被拒绝，而不是装进去之后
         // 让应用进入「读不了本地记录」的只读态。
-        let restoredEventsURL = restoredRoot.appendingPathComponent(
-            LightAnchorStorage.eventsURL().lastPathComponent
-        )
-        if fileManager.fileExists(atPath: restoredEventsURL.path) {
-            do {
-                _ = try LocalEventStore(fileURL: restoredEventsURL).load()
-            } catch {
-                throw LocalDataArchiveError.restoreFailed(error.localizedDescription)
-            }
+        do {
+            _ = try LocalEventStore(
+                directoryURL: restoredRoot.appendingPathComponent(
+                    LightAnchorStorage.eventsDirectoryURL().lastPathComponent,
+                    isDirectory: true
+                )
+            ).load()
+        } catch {
+            throw LocalDataArchiveError.restoreFailed(error.localizedDescription)
         }
         // 偏好快照是备份的一部分，缺了就不是我们打的包。取出来后就把文件拿掉：
         // 它不属于数据目录，装进去只会留个残留。

@@ -2,10 +2,11 @@ import SwiftUI
 
 /// The macOS workspace routes attention and operational tools through one
 /// split-view selection instead of duplicating the same tabs in every page.
+/// 没有「等待」这一格：等结果的事不住在单独一页，它就是稍后清单上
+/// 「等着别人」那一组——等待不是一个你要去看的地方，是一个到期会来找你的东西。
 enum WorkspaceDestination: String, CaseIterable, Identifiable, Hashable {
     case now
     case later
-    case waiting
     case environments
     case review
     case chat
@@ -16,7 +17,6 @@ enum WorkspaceDestination: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .now: tr("now")
         case .later: tr("later")
-        case .waiting: tr("waiting")
         case .environments: tr("environments")
         case .review: tr("review_2")
         case .chat: tr("chat")
@@ -27,7 +27,6 @@ enum WorkspaceDestination: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .now: ""
         case .later: tr("new_items_held_until_you_re")
-        case .waiting: tr("waiting_for_results")
         case .environments: tr("set_the_scene_up")
         case .review: tr("see_what_actually_worked")
         case .chat: tr("ask_your_memory")
@@ -36,7 +35,7 @@ enum WorkspaceDestination: String, CaseIterable, Identifiable, Hashable {
 
     var isAttention: Bool {
         switch self {
-        case .now, .later, .waiting: true
+        case .now, .later: true
         case .environments, .review, .chat: false
         }
     }
@@ -146,7 +145,6 @@ enum UserFacingCopy {
     static let finishWork = tr("finish_this")
     static let waitForResult = tr("wait_for_a_result")
     static let later = tr("later")
-    static let waiting = tr("waiting")
     static let settings = tr("settings")
     static let quit = tr("quit")
     static let save = tr("save")
@@ -158,7 +156,6 @@ enum UserFacingCopy {
     static let discard = tr("discard")
 
     static let noCurrentWorkMessage = tr("start_with_something_small_or_tuck")
-    static let noWaitingItems = tr("nothing_waiting_right_now")
 
     static func captureKind(_ kind: CaptureKind) -> String {
         switch kind {
@@ -170,27 +167,10 @@ enum UserFacingCopy {
         }
     }
 
-    static func waitingProgress(for waiting: WaitingItem) -> String {
-        if waiting.status == .ready {
-            return tr("ready_to_return")
-        }
-        guard let monitor = waiting.monitor else {
-            return tr("awaiting_your_confirmation")
-        }
-        if monitor.kind == .date, let date = monitor.date {
-            return String(
-                format: tr("reminder_at_time"),
-                date.formatted(date: .abbreviated, time: .shortened)
-            )
-        }
-        return tr("watching_automatically")
-    }
-
     static func waitingState(_ state: AttentionEpisodeState) -> String {
         switch state {
         case .active: tr("active")
         case .paused: tr("paused")
-        case .waiting: tr("waiting_2")
         case .returning: tr("ready_to_return_2")
         case .ended: tr("ended")
         }
@@ -239,6 +219,36 @@ enum UserFacingCopy {
             format: tr("waited_for"),
             String(format: tr("days_plain"), minutes / 1440)
         )
+    }
+
+    /// 期限的倒计时写法。这个软件里别的数字都在**往上加**（放下 3 天、已等 5 天、
+    /// 专注 47 分钟）——往上加的数字天生是死的，它只在描述过去。押了期限的要
+    /// **倒着走**：还有 2 天 → 就是今天 → 过期 1 天。倒着走的数字自己会喊人，
+    /// 扫一眼清单，哪条在逼你，不用读字就看得出来。
+    static func dueCountdown(_ countdown: DueCountdown) -> String {
+        if countdown.isToday { return tr("due_today") }
+        if countdown.isOverdue {
+            return String(
+                format: countdown.daysOverdue == 1 ? tr("due_overdue_one") : tr("due_overdue"),
+                countdown.daysOverdue
+            )
+        }
+        return String(
+            format: countdown.days == 1 ? tr("due_in_days_one") : tr("due_in_days"),
+            countdown.days
+        )
+    }
+
+    /// 期限那天的人话写法：今天/明天说名字，一周内说星期几，再远说日期。
+    /// 到期那句话里必须有日期——「已等 5 天」只是陈述过去，「周五要用」才逼人。
+    static func dueDayLabel(_ date: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
+        let days = DueCountdown(due: date, now: now).days
+        if days == 0 { return tr("due_day_today") }
+        if days == 1 { return tr("due_day_tomorrow") }
+        if (2...6).contains(days) {
+            return date.formatted(.dateTime.weekday(.wide))
+        }
+        return date.formatted(.dateTime.month(.abbreviated).day())
     }
 
     /// 「38 分钟前」式的相对时间（V7 元信息密度：分钟以下不显示秒）。
@@ -746,43 +756,27 @@ extension LightAnchorReadout where Trailing == EmptyView {
 }
 
 /// readout 右侧的「N 项」计数（数字文字蓝）。
+/// 「3 项」式的单值计数。原来还有一个「可返回 3 · 等结果中 2」的多段初始化器，
+/// 只有等待页在用；等待并进稍后之后那种读数没有了（分组自己报数）。
 struct LightAnchorReadoutCount: View {
-    let segments: [(value: Int, unit: String)]
-    /// true = 「3 项」式（数字在前，单值计数）；false = 「可返回 3」式（标签在前，多段）。
-    private let unitFollowsValue: Bool
+    let value: Int
+    let unit: String
 
     init(_ value: Int, unit: String? = nil) {
-        segments = [(value, unit ?? tr("unit_items"))]
-        unitFollowsValue = true
-    }
-
-    init(segments: [(value: Int, unit: String)]) {
-        self.segments = segments
-        unitFollowsValue = false
+        self.value = value
+        self.unit = unit ?? tr("unit_items")
     }
 
     var body: some View {
         HStack(spacing: 4) {
-            ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
-                if index > 0 {
-                    Text("·")
-                        .font(LightAnchorTheme.supportingFont(size: 12.5))
-                        .foregroundStyle(LightAnchorTheme.mutedInk)
-                }
-                if !segment.unit.isEmpty, !unitFollowsValue {
-                    Text(segment.unit)
-                        .font(LightAnchorTheme.supportingFont(size: 12.5))
-                        .foregroundStyle(LightAnchorTheme.mutedInk)
-                }
-                Text("\(segment.value)")
-                    .font(LightAnchorTheme.supportingFont(size: 12.5, weight: .semibold))
-                    .monospacedDigit()
-                    .foregroundStyle(LightAnchorTheme.accentInk)
-                if unitFollowsValue {
-                    Text(segment.unit)
-                        .font(LightAnchorTheme.supportingFont(size: 12.5))
-                        .foregroundStyle(LightAnchorTheme.mutedInk)
-                }
+            Text("\(value)")
+                .font(LightAnchorTheme.supportingFont(size: 12.5, weight: .semibold))
+                .monospacedDigit()
+                .foregroundStyle(LightAnchorTheme.accentInk)
+            if !unit.isEmpty {
+                Text(unit)
+                    .font(LightAnchorTheme.supportingFont(size: 12.5))
+                    .foregroundStyle(LightAnchorTheme.mutedInk)
             }
         }
     }
@@ -935,8 +929,8 @@ extension View {
 /// 侧栏导航图标：Lucide 细线单色。彩色家族已废弃——六个色各不相同太花，
 /// macOS 原生侧栏（Finder/Mail）也是单色，层级靠选中行的底色而不是靠图标变色。
 /// 颜色跟随 foregroundStyle，由调用方按选中态给（选中转正文墨、未选暖灰）。
-/// 六个字形都是正面平视、密度相近——等轴测的 3D 盒子（package/box/container）
-/// 混进来会散，别换。隐喻：对焦框=现在、工具箱=稍后、虚线圈=等待、
+/// 五个字形都是正面平视、密度相近——等轴测的 3D 盒子（package/box/container）
+/// 混进来会散，别换。隐喻：对焦框=现在、工具箱=稍后、
 /// 积木块=环境、倒转时钟=使用回顾、圆气泡=对话。
 struct LightAnchorDestinationIcon: View {
     let destination: WorkspaceDestination
@@ -961,7 +955,6 @@ struct LightAnchorDestinationIcon: View {
         switch destination {
         case .now: .focus
         case .later: .toolCase
-        case .waiting: .circleDashed
         case .environments: .blocks
         case .review: .rotateCcwClock
         case .chat: .messageCircle
@@ -1093,51 +1086,5 @@ struct LightAnchorSectionLabel: View {
             .font(LightAnchorTheme.interfaceFont(size: 12.5, weight: .medium))
             .foregroundStyle(LightAnchorTheme.faintInk)
             .padding(.leading, 2)
-    }
-}
-
-/// 样机 .grouphead：宜绿 / 暖黄组头（点 + 标题 + 小徽章）。
-struct LightAnchorGroupHead: View {
-    enum Role {
-        case ready
-        case waiting
-    }
-
-    let role: Role
-    let title: String
-    let badge: String
-
-    var body: some View {
-        HStack(spacing: 8) {
-            if role == .ready {
-                Circle()
-                    .fill(LightAnchorTheme.successBadge)
-                    .frame(width: 9, height: 9)
-            } else {
-                Circle()
-                    .stroke(
-                        LightAnchorTheme.warning,
-                        style: StrokeStyle(lineWidth: 2, dash: [2.4, 2.4])
-                    )
-                    .frame(width: 9, height: 9)
-            }
-            Text(title)
-                .font(LightAnchorTheme.supportingFont(size: 12.5, weight: .semibold))
-                .foregroundStyle(role == .ready ? LightAnchorTheme.success : LightAnchorTheme.warning)
-            Text(badge)
-                .font(LightAnchorTheme.labelFont(size: 10.5, weight: .semibold))
-                .foregroundStyle(role == .ready ? LightAnchorTheme.success : LightAnchorTheme.warning)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 1.5)
-                .background(
-                    role == .ready
-                        ? LightAnchorTheme.successBadge.opacity(0.14)
-                        : LightAnchorTheme.warningBackground,
-                    in: RoundedRectangle(cornerRadius: 7, style: .continuous)
-                )
-        }
-        .padding(.leading, 2)
-        .padding(.bottom, 8)
-        .accessibilityElement(children: .combine)
     }
 }

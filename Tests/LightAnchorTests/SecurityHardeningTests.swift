@@ -69,7 +69,7 @@ final class SecurityHardeningTests: XCTestCase {
     }
 
     func testReloadFromDiskQuarantinesWhenAskedTo() throws {
-        let fileURL = temporaryFileURL()
+        let fileURL = temporaryEventsDirectoryURL()
         let writer = makeWorkspace(fileURL: fileURL)
         let environment = try XCTUnwrap(
             writer.createEnvironment(
@@ -183,13 +183,13 @@ final class SecurityHardeningTests: XCTestCase {
 
     // MARK: - 辅助
 
-    private func temporaryFileURL() -> URL {
+    private func temporaryEventsDirectoryURL() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("LightAnchorSecurityTests-\(UUID().uuidString).json")
     }
 
     private func makeWorkspace(fileURL: URL? = nil) -> AttentionWorkspace {
-        AttentionWorkspace(store: LocalEventStore(fileURL: fileURL ?? temporaryFileURL()))
+        AttentionWorkspace(store: LocalEventStore(directoryURL: fileURL ?? temporaryEventsDirectoryURL()))
     }
 
     private func makeScratchDirectory() throws -> URL {

@@ -13,9 +13,11 @@ final class AttentionWorkspaceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
 
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        // 恢复前会校验事件日志能否解码，夹具用一份真实的空日志。
-        try LocalEventStore(fileURL: root.appendingPathComponent("events.json")).save(events: [])
-        let original = try Data(contentsOf: root.appendingPathComponent("events.json"))
+        // 恢复前会校验事件日志能否解码，夹具用一份真实的日志。
+        let store = LocalEventStore(directoryURL: root.appendingPathComponent("events", isDirectory: true))
+        let workspace = AttentionWorkspace(store: store)
+        XCTAssertNotNil(workspace.createTarget(name: "备份前就有的工作"))
+        let original = try store.load()
         try Data("runtime".utf8).write(to: root.appendingPathComponent("launch-marker.json"))
         try Data("lock".utf8).write(to: root.appendingPathComponent("writer.lock"))
 
@@ -25,20 +27,17 @@ final class AttentionWorkspaceTests: XCTestCase {
         addTeardownBlock { UserDefaults().removePersistentDomain(forName: defaultsName) }
         let service = LocalDataArchiveService(rootURL: root, defaults: defaults)
         try service.createArchive(at: archive)
-        try Data("changed".utf8).write(to: root.appendingPathComponent("events.json"))
+        XCTAssertNotNil(workspace.createTarget(name: "备份之后才加的工作"))
         try service.restoreArchive(from: archive)
 
-        XCTAssertEqual(
-            try Data(contentsOf: root.appendingPathComponent("events.json")),
-            original
-        )
+        XCTAssertEqual(try store.load(), original)
         XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("launch-marker.json").path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("writer.lock").path))
     }
 
     func testCaptureStaysInTheInboxAndSurvivesReload() throws {
-        let fileURL = temporaryFileURL()
-        let store = LocalEventStore(fileURL: fileURL)
+        let fileURL = temporaryEventsDirectoryURL()
+        let store = LocalEventStore(directoryURL: fileURL)
         let workspace = AttentionWorkspace(store: store)
 
         let capture = workspace.captureText(
@@ -55,7 +54,7 @@ final class AttentionWorkspaceTests: XCTestCase {
     }
 
     func testCaptureCanBecomeReferenceMaterialAndSurvivesReload() throws {
-        let store = LocalEventStore(fileURL: temporaryFileURL())
+        let store = LocalEventStore(directoryURL: temporaryEventsDirectoryURL())
         let workspace = AttentionWorkspace(store: store)
         let capture = try XCTUnwrap(workspace.captureText("以后查阅的资料"))
 
@@ -69,7 +68,7 @@ final class AttentionWorkspaceTests: XCTestCase {
     }
 
     func testCreatingTargetFromCaptureCommitsTargetEpisodeAndAttachmentTogether() throws {
-        let store = LocalEventStore(fileURL: temporaryFileURL())
+        let store = LocalEventStore(directoryURL: temporaryEventsDirectoryURL())
         let workspace = AttentionWorkspace(store: store)
         let capture = try XCTUnwrap(workspace.captureText("从这里开始整理"))
 
@@ -94,7 +93,7 @@ final class AttentionWorkspaceTests: XCTestCase {
     }
 
     func testTurningCaptureIntoWaitingArchivesItInTheSameCommit() throws {
-        let workspace = AttentionWorkspace(store: LocalEventStore(fileURL: temporaryFileURL()))
+        let workspace = AttentionWorkspace(store: LocalEventStore(directoryURL: temporaryEventsDirectoryURL()))
         let target = try XCTUnwrap(workspace.createTarget(name: "等待捕获"))
         let episode = try XCTUnwrap(workspace.startEpisode(targetID: target.id))
         let capture = try XCTUnwrap(workspace.captureText("等待外部结果"))
@@ -103,13 +102,13 @@ final class AttentionWorkspaceTests: XCTestCase {
             workspace.beginWaitingFromCapture(
                 capture.id,
                 episodeID: episode.id,
-                completionCondition: "导出文件出现",
-                restorePolicy: .nextTransition
+                completionCondition: "导出文件出现"
             )
         )
 
         XCTAssertEqual(workspace.snapshot.waitingItems[waiting.id]?.status, .waiting)
-        XCTAssertEqual(workspace.snapshot.episodes[episode.id]?.state, .waiting)
+        // 球交到别人手里 = 这件事被放下了，它离开「现在」页。
+        XCTAssertEqual(workspace.snapshot.episodes[episode.id]?.state, .paused)
         XCTAssertEqual(workspace.snapshot.captures[capture.id]?.status, .archived)
         XCTAssertTrue(workspace.snapshot.inbox.isEmpty)
     }
@@ -135,7 +134,7 @@ final class AttentionWorkspaceTests: XCTestCase {
         defaults.set(7.0, forKey: AttentionWorkspace.inboxAutoArchiveDaysKey)
 
         let now = Date(timeIntervalSince1970: 10_000)
-        let workspace = AttentionWorkspace(store: LocalEventStore(fileURL: temporaryFileURL()))
+        let workspace = AttentionWorkspace(store: LocalEventStore(directoryURL: temporaryEventsDirectoryURL()))
         let stale = try XCTUnwrap(
             workspace.captureText("过期捕获", now: now.addingTimeInterval(-8 * 24 * 60 * 60))
         )
@@ -154,7 +153,7 @@ final class AttentionWorkspaceTests: XCTestCase {
     }
 
     func testEpisodeLifecycleKeepsTheContextCapsule() throws {
-        let workspace = AttentionWorkspace(store: LocalEventStore(fileURL: temporaryFileURL()))
+        let workspace = AttentionWorkspace(store: LocalEventStore(directoryURL: temporaryEventsDirectoryURL()))
         let target = try XCTUnwrap(workspace.createTarget(name: "整理研究材料"))
         let context = ContextCapsule(
             applications: ["Xcode"],
@@ -183,22 +182,21 @@ final class AttentionWorkspaceTests: XCTestCase {
     }
 
     func testWaitingCompletesWithoutStealingTheCurrentEpisode() throws {
-        let workspace = AttentionWorkspace(store: LocalEventStore(fileURL: temporaryFileURL()))
+        let workspace = AttentionWorkspace(store: LocalEventStore(directoryURL: temporaryEventsDirectoryURL()))
         let target = try XCTUnwrap(workspace.createTarget(name: "等待构建结果"))
         let episode = try XCTUnwrap(workspace.startEpisode(targetID: target.id))
         let waiting = try XCTUnwrap(
             workspace.beginWaiting(
                 episodeID: episode.id,
                 description: "等待测试构建完成",
-                completionCondition: "进程退出且测试通过",
-                restorePolicy: .notify
+                completionCondition: "进程退出且测试通过"
             )
         )
 
-        XCTAssertEqual(workspace.snapshot.episodes[episode.id]?.state, .waiting)
+        XCTAssertEqual(workspace.snapshot.episodes[episode.id]?.state, .paused)
         XCTAssertTrue(workspace.completeWaiting(waiting.id, evidence: "测试进程已退出"))
         XCTAssertEqual(workspace.snapshot.waitingItems[waiting.id]?.status, .ready)
-        XCTAssertEqual(workspace.snapshot.episodes[episode.id]?.state, .waiting)
+        XCTAssertEqual(workspace.snapshot.episodes[episode.id]?.state, .paused)
 
         XCTAssertTrue(workspace.resumeWaitingEpisode(waiting.id))
         XCTAssertEqual(workspace.snapshot.waitingItems[waiting.id]?.status, .resolved)
@@ -206,23 +204,21 @@ final class AttentionWorkspaceTests: XCTestCase {
     }
 
     func testEndingATargetClosesTheWaitsItLeftBehind() throws {
-        let workspace = AttentionWorkspace(store: LocalEventStore(fileURL: temporaryFileURL()))
+        let workspace = AttentionWorkspace(store: LocalEventStore(directoryURL: temporaryEventsDirectoryURL()))
         let target = try XCTUnwrap(workspace.createTarget(name: "等待两个结果"))
         let episode = try XCTUnwrap(workspace.startEpisode(targetID: target.id))
         let stillWaiting = try XCTUnwrap(
             workspace.beginWaiting(
                 episodeID: episode.id,
                 description: "等待构建完成",
-                completionCondition: "",
-                restorePolicy: .notify
+                completionCondition: ""
             )
         )
         let alreadyReady = try XCTUnwrap(
             workspace.beginWaiting(
                 episodeID: episode.id,
                 description: "等待下载完成",
-                completionCondition: "",
-                restorePolicy: .notify
+                completionCondition: ""
             )
         )
         XCTAssertTrue(workspace.completeWaiting(alreadyReady.id, evidence: "文件已下载"))
@@ -236,15 +232,14 @@ final class AttentionWorkspaceTests: XCTestCase {
     }
 
     func testAbandoningATargetClosesTheWaitsItLeftBehind() throws {
-        let workspace = AttentionWorkspace(store: LocalEventStore(fileURL: temporaryFileURL()))
+        let workspace = AttentionWorkspace(store: LocalEventStore(directoryURL: temporaryEventsDirectoryURL()))
         let target = try XCTUnwrap(workspace.createTarget(name: "放弃这件事"))
         let episode = try XCTUnwrap(workspace.startEpisode(targetID: target.id))
         let waiting = try XCTUnwrap(
             workspace.beginWaiting(
                 episodeID: episode.id,
                 description: "等待回复",
-                completionCondition: "",
-                restorePolicy: .manual
+                completionCondition: ""
             )
         )
 
@@ -255,41 +250,42 @@ final class AttentionWorkspaceTests: XCTestCase {
     }
 
     func testUnreadableEventLogIsNotOverwrittenByLaterWrites() throws {
-        let fileURL = temporaryFileURL()
-        let workspace = AttentionWorkspace(store: LocalEventStore(fileURL: fileURL))
+        let directoryURL = temporaryEventsDirectoryURL()
+        let workspace = AttentionWorkspace(store: LocalEventStore(directoryURL: directoryURL))
         XCTAssertNotNil(workspace.createTarget(name: "已经保存的工作"))
 
-        let corrupted = "{ not a valid event document"
-        try Data(corrupted.utf8).write(to: fileURL)
-        let reopened = AttentionWorkspace(store: LocalEventStore(fileURL: fileURL))
+        // 事件目录里放一份坏记录：load 读到它就拒读，且不该被后续写回覆盖。
+        let corrupted = "{ not a valid event record"
+        let corruptURL = try writeCorruptRecord(in: directoryURL, content: corrupted)
+        let reopened = AttentionWorkspace(store: LocalEventStore(directoryURL: directoryURL))
         XCTAssertTrue(reopened.snapshot.targets.isEmpty)
         XCTAssertNotNil(reopened.lastError)
 
         XCTAssertNil(reopened.createTarget(name: "不应该写进去的工作"))
-        XCTAssertEqual(try String(contentsOf: fileURL, encoding: .utf8), corrupted)
+        XCTAssertEqual(try String(contentsOf: corruptURL, encoding: .utf8), corrupted)
     }
 
     func testDeletingCaptureIsRefusedAfterAFailedReload() throws {
-        let fileURL = temporaryFileURL()
-        let workspace = AttentionWorkspace(store: LocalEventStore(fileURL: fileURL))
+        let directoryURL = temporaryEventsDirectoryURL()
+        let workspace = AttentionWorkspace(store: LocalEventStore(directoryURL: directoryURL))
         let linkURL = try XCTUnwrap(URL(string: "https://example.com/article"))
         let capture = try XCTUnwrap(workspace.captureLink(linkURL, title: "一篇文章"))
 
         // A failed reload used to leave the previous snapshot in memory, and
         // deleting bypasses `commit`, so the next delete rewrote the file from
         // that stale history and destroyed whatever had just been restored.
-        let corrupted = "{ not a valid event document"
-        try Data(corrupted.utf8).write(to: fileURL)
+        let corrupted = "{ not a valid event record"
+        let corruptURL = try writeCorruptRecord(in: directoryURL, content: corrupted)
         XCTAssertFalse(workspace.reloadFromDisk())
 
         XCTAssertFalse(workspace.deleteCapture(capture.id))
-        XCTAssertEqual(try String(contentsOf: fileURL, encoding: .utf8), corrupted)
+        XCTAssertEqual(try String(contentsOf: corruptURL, encoding: .utf8), corrupted)
     }
 
     /// 完成手上这件后「现在」落到干净状态：放下的事不自动顶上来，
     /// 下一件由用户挑，不由它蹦（2026-08-24 结构重组定的语义）。
     func testEndingCurrentEpisodeLandsCleanInsteadOfPromotingPausedWork() throws {
-        let workspace = AttentionWorkspace(store: LocalEventStore(fileURL: temporaryFileURL()))
+        let workspace = AttentionWorkspace(store: LocalEventStore(directoryURL: temporaryEventsDirectoryURL()))
         let firstTarget = try XCTUnwrap(workspace.createTarget(name: "第一段工作"))
         let secondTarget = try XCTUnwrap(workspace.createTarget(name: "第二段工作"))
         let firstEpisode = try XCTUnwrap(
@@ -315,8 +311,8 @@ final class AttentionWorkspaceTests: XCTestCase {
     }
 
     func testReplayProducesTheSameProjectionAsTheLiveWorkspace() throws {
-        let fileURL = temporaryFileURL()
-        let store = LocalEventStore(fileURL: fileURL)
+        let fileURL = temporaryEventsDirectoryURL()
+        let store = LocalEventStore(directoryURL: fileURL)
         let workspace = AttentionWorkspace(store: store)
         let target = try XCTUnwrap(workspace.createTarget(name: "验证事件回放"))
         _ = workspace.startEpisode(targetID: target.id)
@@ -331,7 +327,7 @@ final class AttentionWorkspaceTests: XCTestCase {
             .appendingPathComponent("LightAnchorAssets")
             .appendingPathComponent(UUID().uuidString)
         let workspace = AttentionWorkspace(
-            store: LocalEventStore(fileURL: temporaryFileURL()),
+            store: LocalEventStore(directoryURL: temporaryEventsDirectoryURL()),
             assetStore: LocalAssetStore(directoryURL: assetDirectory)
         )
 
@@ -398,7 +394,7 @@ final class AttentionWorkspaceTests: XCTestCase {
     }
 
     func testEnvironmentCanBeUpdatedAndReplayed() throws {
-        let store = LocalEventStore(fileURL: temporaryFileURL())
+        let store = LocalEventStore(directoryURL: temporaryEventsDirectoryURL())
         let workspace = AttentionWorkspace(store: store)
         let environment = try XCTUnwrap(workspace.createEnvironment(
             name: "写作环境",
@@ -425,8 +421,8 @@ final class AttentionWorkspaceTests: XCTestCase {
     }
 
     func testContextEditsAndAbandonmentRemainReachableAndPersisted() throws {
-        let fileURL = temporaryFileURL()
-        let workspace = AttentionWorkspace(store: LocalEventStore(fileURL: fileURL))
+        let fileURL = temporaryEventsDirectoryURL()
+        let workspace = AttentionWorkspace(store: LocalEventStore(directoryURL: fileURL))
         let target = try XCTUnwrap(workspace.createTarget(name: "整理旧项目"))
         let episode = try XCTUnwrap(
             workspace.startEpisode(
@@ -452,29 +448,34 @@ final class AttentionWorkspaceTests: XCTestCase {
         XCTAssertEqual(workspace.snapshot.episodes[episode.id]?.state, .ended)
         XCTAssertEqual(workspace.snapshot.episodes[episode.id]?.endedReason, .abandoned)
 
-        let reloaded = AttentionWorkspace(store: LocalEventStore(fileURL: fileURL))
+        let reloaded = AttentionWorkspace(store: LocalEventStore(directoryURL: fileURL))
         XCTAssertEqual(reloaded.snapshot.episodes[episode.id]?.endedReason, .abandoned)
         XCTAssertEqual(reloaded.snapshot.episodes[episode.id]?.context.note, "改过的上下文备注")
     }
 
-    func testRepeatedMaintenanceDoesNotRestartAnActiveWaitingMonitor() async throws {
-        let workspace = AttentionWorkspace(store: LocalEventStore(fileURL: temporaryFileURL()))
+    /// 期限到了，软件催你一次，**但绝不替你宣布结果到了**——它看不见你的邮箱。
+    /// 反复跑维护循环也只催一次：一件事到期只说一次，不累积愧疚。
+    func testDueDateNudgesOnceAndNeverDeclaresTheResultArrived() async throws {
+        let workspace = AttentionWorkspace(store: LocalEventStore(directoryURL: temporaryEventsDirectoryURL()))
         let target = try XCTUnwrap(workspace.createTarget(name: "持续等待"))
         let episode = try XCTUnwrap(workspace.startEpisode(targetID: target.id))
         let waiting = try XCTUnwrap(
             workspace.beginWaiting(
                 episodeID: episode.id,
                 description: "等待长任务",
-                monitor: WaitingMonitorConfiguration(kind: .date, date: Date().addingTimeInterval(1))
+                dueAt: Date().addingTimeInterval(-60)
             )
         )
 
-        for _ in 0..<15 {
+        for _ in 0..<5 {
             workspace.startActiveWaitingMonitors()
-            try await Task.sleep(for: .milliseconds(100))
+            try await Task.sleep(for: .milliseconds(20))
         }
 
-        XCTAssertEqual(workspace.snapshot.waitingItems[waiting.id]?.status, .ready)
+        let stored = try XCTUnwrap(workspace.snapshot.waitingItems[waiting.id])
+        XCTAssertEqual(stored.status, .waiting, "到期只是催你，结果到没到只有你知道")
+        XCTAssertNotNil(stored.nudgedAt)
+        XCTAssertFalse(stored.needsNudge(), "催过就不再催")
     }
 
     func testEnvironmentCommandRunsOffTheSynchronousPath() async throws {
@@ -503,21 +504,20 @@ final class AttentionWorkspaceTests: XCTestCase {
     /// 收件箱是同一用户下任何进程都能追加的文件。一条坏行只丢那一条：
     /// 让整条通道失效会顺带取消用户正在等的下载/导出，代价比丢一条事件大得多。
 
-    func testDateWaitingConfigurationSurvivesWorkspaceReload() throws {
-        let store = LocalEventStore(fileURL: temporaryFileURL())
+    func testWaitingDeadlineSurvivesWorkspaceReload() throws {
+        let store = LocalEventStore(directoryURL: temporaryEventsDirectoryURL())
         let workspace = AttentionWorkspace(store: store)
-        let target = try XCTUnwrap(workspace.createTarget(name: "定时等待"))
+        let target = try XCTUnwrap(workspace.createTarget(name: "押了期限的等待"))
         let episode = try XCTUnwrap(workspace.startEpisode(targetID: target.id))
         let date = Date(timeIntervalSinceReferenceDate: 800_000_000)
         let waiting = try XCTUnwrap(workspace.beginWaiting(
             episodeID: episode.id,
-            description: "等到明天再看",
-            monitor: WaitingMonitorConfiguration(kind: .date, date: date)
+            description: "周五之前必须拿到",
+            dueAt: date
         ))
 
         let reloaded = AttentionWorkspace(store: store)
-        XCTAssertEqual(reloaded.snapshot.waitingItems[waiting.id]?.monitor?.kind, .date)
-        XCTAssertEqual(reloaded.snapshot.waitingItems[waiting.id]?.monitor?.date, date)
+        XCTAssertEqual(reloaded.snapshot.waitingItems[waiting.id]?.dueAt, date)
     }
 
     func testReleaseBoundariesRejectUnsafeOrInvalidInputs() throws {
@@ -526,7 +526,6 @@ final class AttentionWorkspaceTests: XCTestCase {
             product: "LightAnchor",
             version: "1.2.0",
             build: "12",
-            eventSchemaVersion: LightAnchorSchema.eventDocumentVersion,
             binarySHA256: String(repeating: "a", count: 64),
             artifact: ReleaseArtifact(
                 filename: "LightAnchor-1.2.0-12-macos.zip",
@@ -540,6 +539,8 @@ final class AttentionWorkspaceTests: XCTestCase {
             signature: nil
         )
         let data = try JSONEncoder().encode(manifest)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertNil(object["eventSchemaVersion"])
         XCTAssertEqual(try ReleaseManifestVerifier().decode(data), manifest)
         let client = ReleaseUpdateClient()
         XCTAssertTrue(client.isNewer(manifest, thanVersion: "1.1.0", build: "99"))
@@ -547,7 +548,7 @@ final class AttentionWorkspaceTests: XCTestCase {
     }
 
     func testReleaseUpdateCheckerReadsCurrentBundleVersionAndBuild() throws {
-        let directory = temporaryFileURL().deletingLastPathComponent()
+        let directory = temporaryEventsDirectoryURL().deletingLastPathComponent()
             .appendingPathComponent("release-checker-bundle-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -631,7 +632,7 @@ final class AttentionWorkspaceTests: XCTestCase {
     }
 
     func testConfiguredDataRootMapsEveryDefaultLocalStore() throws {
-        let root = temporaryFileURL().deletingLastPathComponent()
+        let root = temporaryEventsDirectoryURL().deletingLastPathComponent()
         var environment = ProcessInfo.processInfo.environment
         environment[LightAnchorStorage.dataRootEnvironmentKey] = root.path
 
@@ -641,8 +642,8 @@ final class AttentionWorkspaceTests: XCTestCase {
         )
         let configuredRoot = LightAnchorStorage.rootURL(environment: environment)
         XCTAssertEqual(
-            configuredRoot.appendingPathComponent("events.json"),
-            root.appendingPathComponent("events.json")
+            configuredRoot.appendingPathComponent("events", isDirectory: true),
+            root.appendingPathComponent("events", isDirectory: true)
         )
         XCTAssertEqual(
             configuredRoot.appendingPathComponent("assets", isDirectory: true),
@@ -663,7 +664,7 @@ final class AttentionWorkspaceTests: XCTestCase {
     }
 
     func testLifecycleTrackerReportsPreviousUncleanRunAndCleansMarker() throws {
-        let directory = temporaryFileURL().deletingLastPathComponent()
+        let directory = temporaryEventsDirectoryURL().deletingLastPathComponent()
         let markerURL = directory.appendingPathComponent("launch-marker.json")
         let diagnosticsURL = directory.appendingPathComponent("diagnostics.log")
         let diagnostics = LocalDiagnostics(fileURL: diagnosticsURL)
@@ -703,16 +704,16 @@ final class AttentionWorkspaceTests: XCTestCase {
         XCTAssertTrue(schedule.shouldCheck(now: now))
         XCTAssertFalse(schedule.shouldCheck(now: now.addingTimeInterval(-60)))
 
-        let diagnosticsURL = temporaryFileURL()
+        let diagnosticsURL = temporaryEventsDirectoryURL()
         let diagnostics = LocalDiagnostics(fileURL: diagnosticsURL)
         diagnostics.record(
             operation: "test",
             message: "路径：\(NSHomeDirectory())/private-value Authorization: Bearer live-token https://example.com/path?access_token=secret#fragment xoxb-123"
         )
-        let bundle = try JSONDecoder().decode(
-            DiagnosticBundle.self,
-            from: diagnostics.exportData()
-        )
+        let exportedData = try diagnostics.exportData()
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: exportedData) as? [String: Any])
+        XCTAssertNil(object["eventSchemaVersion"])
+        let bundle = try JSONDecoder().decode(DiagnosticBundle.self, from: exportedData)
         XCTAssertEqual(bundle.events.count, 1)
         XCTAssertFalse(bundle.events[0].message.contains(NSHomeDirectory()))
         XCTAssertTrue(bundle.events[0].message.contains("<HOME>"))
@@ -722,11 +723,24 @@ final class AttentionWorkspaceTests: XCTestCase {
         XCTAssertTrue(bundle.events[0].message.contains("https://example.com/path"))
     }
 
-    private func temporaryFileURL() -> URL {
+    private func temporaryEventsDirectoryURL() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("LightAnchorTests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString)
-            .appendingPathComponent("events.json")
+            .appendingPathComponent("events", isDirectory: true)
+    }
+
+    /// 往事件目录里放一份坏记录，返回其 URL 供断言改动与否。
+    private func writeCorruptRecord(in directory: URL, content: String) throws -> URL {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.dateFormat = "yyyy-MM-dd"
+        let day = directory.appendingPathComponent(formatter.string(from: Date()), isDirectory: true)
+        try FileManager.default.createDirectory(at: day, withIntermediateDirectories: true)
+        let url = day.appendingPathComponent("00000000-00000000-00000000-00000000.json")
+        try Data(content.utf8).write(to: url)
+        return url
     }
 }
 
@@ -756,7 +770,7 @@ final class EpisodeFocusDurationTests: XCTestCase {
             // 10 分钟后暂停，暂停 20 分钟，再恢复 5 分钟后放下等待。
             .episodeChanged(episode(base, state: .paused, at: start.addingTimeInterval(600)), at: start.addingTimeInterval(600)),
             .episodeChanged(episode(base, state: .active, at: start.addingTimeInterval(1800)), at: start.addingTimeInterval(1800)),
-            .episodeChanged(episode(base, state: .waiting, at: start.addingTimeInterval(2100)), at: start.addingTimeInterval(2100))
+            .episodeChanged(episode(base, state: .paused, at: start.addingTimeInterval(2100)), at: start.addingTimeInterval(2100))
         ]
         let snapshot = AttentionSnapshot.replay(events)
 
@@ -795,7 +809,7 @@ final class EpisodeFocusDurationTests: XCTestCase {
 // MARK: - 捕获标签
 
 final class CaptureTagTests: XCTestCase {
-    private func temporaryFileURL() -> URL {
+    private func temporaryEventsDirectoryURL() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("capture-tags-\(UUID().uuidString).json")
     }
@@ -809,7 +823,7 @@ final class CaptureTagTests: XCTestCase {
 
     @MainActor
     func testSetCaptureTagsPersistsAndAggregates() throws {
-        let store = LocalEventStore(fileURL: temporaryFileURL())
+        let store = LocalEventStore(directoryURL: temporaryEventsDirectoryURL())
         let workspace = AttentionWorkspace(store: store)
         let first = try XCTUnwrap(workspace.captureText("整理接口文档"))
         let second = try XCTUnwrap(workspace.captureText("给周报配图"))

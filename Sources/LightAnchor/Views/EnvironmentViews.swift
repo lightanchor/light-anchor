@@ -75,6 +75,16 @@ struct EnvironmentProfilesView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .foregroundStyle(LightAnchorTheme.ink)
+        #if DEBUG
+        // 调试后门：LIGHTANCHOR_DEBUG_OPEN=new-environment 直接摆出新环境那张卡（截图用）。
+        .onAppear {
+            if ProcessInfo.processInfo.environment["LIGHTANCHOR_DEBUG_OPEN"] == "new-environment" {
+                editingProfile = nil
+                snapshotDraft = nil
+                showingEditor = true
+            }
+        }
+        #endif
         .sheet(isPresented: $showingEditor) {
             EnvironmentEditorView(
                 profile: editingProfile,

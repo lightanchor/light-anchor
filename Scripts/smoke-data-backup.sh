@@ -13,7 +13,7 @@ RESTORED_FILE="$DATA_ROOT/events.json"
 trap 'rm -rf "$SMOKE_DIR"' EXIT
 
 mkdir -p "$DATA_ROOT/assets/nested"
-print -r -- '{"schemaVersion":2,"events":[{"id":"backup-smoke"}]}' > "$DATA_ROOT/events.json"
+print -r -- '{"events":[{"id":"backup-smoke"}]}' > "$DATA_ROOT/events.json"
 print -r -- 'attachment bytes' > "$DATA_ROOT/assets/nested/attachment.txt"
 print -r -- 'should not be archived' > "$DATA_ROOT/launch-marker.json"
 print -r -- 'should not be archived' > "$DATA_ROOT/events.json.lock"
@@ -29,7 +29,7 @@ rg -n '^manifest\.json$|^data/events\.json$|^data/assets/nested/attachment\.txt$
 
 mkdir -p "$SMOKE_DIR/tampered"
 tar -xzf "$BACKUP" -C "$SMOKE_DIR/tampered"
-print -r -- '{"schemaVersion":2,"events":[{"id":"tampered"}]}' \
+print -r -- '{"events":[{"id":"tampered"}]}' \
     > "$SMOKE_DIR/tampered/data/events.json"
 tar -C "$SMOKE_DIR/tampered" -czf "$TAMPERED_BACKUP" manifest.json data
 if "$SCRIPT_DIR/restore-data.sh" --backup "$TAMPERED_BACKUP" --verify >/dev/null 2>&1; then
@@ -37,7 +37,7 @@ if "$SCRIPT_DIR/restore-data.sh" --backup "$TAMPERED_BACKUP" --verify >/dev/null
     exit 1
 fi
 
-print -r -- '{"schemaVersion":2,"events":[{"id":"old-data"}]}' > "$RESTORED_FILE"
+print -r -- '{"events":[{"id":"old-data"}]}' > "$RESTORED_FILE"
 if LIGHTANCHOR_DATA_ROOT="$DATA_ROOT" \
     "$SCRIPT_DIR/restore-data.sh" --backup "$BACKUP" >/dev/null 2>&1; then
     print -u2 -- "restore unexpectedly succeeded without --replace"

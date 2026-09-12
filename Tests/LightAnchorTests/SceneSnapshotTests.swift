@@ -7,13 +7,13 @@ final class SceneSnapshotTests: XCTestCase {
 
     // MARK: - 辅助
 
-    private func temporaryFileURL() -> URL {
+    private func temporaryEventsDirectoryURL() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("LightAnchorSceneTests-\(UUID().uuidString).json")
     }
 
     private func makeWorkspace() -> AttentionWorkspace {
-        AttentionWorkspace(store: LocalEventStore(fileURL: temporaryFileURL()))
+        AttentionWorkspace(store: LocalEventStore(directoryURL: temporaryEventsDirectoryURL()))
     }
 
     /// 生产里现场快照只由异步的 SceneSnapshotBuilder 从实时采集产出；
@@ -78,8 +78,8 @@ final class SceneSnapshotTests: XCTestCase {
     // MARK: - 事件流
 
     func testSceneSnapshotEventRoundTripsThroughStore() throws {
-        let fileURL = temporaryFileURL()
-        let store = LocalEventStore(fileURL: fileURL)
+        let fileURL = temporaryEventsDirectoryURL()
+        let store = LocalEventStore(directoryURL: fileURL)
         let workspace = AttentionWorkspace(store: store)
 
         let target = workspace.createTarget(name: "写方案")
@@ -102,7 +102,7 @@ final class SceneSnapshotTests: XCTestCase {
     }
 
     func testLatestSceneSnapshotPicksNewestPerTarget() throws {
-        let store = LocalEventStore(fileURL: temporaryFileURL())
+        let store = LocalEventStore(directoryURL: temporaryEventsDirectoryURL())
         let workspace = AttentionWorkspace(store: store)
         let targetA = try XCTUnwrap(workspace.createTarget(name: "目标 A"))
         let targetB = try XCTUnwrap(workspace.createTarget(name: "目标 B"))
@@ -118,8 +118,8 @@ final class SceneSnapshotTests: XCTestCase {
     }
 
     func testUpdateSceneFilterModePersistsPerTarget() {
-        let fileURL = temporaryFileURL()
-        let store = LocalEventStore(fileURL: fileURL)
+        let fileURL = temporaryEventsDirectoryURL()
+        let store = LocalEventStore(directoryURL: fileURL)
         let workspace = AttentionWorkspace(store: store)
         guard let target = workspace.createTarget(name: "写作") else {
             XCTFail("目标创建失败")
@@ -133,7 +133,7 @@ final class SceneSnapshotTests: XCTestCase {
     }
 
     func testToggleSceneItemRelevanceMarksManualSource() throws {
-        let store = LocalEventStore(fileURL: temporaryFileURL())
+        let store = LocalEventStore(directoryURL: temporaryEventsDirectoryURL())
         let item = SceneItem(kind: .application, title: "Music", address: "com.apple.Music", isRelevant: false)
         let snapshot = SceneSnapshot(items: [item], filterMode: .aiFiltered)
         try seed([snapshot], into: store)
@@ -146,7 +146,7 @@ final class SceneSnapshotTests: XCTestCase {
     }
 
     func testUpdateSceneReturnCue() throws {
-        let store = LocalEventStore(fileURL: temporaryFileURL())
+        let store = LocalEventStore(directoryURL: temporaryEventsDirectoryURL())
         let snapshot = SceneSnapshot(items: [], returnCue: "旧线索")
         try seed([snapshot], into: store)
         let workspace = AttentionWorkspace(store: store)
@@ -221,7 +221,7 @@ final class SceneSnapshotTests: XCTestCase {
         )
         let boundaryTime = Date(timeIntervalSince1970: 1_700_000_000)
         let workspace = AttentionWorkspace(
-            store: LocalEventStore(fileURL: temporaryFileURL()),
+            store: LocalEventStore(directoryURL: temporaryEventsDirectoryURL()),
             sceneCapturePreferences: SceneCapturePreferences(),
             contextCapture: { _, _ in boundaryCapsule }
         )
@@ -255,7 +255,7 @@ final class SceneSnapshotTests: XCTestCase {
         let existing = ContextCapsule(applications: ["Existing Editor"])
         let observed = ContextCapsule(applications: ["Should Not Be Stored"])
         let workspace = AttentionWorkspace(
-            store: LocalEventStore(fileURL: temporaryFileURL()),
+            store: LocalEventStore(directoryURL: temporaryEventsDirectoryURL()),
             sceneCapturePreferences: SceneCapturePreferences(isAutomaticCapturePaused: true),
             contextCapture: { _, _ in observed }
         )
@@ -274,8 +274,8 @@ final class SceneSnapshotTests: XCTestCase {
     }
 
     func testClearSceneHistoryScrubsFactsButKeepsFocusAndWaitingState() throws {
-        let fileURL = temporaryFileURL()
-        let store = LocalEventStore(fileURL: fileURL)
+        let fileURL = temporaryEventsDirectoryURL()
+        let store = LocalEventStore(directoryURL: fileURL)
         let startedAt = Date(timeIntervalSince1970: 1_700_000_000)
         let context = ContextCapsule(
             applications: ["Xcode"],

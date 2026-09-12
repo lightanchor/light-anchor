@@ -251,15 +251,12 @@ popd >/dev/null
 SHA256=$(shasum -a 256 "$APP/Contents/MacOS/$PRODUCT" | awk '{print $1}')
 ARCHIVE_SHA256=$(shasum -a 256 "$ARCHIVE" | awk '{print $1}')
 ARCHIVE_SIZE=$(stat -f%z "$ARCHIVE")
-EVENT_SCHEMA=$(sed -n 's/.*eventDocumentVersion = \([0-9][0-9]*\).*/\1/p' \
-    "$ROOT_DIR/Sources/LightAnchor/Domain/Schema.swift")
 MANIFEST_SCHEMA=$(sed -n 's/.*releaseManifestVersion = \([0-9][0-9]*\).*/\1/p' \
     "$ROOT_DIR/Sources/LightAnchor/Domain/Schema.swift")
 # An empty scrape leaves `sed` exiting 0, which would emit a manifest with a
 # blank value and then sign the broken JSON.
-if [[ ! "$EVENT_SCHEMA" =~ ^[0-9]+$ ]] ||
-   [[ ! "$MANIFEST_SCHEMA" =~ ^[0-9]+$ ]]; then
-    printf '%s\n' "Could not read schema versions from Schema.swift." >&2
+if [[ ! "$MANIFEST_SCHEMA" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "Could not read release manifest version from Schema.swift." >&2
     exit 1
 fi
 MANIFEST="$DIST_DIR/$PRODUCT-release-manifest.json"
@@ -284,7 +281,6 @@ jq -n \
     --arg product "$PRODUCT" \
     --arg version "$VERSION" \
     --arg build "$BUILD_NUMBER" \
-    --argjson eventSchemaVersion "$EVENT_SCHEMA" \
     --arg binarySHA256 "$SHA256" \
     --arg artifactFilename "$ARCHIVE_NAME" \
     --arg artifactURL "$ARTIFACT_URL" \
@@ -299,7 +295,6 @@ jq -n \
         product: $product,
         version: $version,
         build: $build,
-        eventSchemaVersion: $eventSchemaVersion,
         binarySHA256: $binarySHA256,
         artifact: {
             filename: $artifactFilename,

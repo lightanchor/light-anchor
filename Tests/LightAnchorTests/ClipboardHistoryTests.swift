@@ -44,7 +44,7 @@ final class ClipboardHistoryTests: XCTestCase {
         super.tearDown()
     }
 
-    private func temporaryFileURL() -> URL {
+    private func temporaryEventsDirectoryURL() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("LightAnchorClipboardTests-\(UUID().uuidString).json")
     }
@@ -61,7 +61,7 @@ final class ClipboardHistoryTests: XCTestCase {
         saveClipboardContent: Bool = true
     ) -> AttentionWorkspace {
         let workspace = AttentionWorkspace(
-            store: LocalEventStore(fileURL: storeURL ?? temporaryFileURL()),
+            store: LocalEventStore(directoryURL: storeURL ?? temporaryEventsDirectoryURL()),
             sceneCapturePreferences: SceneCapturePreferences(),
             recordingTraceStore: RecordingTraceStore(directoryURL: temporaryDirectoryURL()),
             clipboardHistoryStore: ClipboardHistoryStore(directoryURL: historyDirectory ?? temporaryDirectoryURL()),
@@ -351,7 +351,7 @@ final class ClipboardHistoryTests: XCTestCase {
 
     func testHistorySurvivesRelaunchAndContinuesFollowingTheActiveEpisode() throws {
         let clipboard = FakeClipboard()
-        let storeURL = temporaryFileURL()
+        let storeURL = temporaryEventsDirectoryURL()
         let historyDirectory = temporaryDirectoryURL()
         let workspace = makeWorkspace(clipboard: clipboard, storeURL: storeURL, historyDirectory: historyDirectory)
         let target = try XCTUnwrap(workspace.createTarget(name: "修签名校验"))
@@ -377,7 +377,7 @@ final class ClipboardHistoryTests: XCTestCase {
             isDirectory: true
         )
         let workspace = AttentionWorkspace(
-            store: LocalEventStore(fileURL: root.appendingPathComponent("events.json")),
+            store: LocalEventStore(directoryURL: root.appendingPathComponent("events", isDirectory: true)),
             assetStore: LocalAssetStore(directoryURL: root.appendingPathComponent("assets", isDirectory: true)),
             sceneCapturePreferences: SceneCapturePreferences(),
             recordingTraceStore: RecordingTraceStore(directoryURL: root.appendingPathComponent("recordings", isDirectory: true)),

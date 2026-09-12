@@ -64,7 +64,7 @@ final class BlueDotAuditTests: XCTestCase {
     func testCurrentWorkDetailsAreReachableFromInspector() throws {
         let source = try mainWorkspaceSource()
         let rail = try XCTUnwrap(
-            source.slice(from: "private struct WorkspaceContextRail", to: "private struct NowSpaceView")
+            source.slice(from: "private struct WorkspaceContextRail", to: "struct LightAnchorDockHead")
         )
 
         XCTAssertTrue(rail.contains("WorkDetailsView(target: target, episode: episode"))
@@ -76,7 +76,7 @@ final class BlueDotAuditTests: XCTestCase {
     func testSearchRoutesToDestinationScopeAndInspector() throws {
         let source = try mainWorkspaceSource()
         let route = try XCTUnwrap(
-            source.slice(from: "private func routeSearchResult", to: "private func restoreCurrentContext")
+            source.slice(from: "private func routeSearchResult", to: "private func restoreWaitingContext")
         )
 
         XCTAssertTrue(route.contains("selectedSearchResult = result"))
@@ -94,62 +94,184 @@ final class BlueDotAuditTests: XCTestCase {
         XCTAssertFalse(source.contains(".searchable(text:"), "搜索是居中浮层，不是导航栏搜索框")
     }
 
-    func testWaitingPageOwnsASingleManualWaitingEntryPoint() throws {
+    /// 「等待结果」只有一个入口：现在页那条动作条。等待页连同它自己那颗
+    /// 「添加一个等待」一起没了——同一个动作两处入口，用户学两遍。
+    func testManualWaitingHasASingleEntryPoint() throws {
         let source = try mainWorkspaceSource()
-        XCTAssertEqual(try matches(of: #"Button\(tr\("add_a_wait"\)\)"#, in: source), 1)
+        // 入口住在「现在」页那条浮岛动作条上（NowPageView），别处一处也没有。
+        let nowPage = try self.source(at: "Sources/LightAnchor/Views/NowPageView.swift")
+        XCTAssertEqual(
+            try matches(of: #"UserFacingCopy\.waitForResult"#, in: nowPage), 1
+        )
+        // 那颗按钮不许在别处再长一遍（清理台里那个只是行动名，不是入口）。
+        XCTAssertEqual(
+            try matches(of: #"Button\(UserFacingCopy\.waitForResult"#, in: source), 0
+        )
+        XCTAssertFalse(source.contains(#"tr("add_a_wait")"#), "等待页那颗入口应随页面一起删掉")
+        XCTAssertFalse(source.contains("WaitingSpaceView"), "等待不再是一个页面")
     }
 
-    func testWaitingWorkspaceGroupsReadyAndInProgressItems() throws {
-        let source = try mainWorkspaceSource()
-        let waiting = try XCTUnwrap(
-            source.slice(from: "private struct WaitingSpaceView", to: "private struct WaitingRow")
-        )
-
-        XCTAssertTrue(waiting.contains("readyWaitingItems"))
-        XCTAssertTrue(waiting.contains("$0.status == .waiting"))
-        XCTAssertTrue(waiting.contains(#"tr("ready_to_return")"#))
-        XCTAssertTrue(waiting.contains(#"tr("waiting_for_result")"#))
-        // 等待页不许再用「暂时放下」介绍自己：那是稍后页的语义，两处同名
-        // 就等于把等待并进了稍后。
+    /// 等待不再是一个去处：清单只有一张，分组问的是「下一步在谁手里」。
+    func testWaitingIsNotADestinationOfItsOwn() throws {
         XCTAssertFalse(
-            waiting.contains(#"tr("set_aside")"#),
-            "等待页借用了稍后的名字，两页会变成同一页"
+            WorkspaceDestination.allCases.contains { $0.rawValue == "waiting" },
+            "等待不该再占一个顶层导航项"
         )
-        XCTAssertFalse(waiting.contains(#"tr("things_set_aside_ready_when_you")"#))
+        XCTAssertEqual(
+            WorkspaceDestination.allCases.map(\.rawValue),
+            ["now", "later", "environments", "review", "chat"]
+        )
     }
 
-    /// 「暂时放下」只属于稍后页那一组：用户自己搁下的、没人替他推进的事。
-    func testSetAsideNamesOnlyTheUserHeldGroup() throws {
+    /// 稍后页按归属分两组，且「等着别人」默认收着——你扫这张清单是为了
+    /// 挑一件事做，今天挑不了的那几条不该占视线。
+    func testLaterPageGroupsByWhoseCourtTheBallIsIn() throws {
         let source = try mainWorkspaceSource()
         let later = try XCTUnwrap(
-            source.slice(from: "private var setAsideSection", to: "private var setAsideEntries")
+            source.slice(from: "private struct LaterSpaceView", to: "private struct LaterCaptureList")
         )
-        XCTAssertTrue(later.contains(#"tr("set_aside")"#))
-        XCTAssertTrue(later.contains(#"tr("you_set_these_aside_yourself_come")"#))
+
+        // 分组口径走同一份投影，不在视图里重算过滤条件。
+        XCTAssertTrue(later.contains("workspace.snapshot.laterList"))
+        XCTAssertTrue(later.contains("laterList.actionable"))
+        XCTAssertTrue(later.contains("laterList.blocked"))
+        XCTAssertTrue(later.contains(#"tr("later_group_actionable")"#))
+        XCTAssertTrue(later.contains(#"tr("later_blocked_summary")"#))
+        // 默认收着。
+        XCTAssertTrue(later.contains("@State private var blockedExpanded = false"))
+        // 折起来那行的尾巴要报最久的一条，收着也知道里面有没有火。
+        XCTAssertTrue(later.contains("laterList.blockedLead"))
+        // 「结果到了」不单开一组，它是「可以动」里的一个标记。
+        XCTAssertTrue(later.contains(#"tr("later_result_arrived")"#))
     }
 
-    /// 「换一件事」有且只有一个入口，三条来源都在它里面：接着做放下的事、
-    /// 从稍后拿一条、新开一件。在这之前这三条散在三个页面，而有当前工作时
-    /// 现在页根本没有切换按钮。
-    func testSwitchingWorkHasOneEntryCoveringAllThreeSources() throws {
+    /// 「你自己搁下的」这句只属于「可以动」那一组：它就是和「等着别人」的分界线。
+    func testActionableGroupNamesTheUserHeldSide() throws {
+        let source = try mainWorkspaceSource()
+        let group = try XCTUnwrap(
+            source.slice(from: "private var actionableSection", to: "private func actionableRow")
+        )
+        XCTAssertTrue(group.contains(#"tr("later_group_actionable")"#))
+        XCTAssertTrue(group.contains(#"tr("you_set_these_aside_yourself_come")"#))
+    }
+
+    /// 「换一件事」是**挑一件已有的**：接着做放下的事、从稍后拿一条、
+    /// 或者把打好的名字交出去新开一件。它自己不建目标——凭空立一件事要交代的
+    /// 期限和开工环境，这个面板问不了（它的右区是给交接用的，新事没有现场可交接）。
+    func testSwitchingWorkPicksFromWhatExistsAndHandsOffNewOnes() throws {
         let panel = try source(at: "Sources/LightAnchor/Views/SwitchWorkPanel.swift")
         XCTAssertTrue(panel.contains("setAsideEpisodes"), "接着做：放下的未完成事")
         XCTAssertTrue(panel.contains("snapshot.inbox"), "从稍后拿一条")
-        XCTAssertTrue(panel.contains("createTarget(name:"), "新开一件")
         XCTAssertTrue(panel.contains("startEpisode(targetID:"))
         XCTAssertTrue(panel.contains("createTargetFromCapture("))
+        XCTAssertTrue(panel.contains("onCreateNew(name)"), "新开一件：名字交给开始一件事")
+        XCTAssertFalse(
+            panel.contains("createTarget(name:"),
+            "面板不许自己建目标——那条路绕开了期限和环境"
+        )
 
         let source = try mainWorkspaceSource()
+        let nowPage = try self.source(at: "Sources/LightAnchor/Views/NowPageView.swift")
         let actions = try XCTUnwrap(
-            source.slice(from: "private func currentWorkActions", to: "private func cancelCurrentWaiting")
+            nowPage.slice(from: "struct NowActionDock", to: "private struct NowDockItem")
         )
         XCTAssertTrue(
             actions.contains(#"tr("switch_to_something_else")"#),
             "有当前工作时，动作条上必须能直接换一件事"
         )
-        // 空状态和有当前工作走同一个面板。
-        XCTAssertEqual(try matches(of: #"onStart: openSwitchWork"#, in: source), 1)
+        // 开始一件事和换一件事走两个界面：一个是声明，一个是选择。
+        XCTAssertEqual(try matches(of: #"onStart: \{ openStartWork\(\) \}"#, in: source), 1)
         XCTAssertEqual(try matches(of: #"onSwitch: openSwitchWork"#, in: source), 1)
+    }
+
+    /// 「现在」页是**一整页顺着读**：这件事 → 上次做到哪 → 东西在哪，右缘一条小轨。
+    /// 三个并列页签那版被否过好几轮，不许回头。
+    func testNowPageIsOneLongPageWithARailNotThreeTabs() throws {
+        let page = try source(at: "Sources/LightAnchor/Views/NowPageView.swift")
+
+        XCTAssertEqual(
+            NowChapter.allCases.map(\.rawValue),
+            ["task", "summary", "items"],
+            "三节的顺序就是读的顺序"
+        )
+        // 一个滚动容器 + 三节 + 一条小轨；小轨跟着滚动高亮。
+        XCTAssertEqual(try matches(of: #"ScrollView \{"#, in: page), 2, "长页一个、空状态一个")
+        XCTAssertTrue(page.contains("chapterBody(.task)"))
+        XCTAssertTrue(page.contains("chapterBody(.summary)"))
+        XCTAssertTrue(page.contains("chapterBody(.items)"))
+        XCTAssertTrue(page.contains("private func recomputeChapter()"), "读到哪一节，小轨就亮哪一条")
+        XCTAssertTrue(page.contains("struct NowRail"))
+        // 总结和现场跟着同一个「第几段」走——它们是同一段的两面。
+        XCTAssertTrue(page.contains("selectedSegment(of: target)"))
+        XCTAssertEqual(try matches(of: #"@State private var segmentIndex"#, in: page), 1)
+        XCTAssertFalse(page.contains("TabView"), "页签那版被否了")
+        XCTAssertFalse(page.contains("Picker("), "分段控件同样被否")
+    }
+
+    /// 「换一件事」右区是**两块等高的方块**（白卡 + 浅蓝块）；邮票整套已经取消。
+    func testSwitchWorkPanelShowsTwoEqualBlocksNotAStamp() throws {
+        let panel = try source(at: "Sources/LightAnchor/Views/SwitchWorkPanel.swift")
+
+        XCTAssertTrue(panel.contains("SwitchWorkBlock(\n            tone: .now,"))
+        XCTAssertTrue(panel.contains("tone: .destination,"))
+        XCTAssertTrue(panel.contains("private var blockHeight: CGFloat"), "两块共用一个高度")
+        XCTAssertEqual(try matches(of: #"height: blockHeight"#, in: panel), 4, "两块 + 箭头 + 空态")
+        // 邮票：齿孔、面值、内框、撕边复写条，全部不许回来。
+        for gone in ["SwitchWorkStamp", "SwitchWorkPerforation", "SwitchWorkTornTeeth", "lightAnchorStampShadow"] {
+            XCTAssertFalse(panel.contains(gone), "邮票残留：\(gone)")
+        }
+        // 现场与「现在」页同源：两张白卡 + 同一个清单网格，不再按类别分组。
+        XCTAssertTrue(panel.contains("SceneThingsGrid("))
+        XCTAssertTrue(panel.contains("NowCard {"))
+        XCTAssertFalse(panel.contains("sceneGroupHeader("), "现场清单不再分组")
+    }
+
+    /// 「开始一件事」照的是随手记那个窗的骨架，不是设置对话框：先聚焦必填名称，
+    /// 底下一排安静的 chip，右边是明确的启动动作。期限就是其中一颗 chip。
+    func testStartingWorkLooksLikeTheCaptureWindowNotASettingsSheet() throws {
+        let source = try mainWorkspaceSource()
+        let sheet = try XCTUnwrap(
+            source.slice(from: "struct StartWorkView: View", to: "private func start()")
+        )
+        XCTAssertTrue(sheet.contains("dueAt: $dueAt"), "创建时就能押期限")
+        XCTAssertTrue(sheet.contains(#"placeholder: tr("no_rush")"#), "空着自己会说话")
+        XCTAssertTrue(sheet.contains("chip: true"), "期限是底栏上的一颗 chip")
+        XCTAssertTrue(sheet.contains(".textFieldStyle(.plain)"), "开放写字板，无描边")
+        XCTAssertTrue(sheet.contains(".onSubmit(start)"), "打完名字回车就开始")
+        XCTAssertTrue(sheet.contains(#"Button(tr("start_something"), action: start)"#), "启动动作必须说清楚")
+        // 不许再退回设置对话框那套：头部铺垫、表单行、「更多」三角、开关+字段两步。
+        XCTAssertFalse(sheet.contains("LightAnchorSheetHeader"), "便笺不要四行头部铺垫")
+        XCTAssertFalse(sheet.contains("LightAnchorSettingsSection"))
+        XCTAssertFalse(sheet.contains("LightAnchorDisclosure"))
+        XCTAssertFalse(sheet.contains("hasDeadline"))
+        // 便笺里不该出现选择器那套东西。
+        XCTAssertFalse(sheet.contains("candidateRows"))
+        XCTAssertFalse(sheet.contains("SwitchWork"))
+    }
+
+    /// 期限那一格只挑日子：押的是日期，「周五 23:51」里那个 23:51 是噪声。
+    func testDeadlineFieldPicksADayNotAMoment() throws {
+        let theme = try source(at: "Sources/LightAnchor/Design/LightAnchorTheme.swift")
+        XCTAssertTrue(theme.contains("private var isDueMode: Bool"))
+        XCTAssertTrue(theme.contains(#"tr("no_deadline_after_all")"#), "面板里能撤掉期限")
+        XCTAssertTrue(
+            theme.contains("bySettingHour: 23, minute: 59"),
+            "期限落在那天末尾：周五要交是周五结束前"
+        )
+    }
+
+    /// 展开「等着别人」时组头行不许变高——点一下，你点的那一行自己长高了，
+    /// 手感像跳了一下。
+    func testBlockedHeaderKeepsItsHeightWhenExpanded() throws {
+        let source = try mainWorkspaceSource()
+        let header = try XCTUnwrap(
+            source.slice(from: "private var blockedHeader", to: "private var blockedDot")
+        )
+        XCTAssertFalse(
+            header.contains("if showsBlocked {"),
+            "组头行里不许有随展开出现的第二行"
+        )
+        XCTAssertTrue(header.contains("blockedSummary"))
     }
 
     func testLaterWorkspaceSurfacesBothScopes() throws {
@@ -260,7 +382,6 @@ final class BlueDotAuditTests: XCTestCase {
     func testStatusDotFormsCoverEveryEpisodeState() {
         XCTAssertEqual(LightAnchorStatusDotForm(.active), .active)
         XCTAssertEqual(LightAnchorStatusDotForm(.paused), .paused)
-        XCTAssertEqual(LightAnchorStatusDotForm(.waiting), .waiting)
         XCTAssertEqual(LightAnchorStatusDotForm(.returning), .returning)
         XCTAssertEqual(LightAnchorStatusDotForm(.ended), .ended)
     }
@@ -287,8 +408,16 @@ final class BlueDotAuditTests: XCTestCase {
     func testWaitingSemanticsUseAlmanacGreenAndWarmAmber() throws {
         let source = try mainWorkspaceSource()
 
-        XCTAssertTrue(source.contains("LightAnchorTheme.successBadge"), "可以返回组使用宜绿本色")
-        XCTAssertTrue(source.contains("LightAnchorTheme.warningBackground"), "等待徽章使用暖黄")
+        XCTAssertTrue(source.contains("LightAnchorTheme.successBadge"), "结果到了用宜绿本色")
+        XCTAssertTrue(source.contains("LightAnchorTheme.warning"), "等着别人用暖黄")
+        // 过期用告警红：暖黄是「快了」，红是「已经晚了」，两件事不能同色。
+        XCTAssertTrue(source.contains("LightAnchorDesign.danger"), "过期用告警色")
+        // 语义色落在**点**和**字**上，不是一行挂一颗带底色的标签——
+        // 每行一颗黄药丸，整张清单就花了。
+        XCTAssertFalse(
+            source.contains("LightAnchorTheme.warningBackground"),
+            "清单行不许再用暖黄底的药丸"
+        )
     }
 
     func testShadowsStayOnSanctionedSurfacesOnly() throws {

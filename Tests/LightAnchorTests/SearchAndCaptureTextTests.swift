@@ -107,8 +107,8 @@ final class SearchAndCaptureTextTests: XCTestCase {
     // MARK: - 截图文字
 
     func testExtractedTextRoundTripsAndMarksAttempt() throws {
-        let storeURL = temporaryFileURL()
-        let workspace = AttentionWorkspace(store: LocalEventStore(fileURL: storeURL))
+        let storeURL = temporaryEventsDirectoryURL()
+        let workspace = AttentionWorkspace(store: LocalEventStore(directoryURL: storeURL))
         let capture = try XCTUnwrap(workspace.captureText("截图占位", now: base))
 
         XCTAssertTrue(workspace.setCaptureExtractedText(
@@ -125,14 +125,14 @@ final class SearchAndCaptureTextTests: XCTestCase {
         XCTAssertEqual(workspace.snapshot.captures[capture.id]?.extractedText, "")
         XCTAssertNotNil(workspace.snapshot.captures[capture.id]?.textExtractedAt)
 
-        let reloaded = AttentionWorkspace(store: LocalEventStore(fileURL: storeURL))
+        let reloaded = AttentionWorkspace(store: LocalEventStore(directoryURL: storeURL))
         XCTAssertNotNil(reloaded.snapshot.captures[capture.id]?.textExtractedAt)
     }
 
     // MARK: - 资料活化
 
     func testReferenceAndArchivedCanReturnToInbox() throws {
-        let workspace = AttentionWorkspace(store: LocalEventStore(fileURL: temporaryFileURL()))
+        let workspace = AttentionWorkspace(store: LocalEventStore(directoryURL: temporaryEventsDirectoryURL()))
         let reference = try XCTUnwrap(workspace.captureText("资料", now: base))
         let archived = try XCTUnwrap(workspace.captureText("旧内容", now: base))
         XCTAssertTrue(workspace.saveCaptureAsReference(reference.id, now: base))
@@ -149,9 +149,9 @@ final class SearchAndCaptureTextTests: XCTestCase {
         )
     }
 
-    private func temporaryFileURL() -> URL {
+    private func temporaryEventsDirectoryURL() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("SearchCaptureTests-\(UUID().uuidString)", isDirectory: true)
-            .appendingPathComponent("events.json")
+            .appendingPathComponent("events", isDirectory: true)
     }
 }

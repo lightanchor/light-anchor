@@ -14,6 +14,8 @@ struct MainWorkspaceView: View {
     @SceneStorage("workspace.showInspector") private var inspectorSceneValue = false
     @State private var selectedDestination: WorkspaceDestination? = .now
     @State private var showingStartWork = false
+    /// 从「换一件事」里那行「新开…」过来时，把已经打好的名字带过去。
+    @State private var startWorkInitialName = ""
     /// 「更多设置…」带过去的名字：浮层里敲了一半就不该让用户再打一遍。
     /// 「换一件事」浮层：开始/切换到某件事的唯一入口（⌘K）。
     @State private var showingSwitchWork = false
@@ -174,7 +176,15 @@ struct MainWorkspaceView: View {
             case "inspector": inspectorSceneValue = true
             case "menubar": openMenuBarPreviewPanel()
             case "waiting-editor": showWaitingEditor()
+            case "start-work": openStartWork()
             case "switch": showingSwitchWork = true
+            // 「重返现场」确认面板：用手上这件事已有的现场快照亮出来。
+            case "restore":
+                if let episode = workspace.currentEpisode,
+                   let scene = workspace.snapshot.latestSceneSnapshot(for: episode.targetID) {
+                    sceneReturnWaitingID = nil
+                    sceneReturnSnapshot = scene
+                }
             // 「已放下」确认弹窗：放下当前这件、用它已有的现场快照亮出弹窗。
             case "set-aside":
                 if let episode = workspace.currentEpisode {
@@ -245,8 +255,11 @@ struct MainWorkspaceView: View {
         .onChange(of: showingInspector) { _, value in
             inspectorSceneValue = value
         }
+        // 「开始一件事」是自己的便笺（凭空立一件），不是「换一件事」那个选择器
+        // （从已有的里面挑一件）。之前它俩共用一个面板，于是立一件新事要面对
+        // 一张空清单和一张空邮票。
         .sheet(isPresented: $showingStartWork) {
-            StartWorkView()
+            StartWorkView(initialName: startWorkInitialName)
                 .environmentObject(workspace)
         }
         // 「换一件事」不是系统 sheet：是压暗的舞台上居中的一张纸（定稿 r22 的 .stage），
@@ -267,6 +280,13 @@ struct MainWorkspaceView: View {
                     onDismiss: {
                         showingSwitchWork = false
                         switchWorkInitialPick = nil
+                    },
+                    onCreateNew: { name in
+                        // 面板收起，名字带进「开始一件事」——立一件新事该有机会
+                        // 交代期限和开工要开什么，那些这个面板问不了。
+                        showingSwitchWork = false
+                        switchWorkInitialPick = nil
+                        openStartWork(name: name)
                     },
                     initialPick: switchWorkInitialPick
                 )
@@ -416,25 +436,12 @@ struct MainWorkspaceView: View {
     @ViewBuilder
     private func sidebarTrailingAccessory(for destination: WorkspaceDestination) -> some View {
         if let count = count(for: destination), count > 0 {
-            if destination == .waiting {
-                // 等待计数用暖黄徽章（黄历「待」的语感）。
-                Text(String(format: count == 1 ? tr("items_one") : tr("items"), count))
-                    .font(LightAnchorTheme.labelFont(size: 10, weight: .semibold))
-                    .foregroundStyle(LightAnchorTheme.warning)
-                    .lineLimit(1)
-                    .fixedSize()
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(
-                        LightAnchorTheme.warningBackground.opacity(0.55),
-                        in: RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    )
-            } else {
-                Text("\(count)")
-                    .font(LightAnchorTheme.interfaceFont(size: 12, weight: .semibold))
-                    .monospacedDigit()
-                    .foregroundStyle(LightAnchorTheme.accentInk)
-            }
+            // 原来「等待」那一格挂的是暖黄徽章。等待并进稍后之后不再单独染色：
+            // 「里面有没有火」由稍后页那条折叠行自己说，侧栏只报数。
+            Text("\(count)")
+                .font(LightAnchorTheme.interfaceFont(size: 12, weight: .semibold))
+                .monospacedDigit()
+                .foregroundStyle(LightAnchorTheme.accentInk)
         }
     }
 
@@ -560,9 +567,6 @@ struct MainWorkspaceView: View {
         if episode.id == workspace.currentEpisode?.id,
            episode.state == .active || episode.state == .returning {
             return tr("in_progress")
-        }
-        if episode.state == .waiting {
-            return tr("waiting_2")
         }
         if episode.state == .paused {
             return UserFacingCopy.setAsideAge(of: episode.updatedAt)
@@ -738,6 +742,9 @@ struct MainWorkspaceView: View {
                     stageContent
                         .id(activeDestination)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    // 窗底独立一条账（样机 .statusbar）：左边欠着多少、右边今天做了多少。
+                    // 它是应用级的，跟按钮不是一件事，所以分带——也绝不和动作条重叠。
+                    workspaceStatusBar
                 }
                 .background(
                     LightAnchorTheme.windowBackground,
@@ -806,6 +813,11 @@ struct MainWorkspaceView: View {
     }
 
     /// 打开「换一件事」：应用的标准 sheet（和开始一件事/等待编辑器同族）。
+    private func openStartWork(name: String = "") {
+        startWorkInitialName = name
+        showingStartWork = true
+    }
+
     private func openSwitchWork() {
         showingSwitchWork = true
     }
@@ -923,14 +935,9 @@ struct MainWorkspaceView: View {
                     withAnimation(sideDotAnimation) {
                         selectedDestination = .now
                     }
-                }
-            )
-                .environmentObject(workspace)
-        case .waiting:
-            WaitingSpaceView(
-                onRestore: restoreWaitingContext,
-                onCreateWaiting: showWaitingEditor,
-                selectedResult: selectedSearchResult
+                },
+                onRestoreWaiting: restoreWaitingContext,
+                onChaseWaiting: chaseWaitingContext
             )
                 .environmentObject(workspace)
         case .environments:
@@ -953,12 +960,16 @@ struct MainWorkspaceView: View {
         NowSpaceView(
             // 有没有当前工作走的是同一个面板：空状态时它是「开始一件事」，
             // 有当前工作时它是「换一件事」。
-            onStart: openSwitchWork,
+            onStart: { openStartWork() },
             onSwitch: openSwitchWork,
             onSwitchToStep: { openSwitchWork(picking: $0) },
             onCapture: openCaptureWindow,
             onWait: showWaitingEditor,
-            onRestore: restoreCurrentContext,
+            onRestoreContext: restore,
+            onRestoreSnapshot: { snapshot in
+                sceneReturnWaitingID = nil
+                sceneReturnSnapshot = snapshot
+            },
             onOpenDestination: { destination in
                 withAnimation(sideDotAnimation) {
                     selectedDestination = destination
@@ -968,14 +979,80 @@ struct MainWorkspaceView: View {
         .environmentObject(workspace)
     }
 
+    /// 窗底那条账（样机 .statusbar：30 高、比动作条矮、底色更浅、字更小）。
+    ///
+    /// 左边三笔是**欠着的**（可以动 / 等着别人 / 收件箱），点一下就去稍后；
+    /// 右边一句是**今天做了多少**。它不属于任何一页，所以住在内容岛的最底下，
+    /// 每一页都看得见，也不会被「现在」页那条动作条压住。
+    private var workspaceStatusBar: some View {
+        let list = workspace.snapshot.laterList
+        let today = workspace.focusPeriodSummary(in: ReviewPeriod(unit: .day, offset: 0).interval())
+        return HStack(spacing: 18) {
+            statusTally(title: tr("later_group_actionable"), value: list.actionable.count)
+            statusTally(title: tr("later_group_blocked"), value: list.blocked.count)
+            // 第三笔叫「没归的」：这个应用里「稍后」既是去处也是那一组的名字，
+            // 再拿它当标签，账上就有两个「稍后」了。
+            statusTally(title: tr("status_unfiled"), value: workspace.snapshot.inbox.count)
+            Spacer(minLength: 12)
+            Text(String(
+                format: tr("status_today"),
+                UserFacingCopy.focusDuration(max(0, Int(today.focusDuration / 60))),
+                today.segmentCount,
+                today.completedCount
+            ))
+            .font(LightAnchorTheme.supportingFont(size: 11.5))
+            .monospacedDigit()
+            .foregroundStyle(LightAnchorTheme.mutedInk)
+            .lineLimit(1)
+        }
+        .padding(.leading, 22)
+        .padding(.trailing, 18)
+        .frame(height: 30)
+        .frame(maxWidth: .infinity)
+        .background {
+            UnevenRoundedRectangle(
+                bottomLeadingRadius: LightAnchorDesign.radiusCard,
+                bottomTrailingRadius: LightAnchorDesign.radiusCard,
+                style: .continuous
+            )
+            .fill(LightAnchorTheme.raisedBand)
+        }
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(LightAnchorTheme.softHairline)
+                .frame(height: 1)
+        }
+    }
+
+    /// 一笔账：名字 + 蓝色计数，点一下去稍后看它。
+    private func statusTally(title: String, value: Int) -> some View {
+        Button {
+            withAnimation(sideDotAnimation) { selectedDestination = .later }
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Text(title)
+                    .font(LightAnchorTheme.supportingFont(size: 11.5))
+                    .foregroundStyle(LightAnchorTheme.mutedInk)
+                Text("\(value)")
+                    .font(LightAnchorTheme.supportingFont(size: 11.5, weight: .semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(LightAnchorTheme.accentInk)
+            }
+            .lineLimit(1)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(String(format: value == 1 ? tr("items_2_one") : tr("items_2"), title, value))
+    }
+
     private func count(for destination: WorkspaceDestination) -> Int? {
         switch destination {
         case .now:
             return workspace.currentEpisode == nil ? nil : 1
         case .later:
-            return workspace.snapshot.inbox.count + workspace.snapshot.setAsideEpisodes.count
-        case .waiting:
-            return workspace.snapshot.activeWaitingItems.count
+            // 稍后装两组事情（可以动 / 等着别人）加上收件箱。走同一份 laterList
+            // 投影，别在这里重算——否则侧栏报 5、点进去只有 4 行。
+            return workspace.snapshot.laterList.total + workspace.snapshot.inbox.count
         case .environments, .review, .chat:
             return nil
         }
@@ -1129,8 +1206,12 @@ struct MainWorkspaceView: View {
                 stableID: "waiting-\(item.id.uuidString)",
                 kind: .waiting,
                 title: item.description,
-                subtitle: "\(isReady ? tr("ready_to_return") : tr("set_aside")) · \(UserFacingCopy.relativeAge(of: item.startedAt))",
-                destination: .waiting,
+                // 副题写「可以返回 / 已等 X」——原来这里写「暂时放下」，
+                // 可一件正在等结果的事，用户并没有放下它，是它还没回来。
+                subtitle: isReady
+                    ? "\(tr("ready_to_return")) · \(UserFacingCopy.relativeAge(of: item.completedAt ?? item.startedAt))"
+                    : UserFacingCopy.waitedAge(of: item.startedAt),
+                destination: .later,
                 dot: isReady ? .ready : .waiting
             ), score))
         }
@@ -1291,10 +1372,10 @@ struct MainWorkspaceView: View {
         searchSelectionIndex = 0
     }
 
-    /// 结果按目的地分组：现在 → 稍后 → 等待。
+    /// 结果按目的地分组：现在 → 稍后（等待也落在稍后，它不再是单独一页）。
     private var groupedSearchResults: [(destination: WorkspaceDestination, results: [WorkspaceSearchResult])] {
         let grouped = Dictionary(grouping: workspaceSearchResultsModel, by: \.destination)
-        return [WorkspaceDestination.now, .later, .waiting].compactMap { destination in
+        return [WorkspaceDestination.now, .later].compactMap { destination in
             guard let results = grouped[destination], !results.isEmpty else { return nil }
             return (destination, results)
         }
@@ -1474,23 +1555,13 @@ struct MainWorkspaceView: View {
                 sceneReturnSnapshot = scene
             }
         case .waiting:
-            break
+            // 等待住在稍后的收件箱档里（「等着别人」那一组）。选中项会让
+            // 那一组自动展开——见 LaterSpaceView.blockedExpanded。
+            laterScopeRawValue = LaterScope.inbox.rawValue
         }
         closeWorkspaceSearch()
         withAnimation(dockAnimation) {
             showingInspector = true
-        }
-    }
-
-    private func restoreCurrentContext() {
-        guard let episode = workspace.currentEpisode else { return }
-        if let snapshot = workspace.snapshot.latestSceneSnapshot(for: episode.targetID),
-           !snapshot.restorableItems.isEmpty
-        {
-            sceneReturnWaitingID = nil
-            sceneReturnSnapshot = snapshot
-        } else {
-            restore(episode.context)
         }
     }
 
@@ -1503,6 +1574,21 @@ struct MainWorkspaceView: View {
             sceneReturnSnapshot = snapshot
         } else {
             guard workspace.resumeWaitingEpisode(waiting.id) else { return }
+            restore(waiting.originalContext)
+        }
+    }
+
+    /// 「去催」：结果还没到，别碰这条等待的状态——只把当初交出去时的现场
+    /// 铺开（那封邮件、那个群、那个页面），你从那儿发一句就完了。
+    /// 这是别的软件给不了的一颗：待办软件到期只能说「有这么回事」。
+    private func chaseWaitingContext(_ waiting: WaitingItem) {
+        guard let episode = workspace.snapshot.episodes[waiting.episodeID] else { return }
+        if let snapshot = workspace.snapshot.latestSceneSnapshot(for: episode.targetID),
+           !snapshot.restorableItems.isEmpty
+        {
+            sceneReturnWaitingID = nil
+            sceneReturnSnapshot = snapshot
+        } else {
             restore(waiting.originalContext)
         }
     }
@@ -1745,439 +1831,6 @@ struct LightAnchorDockCueCard: View {
     }
 }
 
-private struct NowSpaceView: View {
-    @EnvironmentObject private var workspace: AttentionWorkspace
-    let onStart: () -> Void
-    let onSwitch: () -> Void
-    /// 「切到这步」：打开换一件事并预选那一步（步骤切换算换一件事，仪式照走）。
-    let onSwitchToStep: (UUID) -> Void
-    let onCapture: () -> Void
-    let onWait: () -> Void
-    let onRestore: () -> Void
-    let onOpenDestination: (WorkspaceDestination) -> Void
-
-    // 步骤卡的输入态：点「加一步」现身，回车连着加，esc 收起。
-    @State private var addingStep = false
-    @State private var stepDraft = ""
-    @FocusState private var stepFieldFocused: Bool
-    /// 完成一件还有未完成步骤的大事：先提醒，确认了才连带收起。
-    @State private var confirmingFinishSteps = false
-
-    var body: some View {
-        // 居中舞台构图（样机 .herowrap/.empty：垂直水平双居中，
-        // 底部留 24 让重心略高于几何中心）。
-        GeometryReader { proxy in
-            ScrollView {
-                VStack(spacing: 0) {
-                    if let episode = workspace.currentEpisode,
-                       let target = workspace.snapshot.targets[episode.targetID] {
-                        currentWork(episode: episode, target: target)
-                    } else {
-                        emptyState
-                    }
-                }
-                .padding(.horizontal, LightAnchorDesign.workspaceHorizontalPadding)
-                .frame(maxWidth: .infinity, minHeight: max(0, proxy.size.height - 24))
-                .padding(.bottom, 24)
-            }
-        }
-    }
-
-    private var emptyState: some View {
-        VStack(spacing: 0) {
-            LightAnchorEmptyIllustration()
-                .padding(.bottom, 24)
-
-            Text(tr("put_something_in_first"))
-                .font(LightAnchorTheme.interfaceFont(size: 20, weight: .semibold))
-                .foregroundStyle(LightAnchorTheme.ink)
-                .padding(.bottom, 5)
-            Text(UserFacingCopy.noCurrentWorkMessage)
-                .font(LightAnchorTheme.interfaceFont(size: 13))
-                .foregroundStyle(LightAnchorTheme.mutedInk)
-                .padding(.bottom, 18)
-
-            HStack(spacing: 9) {
-                Button(UserFacingCopy.startWork, action: onStart)
-                    .buttonStyle(LightAnchorPrimaryButtonStyle())
-                Button(UserFacingCopy.captureIdea, action: onCapture)
-                    .buttonStyle(LightAnchorQuietButtonStyle())
-            }
-
-            Text(tr("start_with_something_you_can_finish"))
-                .font(LightAnchorTheme.supportingFont(size: 11.5))
-                .foregroundStyle(LightAnchorTheme.faintInk)
-                .padding(.top, 16)
-
-            workspaceStatChips
-                .padding(.top, 24)
-        }
-        .frame(maxWidth: 620)
-    }
-
-    /// 稍后 / 等待 两枚统计胶囊（样机 .statchip：只有名称 + 蓝色计数）。
-    private var workspaceStatChips: some View {
-        HStack(spacing: 10) {
-            workspaceStatChip(
-                title: UserFacingCopy.later,
-                value: workspace.snapshot.inbox.count,
-                destination: .later
-            )
-            workspaceStatChip(
-                title: UserFacingCopy.waiting,
-                value: workspace.snapshot.activeWaitingItems.count,
-                destination: .waiting
-            )
-        }
-    }
-
-    private func workspaceStatChip(
-        title: String,
-        value: Int,
-        destination: WorkspaceDestination
-    ) -> some View {
-        Button {
-            onOpenDestination(destination)
-        } label: {
-            HStack(spacing: 8) {
-                Text(title)
-                    .font(LightAnchorTheme.interfaceFont(size: 12.5, weight: .medium))
-                    .foregroundStyle(LightAnchorTheme.mutedInk)
-                Text("\(value)")
-                    .font(LightAnchorTheme.interfaceFont(size: 13, weight: .semibold))
-                    .monospacedDigit()
-                    .foregroundStyle(LightAnchorTheme.accentInk)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(LightAnchorTheme.recessed, in: Capsule(style: .continuous))
-            .overlay {
-                Capsule(style: .continuous)
-                    .strokeBorder(LightAnchorTheme.sidebarHairline, lineWidth: 1)
-            }
-            .contentShape(Capsule(style: .continuous))
-        }
-        .buttonStyle(.plain)
-        // 样机 .statchip:hover。
-        .lightAnchorHoverFill(cornerRadius: 999)
-        .accessibilityLabel(String(format: value == 1 ? tr("items_2_one") : tr("items_2"), title, value))
-    }
-
-    private func currentWork(episode: AttentionEpisode, target: AttentionTarget) -> some View {
-        VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 16) {
-                currentWorkHeader(episode: episode, target: target)
-
-                SceneCardView(episode: episode, target: target, onRestore: onRestore)
-                    .lightAnchorRecessed(radius: 12, padding: 13)
-
-                if episode.state == .waiting {
-                    // 回场简报（README「现在」页承诺的那份）：等待中回到这页，
-                    // 先看到你在哪/发生了什么/先做什么，不必先点「恢复现场」。
-                    ReturnBriefingCard(episodeID: episode.id)
-                    LightAnchorLabel(
-                        title: tr("this_one_is_waiting_on_a"),
-                        icon: "hourglass",
-                        spacing: 7
-                    )
-                        .font(LightAnchorTheme.bodyFont(size: 12.5))
-                        .foregroundStyle(LightAnchorDesign.waiting)
-                }
-
-                stepsSection(for: target)
-
-                cardSeparator
-
-                currentWorkActions(episode: episode, target: target)
-            }
-            .padding(.horizontal, 26)
-            .padding(.top, 22)
-            .padding(.bottom, 20)
-            // 宽度跟随窗口（用户要求：不写死），铺满除页边距外的舞台宽。
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .lightAnchorPanel(radius: LightAnchorDesign.radiusHero)
-            .confirmationDialog(
-                finishStepsTitle(for: target),
-                isPresented: $confirmingFinishSteps,
-                titleVisibility: .visible
-            ) {
-                Button(tr("finish_and_collapse_steps")) {
-                    if let current = workspace.currentEpisode {
-                        _ = workspace.endEpisodeCollapsingSteps(current.id)
-                    }
-                }
-                Button(tr("cancel"), role: .cancel) {}
-            } message: {
-                Text(tr("finish_steps_alert_message"))
-            }
-
-            workspaceStatChips
-                .padding(.top, 18)
-        }
-    }
-
-    /// 卡内发丝分隔线（样机 .cardsep）。
-    private var cardSeparator: some View {
-        Rectangle()
-            .fill(LightAnchorTheme.hairlineBorder)
-            .frame(height: 1)
-            .accessibilityHidden(true)
-    }
-
-    private func currentWorkHeader(episode: AttentionEpisode, target: AttentionTarget) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 16) {
-                HStack(spacing: 8) {
-                    LightAnchorStatusDot(episode.state, size: 9)
-                    Text(UserFacingCopy.waitingState(episode.state))
-                        .font(LightAnchorTheme.bodyFont(size: 12.5, weight: .semibold))
-                        .foregroundStyle(stateColor(episode.state))
-                    Text(String(format: tr("started_3"), episode.startedAt.formatted(date: .omitted, time: .shortened)))
-                        .font(LightAnchorTheme.supportingFont(size: 12))
-                        .monospacedDigit()
-                        .foregroundStyle(LightAnchorTheme.faintInk)
-                }
-                .padding(.top, 12)
-
-                Spacer(minLength: 12)
-
-                // 大号细体计时：页面的视觉锚（V7）；超过一小时拆报时分。
-                LightAnchorFocusReadout(minutes: elapsedMinutes(for: episode))
-                    .accessibilityLabel(String(format: tr("focused_for"), UserFacingCopy.focusDuration(elapsedMinutes(for: episode))))
-            }
-
-            Text(target.name)
-                .font(LightAnchorTheme.titleFont(size: 26, weight: .semibold))
-                .lineSpacing(2)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityAddTraits(.isHeader)
-            if !target.note.isEmpty {
-                Text(target.note)
-                    .font(LightAnchorTheme.bodyFont(size: 13))
-                    .foregroundStyle(LightAnchorTheme.mutedInk)
-                    .lineSpacing(3)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            // 这件事的全程纵深一行小字：做过多段才显示（工作记忆·F4）。
-            if let historyLine = workspace.currentTargetHistoryLine() {
-                Text(historyLine)
-                    .font(LightAnchorTheme.supportingFont(size: 11.5))
-                    .monospacedDigit()
-                    .foregroundStyle(LightAnchorTheme.faintInk)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func elapsedMinutes(for episode: AttentionEpisode) -> Int {
-        // 大号计时显示专注分钟：暂停/等待时数字停住，而不是继续走墙钟。
-        workspace.snapshot.focusMinutes(of: episode.id)
-    }
-
-    // MARK: 步骤（大任务拆小步骤）
-
-    /// 步骤住在哪件大事名下：当前是步骤就看它的母任务——顺便看到大任务进度和兄弟步骤。
-    private func stepsHostID(for target: AttentionTarget) -> UUID {
-        target.parentTargetID ?? target.id
-    }
-
-    /// 步骤卡：清单 + 进度 + 「加一步」。步骤是完整的目标（自己的段/现场/计时），
-    /// 这里只是大任务名下的一份目录；切换走换一件事仪式。
-    @ViewBuilder
-    private func stepsSection(for target: AttentionTarget) -> some View {
-        let hostID = stepsHostID(for: target)
-        let steps = workspace.snapshot.steps(of: hostID).filter { $0.retiredAt == nil }
-        if !steps.isEmpty || addingStep || target.parentTargetID == nil {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 8) {
-                    Text(stepsHeader(for: target))
-                        .font(LightAnchorTheme.supportingFont(size: 12, weight: .semibold))
-                        .foregroundStyle(LightAnchorTheme.mutedInk)
-                    if let progress = workspace.snapshot.stepProgress(of: hostID) {
-                        // 眉题已经写着「步骤」，计数不再带单位。
-                        Text("\(progress.done)/\(progress.total)")
-                            .font(LightAnchorTheme.supportingFont(size: 12))
-                            .monospacedDigit()
-                            .foregroundStyle(LightAnchorTheme.accentInk)
-                    }
-                    Spacer(minLength: 8)
-                    if !addingStep {
-                        Button(tr("add_a_step")) {
-                            addingStep = true
-                            stepFieldFocused = true
-                        }
-                        .buttonStyle(LightAnchorQuietButtonStyle(compact: true))
-                    }
-                }
-                ForEach(steps) { step in
-                    stepRow(step, currentTargetID: target.id)
-                }
-                if addingStep {
-                    TextField(tr("step_name_placeholder"), text: $stepDraft)
-                        .textFieldStyle(.plain)
-                        .font(LightAnchorTheme.bodyFont(size: 13))
-                        .focused($stepFieldFocused)
-                        .frame(minHeight: 26)
-                        .onSubmit { commitStepDraft(hostID: hostID) }
-                        .onExitCommand {
-                            addingStep = false
-                            stepDraft = ""
-                        }
-                }
-            }
-            .lightAnchorRecessed(radius: 12, padding: 13)
-        }
-    }
-
-    private func stepsHeader(for target: AttentionTarget) -> String {
-        if let parentID = target.parentTargetID,
-           let parent = workspace.snapshot.targets[parentID] {
-            return String(format: tr("step_of_parent"), parent.name)
-        }
-        return tr("steps")
-    }
-
-    private func stepRow(_ step: AttentionTarget, currentTargetID: UUID) -> some View {
-        let done = workspace.snapshot.isTargetCompleted(step.id)
-        let latest = workspace.snapshot.latestEpisode(of: step.id)
-        let minutes = latest.map { workspace.snapshot.focusMinutes(of: $0.id) } ?? 0
-        return HStack(spacing: 10) {
-            if done {
-                LightAnchorIcon("check", size: 11)
-                    .foregroundStyle(LightAnchorTheme.mutedInk)
-            } else {
-                LightAnchorStatusDot(
-                    latest.map { LightAnchorStatusDotForm($0.state) } ?? .ended,
-                    size: 8
-                )
-            }
-            Text(step.name)
-                .font(LightAnchorTheme.bodyFont(size: 13))
-                .strikethrough(done)
-                .foregroundStyle(done ? LightAnchorTheme.faintInk : LightAnchorTheme.ink)
-                .lineLimit(1)
-            Spacer(minLength: 10)
-            if minutes > 0 {
-                Text(String(format: tr("focused"), UserFacingCopy.focusDuration(minutes)))
-                    .font(LightAnchorTheme.supportingFont(size: 11.5))
-                    .monospacedDigit()
-                    .foregroundStyle(LightAnchorTheme.faintInk)
-            }
-            if step.id == currentTargetID {
-                Text(tr("step_current"))
-                    .font(LightAnchorTheme.supportingFont(size: 11.5, weight: .semibold))
-                    .foregroundStyle(LightAnchorTheme.accentInk)
-            } else if !done {
-                Button(tr("switch_to_this_step")) {
-                    onSwitchToStep(step.id)
-                }
-                .buttonStyle(LightAnchorQuietButtonStyle(compact: true))
-            }
-        }
-        .frame(minHeight: 26)
-        .accessibilityElement(children: .combine)
-    }
-
-    private func commitStepDraft(hostID: UUID) {
-        let name = stepDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else {
-            addingStep = false
-            return
-        }
-        if workspace.addStep(named: name, to: hostID) != nil {
-            stepDraft = ""
-            // 停在输入态：拆步骤往往一口气拆完。
-            stepFieldFocused = true
-        }
-    }
-
-    private func finishStepsTitle(for target: AttentionTarget) -> String {
-        let count = workspace.snapshot.unfinishedSteps(of: target.id).count
-        return String(
-            format: count == 1 ? tr("finish_steps_alert_title_one") : tr("finish_steps_alert_title"),
-            count
-        )
-    }
-
-    @ViewBuilder
-    private func currentWorkActions(episode: AttentionEpisode, target: AttentionTarget) -> some View {
-        HStack(alignment: .center, spacing: 8) {
-            switch episode.state {
-            case .active, .returning:
-                // 按钮叫「暂时放下」而不是「暂停」：它落地的地方（稍后页那一组）
-                // 就叫这个名字。一个动作在按下处和落地处叫两个名字，用户没法
-                // 把两页连起来。
-                Button(tr("set_aside"), action: { _ = workspace.pauseEpisode(episode.id, returnCue: episode.returnCue) })
-                    .buttonStyle(LightAnchorPrimaryButtonStyle())
-            case .paused:
-                Button(tr("continue"), action: { _ = workspace.resumeEpisode(episode.id) })
-                    .buttonStyle(LightAnchorPrimaryButtonStyle())
-            case .waiting:
-                // 取消等待全程一个名字：「不再等待」（原「不用等了」是同一操作的第三个名字）。
-                Button(tr("stop_waiting"), action: { cancelCurrentWaiting(episode) })
-                    .buttonStyle(LightAnchorQuietButtonStyle())
-            case .ended:
-                EmptyView()
-            }
-            // 换一件事就在这条动作条上：在这之前，想换一件事得先点「暂停」把
-            // 现在页清空，才看得见「开始一件事」——一个听起来像休息的动作，
-            // 用来完成一件其实叫切换的事。
-            if episode.state != .ended {
-                Button(tr("switch_to_something_else"), action: onSwitch)
-                    .buttonStyle(LightAnchorQuietButtonStyle())
-                    .help(tr("sets_this_one_aside_with_its"))
-            }
-            if episode.state != .waiting && episode.state != .ended {
-                Button(UserFacingCopy.waitForResult, action: onWait)
-                    .buttonStyle(LightAnchorQuietButtonStyle())
-            }
-            // 单次开启「记录本次」：给这件事录一份过程，生命周期随它走
-            // （放下暂停、恢复继续、结束收尾）。已在录时入口在悬浮动作组。
-            if episode.state != .ended,
-               workspace.activeRecordingSession == nil {
-                Button(tr("record_this_one")) {
-                    _ = workspace.startRecordingCurrentEpisode()
-                }
-                .buttonStyle(LightAnchorQuietButtonStyle())
-                .help(tr("auto_record_episodes_detail"))
-            }
-            if episode.state != .ended {
-                Spacer(minLength: 8)
-                Button {
-                    // 大任务还有没做完的步骤：先提醒，确认了才连带收起（用户定）。
-                    if workspace.snapshot.unfinishedSteps(of: target.id).isEmpty {
-                        _ = workspace.endEpisode(episode.id)
-                    } else {
-                        confirmingFinishSteps = true
-                    }
-                } label: {
-                    // 勾形给「完成」一个身份记号——三颗灰字按钮里它是收束的那颗。
-                    HStack(spacing: 6) {
-                        LightAnchorIcon("check", size: 12)
-                        Text(UserFacingCopy.finishWork)
-                    }
-                }
-                .buttonStyle(LightAnchorSuccessButtonStyle())
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func cancelCurrentWaiting(_ episode: AttentionEpisode) {
-        workspace.snapshot.activeWaitingItems
-            .filter { $0.episodeID == episode.id && $0.status == .waiting }
-            .forEach { _ = workspace.cancelWaiting($0.id, evidence: "用户停止等待。") }
-    }
-
-    private func stateColor(_ state: AttentionEpisodeState) -> LightAnchorThemeColor {
-        switch state {
-        case .active, .returning: LightAnchorTheme.accentInk
-        case .paused, .ended: LightAnchorTheme.mutedInk
-        case .waiting: LightAnchorDesign.waiting
-        }
-    }
-}
-
 /// 目标回顾（点「最近的事」或搜索结果进入）：中心舞台的一张回顾卡——
 /// 这件事是什么、一共投入了多少专注、每一段的经过，以及回去的入口。
 private struct TargetReviewView: View {
@@ -2358,6 +2011,9 @@ private struct TargetReviewView: View {
     }
 }
 
+/// 稍后 = 唯一的那张清单。上半是两组「事情」（可以动 / 等着别人），
+/// 下半是随手记进来的捕获。分组只问一句「下一步在谁手里」——
+/// 等待不再有自己的一页，它就是这里第二组的名字。
 private struct LaterSpaceView: View {
     @EnvironmentObject private var workspace: AttentionWorkspace
     @Binding var scope: LaterScope
@@ -2365,7 +2021,14 @@ private struct LaterSpaceView: View {
     let onCapture: () -> Void
     /// 「继续」某件放下的事：切换由用户在这张完整列表上自己决定。
     let onSwitch: (UUID) -> Void
+    /// 「返回工作」某条已到的结果：连带把那条等待销账，再铺开原来的现场。
+    let onRestoreWaiting: (WaitingItem) -> Void
+    /// 「去催」某条还没到的结果：只铺开现场，不动它的状态。
+    let onChaseWaiting: (WaitingItem) -> Void
     @State private var showingTriage = false
+    /// 「等着别人」默认收着：你扫这张清单是为了挑一件事做，
+    /// 这几条今天挑不了，不该占视线。
+    @State private var blockedExpanded = false
 
     var body: some View {
         Group {
@@ -2381,6 +2044,14 @@ private struct LaterSpaceView: View {
             InboxTriageSheet()
                 .environmentObject(workspace)
         }
+        #if DEBUG
+        // 调试后门：LIGHTANCHOR_DEBUG_LATER_BLOCKED=1 直接摊开「等着别人」（截图/验收用）。
+        .onAppear {
+            if ProcessInfo.processInfo.environment["LIGHTANCHOR_DEBUG_LATER_BLOCKED"] == "1" {
+                blockedExpanded = true
+            }
+        }
+        #endif
     }
 
     @ViewBuilder
@@ -2417,11 +2088,17 @@ private struct LaterSpaceView: View {
                 )
                 .padding(.top, 12)
             } else {
-                // 放下的未完成事住在稍后第一档最上面：它们就是「之后要处理的事」，
-                // 完整列出，谁先谁后由用户自己挑。
-                if scope == .inbox, !workspace.snapshot.setAsideEpisodes.isEmpty {
-                    setAsideSection
-                        .padding(.bottom, 14)
+                // 两组事情住在稍后第一档最上面：先是今天能挑的，
+                // 再是今天挑不了的（收着）。捕获在它们下面。
+                if scope == .inbox {
+                    if !laterList.actionable.isEmpty {
+                        actionableSection
+                            .padding(.bottom, 14)
+                    }
+                    if !laterList.blocked.isEmpty {
+                        blockedSection
+                            .padding(.bottom, 14)
+                    }
                 }
                 LaterCaptureList(
                     scope: scope,
@@ -2436,24 +2113,31 @@ private struct LaterSpaceView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
+    private var laterList: LaterListProjection {
+        workspace.snapshot.laterList
+    }
+
     private var visibleCount: Int {
         switch scope {
         case .inbox:
-            workspace.snapshot.inbox.count + workspace.snapshot.setAsideEpisodes.count
+            workspace.snapshot.inbox.count + laterList.total
         case .references: workspace.snapshot.referenceCaptures.count
         case .archived: workspace.snapshot.archivedCaptures.count
         }
     }
 
-    /// 「暂时放下」组：完整列表 + 每行一颗「继续」。
-    private var setAsideSection: some View {
+    // MARK: - 可以动
+
+    /// 球在你手里的那些事：完整列出，谁先谁后由你自己挑。
+    /// 刚解冻的（结果到了）排最上面。
+    private var actionableSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(tr("set_aside"))
+                Text(tr("later_group_actionable"))
                     .font(LightAnchorTheme.supportingFont(size: 12.5, weight: .semibold))
                     .foregroundStyle(LightAnchorTheme.mutedInk)
-                // 和等待页的分界线就在这一句：这里的事没人替你推进，
-                // 什么时候回去由你定；等待页的事反过来。
+                // 和下面那组的分界线就在这一句：这里的事没人替你推进，
+                // 什么时候回去由你定；那一组反过来。
                 Text(tr("you_set_these_aside_yourself_come"))
                     .font(LightAnchorTheme.supportingFont(size: 11.5))
                     .foregroundStyle(LightAnchorTheme.faintInk)
@@ -2461,10 +2145,10 @@ private struct LaterSpaceView: View {
             .padding(.leading, 2)
 
             LightAnchorListPanel {
-                let entries = setAsideEntries
-                ForEach(entries, id: \.episode.id) { entry in
-                    setAsideRow(entry)
-                    if entry.episode.id != entries.last?.episode.id {
+                let entries = laterList.actionable
+                ForEach(entries) { entry in
+                    actionableRow(entry)
+                    if entry.id != entries.last?.id {
                         LightAnchorRowSeparator()
                     }
                 }
@@ -2472,41 +2156,63 @@ private struct LaterSpaceView: View {
         }
     }
 
-    private var setAsideEntries: [(target: AttentionTarget, episode: AttentionEpisode)] {
-        workspace.snapshot.setAsideEpisodes.compactMap { episode in
-            guard let target = workspace.snapshot.targets[episode.targetID] else { return nil }
-            return (target: target, episode: episode)
-        }
-    }
-
-    private func setAsideRow(_ entry: (target: AttentionTarget, episode: AttentionEpisode)) -> some View {
+    private func actionableRow(_ entry: LaterActionableEntry) -> some View {
         HStack(spacing: 12) {
-            LightAnchorStatusDot(entry.episode.state, size: 9)
+            // 刚解冻的用双环（准备返回），其余照它此刻的状态。
+            LightAnchorStatusDot(entry.isThawed ? .returning : LightAnchorStatusDotForm(entry.episode.state), size: 9)
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.target.name)
                     .font(LightAnchorTheme.bodyFont(size: 13.5, weight: .medium))
                     .foregroundStyle(LightAnchorTheme.ink)
                     .lineLimit(1)
-                Text(setAsideMeta(entry))
-                    .font(LightAnchorTheme.supportingFont(size: 11.5))
-                    .monospacedDigit()
-                    .foregroundStyle(LightAnchorTheme.faintInk)
+                HStack(spacing: 6) {
+                    dueChip(entry.dueAt)
+                    Text(actionableMeta(entry))
+                        .font(LightAnchorTheme.supportingFont(size: 11.5))
+                        .monospacedDigit()
+                        .foregroundStyle(
+                            entry.isThawed ? LightAnchorTheme.success : LightAnchorTheme.faintInk
+                        )
+                        .lineLimit(2)
+                }
             }
             Spacer(minLength: 12)
-            Button(tr("continue")) {
-                onSwitch(entry.target.id)
+            if let waiting = entry.readyWaiting {
+                Button(tr("back_to_work")) { onRestoreWaiting(waiting) }
+                    .buttonStyle(LightAnchorPrimaryButtonStyle(compact: true))
+                // 忽略已到结果全程一个名字：「不再需要」。
+                Button(tr("no_longer_needed")) {
+                    _ = workspace.dismissWaitingResult(waiting.id)
+                }
+                .buttonStyle(LightAnchorQuietButtonStyle(compact: true))
+            } else {
+                Button(tr("continue")) { onSwitch(entry.target.id) }
+                    .buttonStyle(LightAnchorPrimaryButtonStyle(compact: true))
             }
-            .buttonStyle(LightAnchorPrimaryButtonStyle(compact: true))
         }
-        .lightAnchorListRow()
+        .lightAnchorListRow(
+            selectedResult?.targetID == entry.target.id ? .found : .plain
+        )
         .accessibilityElement(children: .combine)
     }
 
-    private func setAsideMeta(_ entry: (target: AttentionTarget, episode: AttentionEpisode)) -> String {
-        let focus = workspace.snapshot.focusMinutes(of: entry.episode.id)
-        var meta = UserFacingCopy.setAsideAge(of: entry.episode.updatedAt)
-        if focus > 0 {
-            meta += " · " + String(format: tr("total_focus"), UserFacingCopy.focusDuration(focus))
+    private func actionableMeta(_ entry: LaterActionableEntry) -> String {
+        var meta: String
+        if let waiting = entry.readyWaiting {
+            // 刚解冻的行先说「结果到了 · 2 小时前」，再补是什么结果——
+            // 这一行要回答的是「为什么它突然能动了」。
+            meta = String(
+                format: tr("later_result_arrived"),
+                UserFacingCopy.relativeAge(of: waiting.completedAt ?? waiting.startedAt)
+            )
+            let detail = waiting.evidence.isEmpty ? waiting.description : waiting.evidence
+            if !detail.isEmpty { meta += " · " + detail }
+        } else {
+            meta = UserFacingCopy.setAsideAge(of: entry.episode.updatedAt)
+            let focus = workspace.snapshot.focusMinutes(of: entry.episode.id)
+            if focus > 0 {
+                meta += " · " + String(format: tr("total_focus"), UserFacingCopy.focusDuration(focus))
+            }
         }
         // 步骤露出归属；大任务露出步骤进度（用户定：列表里步骤要看得见）。
         if let parentID = entry.target.parentTargetID,
@@ -2516,6 +2222,154 @@ private struct LaterSpaceView: View {
             meta += " · " + String(format: tr("steps_progress"), progress.done, progress.total)
         }
         return meta
+    }
+
+    // MARK: - 等着别人
+
+    /// 搜到一条等待并选中它时强制展开：否则高亮落在收着的抽屉里，
+    /// 用户看不见自己搜到了什么。
+    private var showsBlocked: Bool {
+        blockedExpanded || selectedResult?.kind == .waiting
+    }
+
+    /// 收着是一行，摊开是**同一块岛往下长**——不是换一套布局。
+    /// 它必须始终是一块岛：光秃秃一行组头贴在捕获列表上方，看起来会像
+    /// 那堆捕获的标题（「等着别人的 3 件」下面列着六条随手记）。
+    private var blockedSection: some View {
+        LightAnchorListPanel {
+            blockedHeader.lightAnchorListRow()
+            if showsBlocked {
+                ForEach(laterList.blocked) { entry in
+                    LightAnchorRowSeparator()
+                    blockedRow(entry)
+                }
+            }
+        }
+    }
+
+    /// 组头行：收着的时候尾巴报等得最久的那条——不打开也知道里面有没有火。
+    /// 排版和下面的条目同构（点 + 标题 + 副题），摊开时整块岛才是一件东西。
+    private var blockedHeader: some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.16)) { blockedExpanded.toggle() }
+        } label: {
+            HStack(spacing: 12) {
+                blockedDot
+                // 只有一行，收着和摊开一样高。原来展开时这里多长一句解释，
+                // 于是你点一下，你点的那一行自己变高了——手感像跳了一下。
+                Text(blockedSummary)
+                    .font(LightAnchorTheme.supportingFont(size: 12.5, weight: .semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(LightAnchorTheme.warning)
+                Spacer(minLength: 8)
+                LightAnchorIcon(showsBlocked ? "chevron-down" : "chevron-right", size: 12)
+                    .foregroundStyle(LightAnchorTheme.faintInk)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(selectedResult?.kind == .waiting)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(showsBlocked ? .isSelected : [])
+    }
+
+    private var blockedDot: some View {
+        Circle()
+            .stroke(
+                LightAnchorTheme.warning,
+                style: StrokeStyle(lineWidth: 2, dash: [2.4, 2.4])
+            )
+            .frame(width: 9, height: 9)
+            .accessibilityHidden(true)
+    }
+
+    private var blockedSummary: String {
+        let count = laterList.blocked.count
+        var summary = String(
+            format: count == 1 ? tr("later_blocked_summary_one") : tr("later_blocked_summary"),
+            count
+        )
+        if let lead = laterList.blockedLead {
+            summary += " · " + String(
+                format: tr("later_blocked_longest"),
+                UserFacingCopy.waitedAge(of: lead.startedAt)
+            )
+        }
+        return summary
+    }
+
+    private func blockedRow(_ entry: LaterBlockedEntry) -> some View {
+        let waiting = entry.waiting
+        // 行不做 frost：整行 55% 透明会把这两颗按钮也一起洗淡，看起来像点不了——
+        // 而它们正是你打开这一组要按的东西。这组本来就默认收着，
+        // 你是特地摊开的，不需要再压一次。
+        return HStack(alignment: .center, spacing: 12) {
+            blockedDot
+            VStack(alignment: .leading, spacing: 3) {
+                // 标题是「在等什么」：这一组里能动的单位是那个结果，不是那件事。
+                Text(waiting.description)
+                    .font(LightAnchorTheme.interfaceFont(size: 13.5, weight: .medium))
+                    .foregroundStyle(LightAnchorTheme.ink)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 6) {
+                    dueChip(waiting.dueAt)
+                    Text(blockedMeta(entry))
+                        .font(LightAnchorTheme.supportingFont(size: 11.5))
+                        .monospacedDigit()
+                        .foregroundStyle(LightAnchorTheme.faintInk)
+                        .lineLimit(2)
+                }
+            }
+
+            Spacer(minLength: 14)
+
+            HStack(spacing: 6) {
+                Button(tr("result_is_in")) {
+                    _ = workspace.completeWaiting(waiting.id, evidence: "用户确认可以返回。")
+                }
+                .buttonStyle(LightAnchorQuietButtonStyle(compact: true))
+                Button(tr("stop_waiting"), role: .destructive) {
+                    _ = workspace.cancelWaiting(waiting.id, evidence: "用户停止等待。")
+                }
+                .buttonStyle(LightAnchorDestructiveQuietButtonStyle(compact: true))
+            }
+            .layoutPriority(1)
+        }
+        .lightAnchorListRow(
+            selectedResult?.id == "waiting-\(waiting.id.uuidString)" ? .found : .plain
+        )
+    }
+
+    /// 倒计时。**这个软件里别的数字都在往上加**（放下 6 天、已等 5 天），往上加的
+    /// 数字只在描述过去；押了期限的这一颗倒着走，自己会喊人。没押期限就什么都不显示。
+    ///
+    /// 它只是副题里的一段字，不是一颗带底色的药丸：这套语言里语义色落在**点**和
+    /// **字**上，一行挂一颗黄标签，整张清单就花了。近了才上色，过了才转红。
+    @ViewBuilder
+    private func dueChip(_ dueAt: Date?) -> some View {
+        if let dueAt {
+            let countdown = DueCountdown(due: dueAt)
+            Text(UserFacingCopy.dueCountdown(countdown) + " ·")
+                .font(LightAnchorTheme.supportingFont(size: 11.5, weight: .semibold))
+                .monospacedDigit()
+                .fixedSize()
+                .foregroundStyle(
+                    countdown.isOverdue
+                        ? LightAnchorDesign.danger
+                        : (countdown.isPressing ? LightAnchorTheme.warning : LightAnchorTheme.mutedInk)
+                )
+        }
+    }
+
+    private func blockedMeta(_ entry: LaterBlockedEntry) -> String {
+        // 副题写它属于哪件事 + 结果多久没来 + 回来的信号。押了期限的话，
+        // 倒计时不写在这里——它单独占一格，因为它是唯一在逼你的那个数字。
+        var parts = [entry.target.name, UserFacingCopy.waitedAge(of: entry.waiting.startedAt)]
+        if !entry.waiting.completionCondition.isEmpty {
+            parts.append(String(format: tr("return_cue_is"), entry.waiting.completionCondition))
+        }
+        return parts.joined(separator: " · ")
     }
 
     private var emptyActionTitle: String {
@@ -2994,259 +2848,239 @@ private struct LaterCaptureRow: View {
     }
 }
 
-private struct WaitingSpaceView: View {
-    @EnvironmentObject private var workspace: AttentionWorkspace
-    let onRestore: (WaitingItem) -> Void
-    let onCreateWaiting: () -> Void
-    let selectedResult: WorkspaceSearchResult?
-
-    private var readyItems: [WaitingItem] {
-        workspace.snapshot.readyWaitingItems
-    }
-
-    private var inProgressItems: [WaitingItem] {
-        workspace.snapshot.activeWaitingItems.filter { $0.status == .waiting }
-    }
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                // 样机 .readout：等待｜结果不由你推进｜可返回 N · 等结果中 N。
-                // 副标题刻意不提「放下」：那是稍后页的语义，等待页借它来
-                // 自我介绍时，两页就成了同一页。
-                LightAnchorReadout(tr("waiting"), status: tr("results_you_don_t_push_them")) {
-                    LightAnchorReadoutCount(segments: [
-                        (readyItems.count, tr("ready")),
-                        (inProgressItems.count, tr("waiting_for_result"))
-                    ])
-                    Button(tr("add_a_wait")) {
-                        onCreateWaiting()
-                    }
-                    .buttonStyle(LightAnchorPrimaryButtonStyle(compact: true))
-                    .disabled(workspace.currentEpisode == nil)
-                    .help(
-                        workspace.currentEpisode == nil
-                            ? tr("start_a_current_task_first_to")
-                            : tr("hand_results_you_re_watching_for")
-                    )
-                }
-
-                if readyItems.isEmpty && inProgressItems.isEmpty {
-                    LightAnchorEmptyState(
-                        // 蓝点点环 = 「等待外部结果」，正好是这一页的语义。
-                        markState: .waiting,
-                        title: UserFacingCopy.noWaitingItems,
-                        detail: tr("when_you_re_waiting_on_a")
-                    )
-                    .padding(.top, 4)
-                } else {
-                    if !readyItems.isEmpty {
-                        waitingGroup(title: tr("ready_to_return"), icon: "checkmark.circle", items: readyItems, isReadyGroup: true)
-                    }
-                    if !inProgressItems.isEmpty {
-                        waitingGroup(title: tr("waiting_for_result"), icon: "hourglass", items: inProgressItems, isReadyGroup: false)
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .center)
-            .padding(.horizontal, LightAnchorDesign.workspaceHorizontalPadding)
-            .padding(.vertical, 18)
-        }
-    }
-
-    @ViewBuilder
-    private func waitingGroup(title: String, icon: String, items: [WaitingItem], isReadyGroup: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // 样机 .grouphead + .listpanel。
-            LightAnchorGroupHead(
-                role: isReadyGroup ? .ready : .waiting,
-                title: title,
-                badge: String(format: items.count == 1 ? tr("items_one") : tr("items"), items.count)
-            )
-
-            LightAnchorListPanel {
-                ForEach(items) { waiting in
-                    WaitingRow(
-                        waiting: waiting,
-                        isSelected: selectedResult?.id == "waiting-\(waiting.id.uuidString)",
-                        isFrost: !isReadyGroup,
-                        onRestore: onRestore
-                    )
-                        .environmentObject(workspace)
-                    if waiting.id != items.last?.id {
-                        LightAnchorRowSeparator()
-                    }
-                }
-            }
-        }
-    }
-}
-
-private struct WaitingRow: View {
-    @EnvironmentObject private var workspace: AttentionWorkspace
-    let waiting: WaitingItem
-    let isSelected: Bool
-    var isFrost = false
-    let onRestore: (WaitingItem) -> Void
-
-    private var isReady: Bool { waiting.status == .ready }
-
-    /// 「已等 18 分钟」式的相对时间（V7 文案密度）。原来这里写的是
-    /// 「18 分钟前放下」——但一件正在等结果的事，用户并没有「放下」它，
-    /// 是它还没回来。
-    private var relativeStartLabel: String {
-        UserFacingCopy.waitedAge(of: waiting.startedAt)
-    }
-
-    private var metaLine: String {
-        var parts = [UserFacingCopy.waitingProgress(for: waiting), relativeStartLabel]
-        if !waiting.completionCondition.isEmpty {
-            parts.append(
-                String(format: tr("return_cue_is"), waiting.completionCondition)
-            )
-        }
-        return parts.joined(separator: " · ")
-    }
-
-    var body: some View {
-        // 样机 .row：标题/元信息在左，.btn.sm 操作组靠右。
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(waiting.description)
-                    .font(LightAnchorTheme.interfaceFont(size: 13.5, weight: .medium))
-                    .foregroundStyle(LightAnchorTheme.ink)
-                    .lineSpacing(3)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(metaLine)
-                    .font(LightAnchorTheme.supportingFont(size: 11.5))
-                    // 「N 分钟前放下」每分钟跳变，比例数字会让整行横移。
-                    .monospacedDigit()
-                    .foregroundStyle(LightAnchorTheme.faintInk)
-                    .lineLimit(2)
-                if !waiting.evidence.isEmpty {
-                    Text(waiting.evidence)
-                        .font(LightAnchorTheme.supportingFont(size: 11.5, weight: .medium))
-                        .foregroundStyle(isReady ? LightAnchorDesign.success : LightAnchorTheme.mutedInk)
-                        .textSelection(.enabled)
-                }
-            }
-
-            Spacer(minLength: 14)
-
-            HStack(spacing: 6) {
-                if isReady {
-                    Button(tr("back_to_work")) {
-                        onRestore(waiting)
-                    }
-                    .buttonStyle(LightAnchorPrimaryButtonStyle(compact: true))
-                    // 忽略已到结果全程一个名字：「不再需要」
-                    // （原「不再关注」在两处对应两种不同操作，最危险的同词异义）。
-                    Button(tr("no_longer_needed")) {
-                        _ = workspace.dismissWaitingResult(waiting.id)
-                    }
-                    .buttonStyle(LightAnchorQuietButtonStyle(compact: true))
-                } else {
-                    Button(tr("result_is_in")) {
-                        _ = workspace.completeWaiting(
-                            waiting.id,
-                            evidence: "用户确认可以返回。"
-                        )
-                    }
-                    .buttonStyle(LightAnchorQuietButtonStyle(compact: true))
-                    Button(tr("stop_waiting"), role: .destructive) {
-                        _ = workspace.cancelWaiting(waiting.id, evidence: "用户停止等待。")
-                    }
-                    .buttonStyle(LightAnchorDestructiveQuietButtonStyle(compact: true))
-                }
-            }
-            .layoutPriority(1)
-        }
-        .lightAnchorListRow(isSelected ? .found : (isFrost ? .frost : .plain))
-    }
-}
-
+/// 「开始一件事」——**一张便笺**。
+///
+/// 两件事定了它的样子：
+///
+/// 一、它和「换一件事」不是同一种动作。换一件事是**从已有的里面挑一件**（所以有
+/// 左栏清单、有那张写着「回去开 N 样」的邮票、有交接确认）；开始一件事是**凭空立
+/// 一件**——没有候选可挑，没有现场可恢复，那张邮票和那张清单都是空的。
+///
+/// 二、它和 ⌥⌘N 那个随手记窗是同一种动作：**打一行字就走，别的都可选**。
+/// 所以照抄那个窗的骨架，而不是设置对话框的骨架——没有头部图标+眉题+标题+副标题
+/// 四行铺垫，没有左标签右控件的表单行，没有孤零零一个「更多」三角。
+/// 就是一块卡面：光标直接落在上面，底下一排安静的 chip，右边算了 + 一颗蓝箭头。
 struct StartWorkView: View {
     @EnvironmentObject private var workspace: AttentionWorkspace
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var themeController: LightAnchorThemeController
+    /// 打开时预填的名字（从「换一件事」里那行「新开…」过来时带着）。
+    var initialName: String = ""
     @State private var name = ""
     @State private var note = ""
-    @State private var showingMore = false
+    @State private var showingNote = false
     @State private var environmentProfileID: UUID?
     @State private var prepareEnvironment = false
+    @State private var dueAt: Date?
+    @FocusState private var focused: Bool
+
+    private var canStart: Bool {
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var environments: [EnvironmentProfile] {
+        workspace.snapshot.environments.values.sorted { $0.name < $1.name }
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            LightAnchorSheetHeader(
-                eyebrow: tr("start_working"),
-                title: UserFacingCopy.startWork,
-                subtitle: tr("just_write_down_what_you_re"),
-                icon: "play"
-            )
-            LightAnchorSettingsSection(
-                title: tr("what_you_re_doing_now"),
-                detail: tr("the_name_becomes_your_way_back"),
-                icon: "pencil"
-            ) {
-                TextField(tr("e_g_organise_the_interview_notes"), text: $name)
-                    .textFieldStyle(LightAnchorTextFieldStyle())
-                    .onSubmit(start)
-            }
-            LightAnchorSettingsSection(
-                title: tr("how_to_prepare"),
-                detail: tr("optional_you_can_still_change_it"),
-                icon: "panels-top-left"
-            ) {
-                LightAnchorDisclosure(title: tr("more_settings"), isExpanded: $showingMore) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        TextField(tr("optional_note"), text: $note, axis: .vertical)
-                            .textFieldStyle(LightAnchorTextFieldStyle())
-                            .lineLimit(2...4)
-                        if !workspace.snapshot.environments.isEmpty {
-                            LightAnchorSelectField(
-                                tr("how_you_work"),
-                                selection: $environmentProfileID,
-                                options: [UUID?.none] + workspace.snapshot.environments.values
-                                    .sorted { $0.name < $1.name }
-                                    .map { Optional($0.id) }
-                            ) { profileID in
-                                guard let profileID else { return tr("none_for_now") }
-                                return workspace.snapshot.environments[profileID]?.name ?? tr("none_for_now")
-                            }
-                            if let environmentProfileID,
-                               let environment = workspace.snapshot.environments[environmentProfileID] {
-                                Toggle(tr("set_the_scene_on_start"), isOn: $prepareEnvironment)
-                                    .toggleStyle(.switch)
-                                Text(
-                                    prepareEnvironment
-                                        ? String(
-                                            format: environment.actions.filter(\.isEnabled).count == 1
-                                                ? tr("will_run_n_actions_on_start_one")
-                                                : tr("will_run_n_actions_on_start"),
-                                            environment.actions.filter(\.isEnabled).count
-                                          )
-                                        : tr("only_links_this_environment_actions_won")
-                                )
-                                .font(LightAnchorTheme.supportingFont(size: 11))
-                                .foregroundStyle(LightAnchorTheme.mutedInk)
-                            }
-                        }
-                    }
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 11) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(LightAnchorTheme.accentWash)
+                    LightAnchorIcon("play", size: 16)
+                        .foregroundStyle(LightAnchorTheme.accentInk)
+                }
+                .frame(width: 34, height: 34)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(tr("start_work_eyebrow").uppercased())
+                        .font(LightAnchorTheme.labelFont(size: 10, weight: .bold))
+                        .tracking(0.8)
+                        .foregroundStyle(LightAnchorTheme.secondaryInk)
+                    Text(UserFacingCopy.startWork)
+                        .font(LightAnchorTheme.interfaceFont(size: 19, weight: .semibold))
+                        .foregroundStyle(LightAnchorTheme.ink)
+                    Text(tr("start_work_subtitle"))
+                        .font(LightAnchorTheme.supportingFont(size: 12))
+                        .foregroundStyle(LightAnchorTheme.mutedInk)
                 }
             }
-            LightAnchorSheetActionBar {
-                Button(UserFacingCopy.cancel) { dismiss() }
-                    .buttonStyle(LightAnchorQuietButtonStyle())
-                Button(UserFacingCopy.startWork, action: start)
-                    .buttonStyle(LightAnchorPrimaryButtonStyle())
-                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .padding(.bottom, 20)
+
+            // 开放写字板：光标直接落在卡面上，无输入框描边（同随手记窗）。
+            TextField(tr("e_g_organise_the_interview_notes"), text: $name, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(LightAnchorTheme.interfaceFont(size: 17, weight: .medium))
+                .lineLimit(1...3)
+                .focused($focused)
+                .accessibilityLabel(tr("name_of_this_work"))
+                .onSubmit(start)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 13)
+                .background(
+                    LightAnchorTheme.recessed,
+                    in: RoundedRectangle(cornerRadius: 11, style: .continuous)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .strokeBorder(
+                            focused ? LightAnchorTheme.primary.opacity(0.55) : LightAnchorTheme.sidebarHairline,
+                            lineWidth: focused ? 1.5 : 1
+                        )
+                }
+                .padding(.top, 2)
+                .padding(.bottom, 18)
+
+            Text(tr("start_work_required_hint"))
+                .font(LightAnchorTheme.supportingFont(size: 11.5))
+                .foregroundStyle(LightAnchorTheme.faintInk)
+                .padding(.bottom, showingNote ? 14 : 20)
+
+            if showingNote {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(tr("start_work_note"))
+                        .font(LightAnchorTheme.controlFont(size: 11.5, weight: .semibold))
+                        .foregroundStyle(LightAnchorTheme.mutedInk)
+                    TextField(tr("optional_note"), text: $note, axis: .vertical)
+                        .textFieldStyle(.plain)
+                        .font(LightAnchorTheme.interfaceFont(size: 13))
+                        .lineLimit(1...3)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(
+                            LightAnchorTheme.windowBackground,
+                            in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        )
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .strokeBorder(LightAnchorTheme.sidebarHairline, lineWidth: 1)
+                        }
+                }
+                .padding(.bottom, 18)
             }
+
+            actionBar
         }
-        .padding(LightAnchorDesign.workspaceContentInset)
-        .frame(width: 560, height: 520)
+        .padding(.horizontal, 24)
+        .padding(.top, 22)
+        .padding(.bottom, 16)
+        .background(
+            LightAnchorTheme.elevatedSurface,
+            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+        )
+        .shadow(color: .black.opacity(0.05), radius: 2, y: 1)
+        .shadow(color: .black.opacity(0.10), radius: 22, y: 10)
+        .padding(18)
+        .frame(width: 560)
         .background(LightAnchorTheme.windowBackground)
         .foregroundStyle(LightAnchorTheme.ink)
+        .tint(LightAnchorThemePalette(theme: themeController.resolvedTheme).color(for: .primary))
+        .onAppear {
+            if name.isEmpty { name = initialName }
+            focused = true
+        }
         .onExitCommand { dismiss() }
+    }
+
+    /// 底栏：可选的交代一律是安静的 chip，**空着的样子就是答案**
+    /// （「不着急」「不用准备」）——不需要旁边再摆一个「有没有期限」的开关。
+    private var actionBar: some View {
+        HStack(spacing: 6) {
+            LightAnchorDateField(
+                tr("must_be_done_by"),
+                dueAt: $dueAt,
+                placeholder: tr("no_rush"),
+                defaultingTo: Date().addingTimeInterval(86_400),
+                in: Date()...,
+                chip: true
+            )
+
+            if !environments.isEmpty {
+                environmentChip
+            }
+
+            noteTool
+
+            Spacer(minLength: 12)
+
+            Button(UserFacingCopy.cancel) { dismiss() }
+                .buttonStyle(LightAnchorInlineButtonStyle())
+                .keyboardShortcut(.escape, modifiers: [])
+            Button(tr("start_something"), action: start)
+                .buttonStyle(LightAnchorPrimaryButtonStyle(compact: true))
+            .keyboardShortcut(.return, modifiers: [.command])
+            .disabled(!canStart)
+            .help(tr("start_work_button_hint"))
+        }
+    }
+
+    /// 开工要开什么。选了环境才多出「进门就跑一遍」那颗开关。
+    private var environmentChip: some View {
+        Menu {
+            Picker(tr("how_you_work"), selection: $environmentProfileID) {
+                Text(tr("nothing_to_prepare")).tag(UUID?.none)
+                ForEach(environments) { profile in
+                    Text(profile.name).tag(Optional(profile.id))
+                }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+            if environmentProfileID != nil {
+                Divider()
+                Toggle(tr("set_the_scene_on_start"), isOn: $prepareEnvironment)
+            }
+        } label: {
+            HStack(spacing: 6) {
+                LightAnchorIcon("blocks", size: 12)
+                    .foregroundStyle(LightAnchorTheme.mutedInk)
+                Text(
+                    environmentProfileID.flatMap { workspace.snapshot.environments[$0]?.name }
+                        ?? tr("nothing_to_prepare")
+                )
+                .font(LightAnchorTheme.controlFont(size: 12, weight: .medium))
+                .lineLimit(1)
+                .foregroundStyle(
+                    environmentProfileID == nil ? LightAnchorTheme.mutedInk : LightAnchorTheme.ink
+                )
+                LightAnchorIcon("chevron-down", size: 8)
+                    .foregroundStyle(LightAnchorTheme.mutedInk)
+            }
+            .padding(.horizontal, 11)
+            .frame(height: 26)
+            .background(LightAnchorTheme.recessed, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(LightAnchorTheme.sidebarHairline, lineWidth: 1)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+    }
+
+    /// 备注：无描边小图标工具（同随手记窗那排 .ictool），点开才多一行。
+    private var noteTool: some View {
+        Button {
+            showingNote.toggle()
+            if !showingNote { note = "" }
+        } label: {
+            LightAnchorIcon("pencil", size: 15)
+                .foregroundStyle(showingNote ? LightAnchorTheme.ink : LightAnchorTheme.mutedInk)
+                .frame(width: 30, height: 30)
+                .background(
+                    showingNote ? LightAnchorTheme.recessed : LightAnchorThemeColor.clear,
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .lightAnchorHoverFill(cornerRadius: 8, isActive: !showingNote)
+        .help(tr("optional_note"))
+        .accessibilityLabel(tr("optional_note"))
+        .accessibilityAddTraits(showingNote ? .isSelected : [])
     }
 
     private func start() {
@@ -3256,7 +3090,8 @@ struct StartWorkView: View {
         guard let target = workspace.createTarget(
             name: name,
             note: note,
-            environmentProfileID: environmentProfileID
+            environmentProfileID: environmentProfileID,
+            dueAt: dueAt
         ) else { return }
         _ = workspace.startEpisode(targetID: target.id)
         if let environmentToPrepare {
@@ -3572,18 +3407,19 @@ private struct CaptureTargetEditorView: View {
     }
 }
 
-private enum WaitingReturnTiming: String, CaseIterable, Identifiable {
-    case selfManaged
-    case scheduled
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .selfManaged: tr("i_ll_confirm")
-        case .scheduled: tr("timed_reminder")
-        }
-    }
+/// 期限用的日期格：**空着就是没有期限**。
+///
+/// 原来这里是「没有期限 / 定个日期」的二选一加一个字段——多一步选择才见到那个格子，
+/// 而且那个二选一在问一件字段自己就能说的事。用户不定，就默认没有，不必先声明。
+@MainActor
+private func waitingDueField(_ dueAt: Binding<Date?>) -> some View {
+    LightAnchorDateField(
+        tr("must_have_it_by"),
+        dueAt: dueAt,
+        placeholder: tr("deadline_none"),
+        defaultingTo: Date().addingTimeInterval(86_400),
+        in: Date()...
+    )
 }
 
 private struct CaptureWaitingEditorView: View {
@@ -3591,8 +3427,7 @@ private struct CaptureWaitingEditorView: View {
     @Environment(\.dismiss) private var dismiss
     let capture: CaptureItem
     let episodeID: UUID
-    @State private var returnTiming: WaitingReturnTiming = .selfManaged
-    @State private var reminderDate = Date().addingTimeInterval(1800)
+    @State private var dueAt: Date?
     @State private var returnCue = ""
 
     var body: some View {
@@ -3604,24 +3439,15 @@ private struct CaptureWaitingEditorView: View {
                 icon: "hourglass"
             )
             LightAnchorSettingsSection(
-                title: tr("when_to_look_again"),
-                detail: tr("confirm_it_yourself_or_have_it"),
+                title: tr("when_must_you_have_it"),
+                detail: tr("deadline_detail_waiting"),
                 icon: "clock"
             ) {
-                LightAnchorChoiceField(
-                    tr("how_to_get_back"),
-                    selection: $returnTiming,
-                    options: WaitingReturnTiming.allCases,
-                    titleForValue: { $0.title },
-                    iconForValue: { $0 == .scheduled ? "clock" : "circle-check" }
-                )
-                if returnTiming == .scheduled {
-                    HStack {
-                        Text(tr("reminder_time"))
-                            .font(LightAnchorTheme.controlFont())
-                        Spacer()
-                        LightAnchorDateField(tr("reminder_time"), selection: $reminderDate, in: Date()...)
-                    }
+                HStack {
+                    Text(tr("must_have_it_by"))
+                        .font(LightAnchorTheme.controlFont())
+                    Spacer()
+                    waitingDueField($dueAt)
                 }
                 TextField(tr("return_cue_optional"), text: $returnCue)
                     .textFieldStyle(LightAnchorTextFieldStyle())
@@ -3634,11 +3460,8 @@ private struct CaptureWaitingEditorView: View {
                     guard workspace.beginWaitingFromCapture(
                         capture.id,
                         episodeID: episodeID,
-                                completionCondition: returnCue,
-                        restorePolicy: returnTiming == .scheduled ? .notify : .manual,
-                        monitor: returnTiming == .scheduled
-                            ? WaitingMonitorConfiguration(kind: .date, date: reminderDate)
-                            : nil
+                        completionCondition: returnCue,
+                        dueAt: dueAt
                     ) != nil else { return }
                     dismiss()
                 }
@@ -3659,15 +3482,14 @@ struct WaitingEditorView: View {
     let episodeID: UUID
     @State private var description = ""
     @State private var returnCue = ""
-    @State private var returnTiming: WaitingReturnTiming = .selfManaged
-    @State private var reminderDate = Date().addingTimeInterval(1800)
+    @State private var dueAt: Date?
 
     init(episodeID: UUID) {
         self.episodeID = episodeID
         #if DEBUG
-        // 调试后门（截图/验收用）：直接落在定时提醒状态。
+        // 调试后门（截图/验收用）：直接押上一个期限。
         if ProcessInfo.processInfo.environment["LIGHTANCHOR_DEBUG_WAITING_TIMING"] == "scheduled" {
-            _returnTiming = State(initialValue: .scheduled)
+            _dueAt = State(initialValue: Date().addingTimeInterval(86_400))
         }
         #endif
     }
@@ -3693,24 +3515,15 @@ struct WaitingEditorView: View {
             }
 
             LightAnchorSettingsSection(
-                title: tr("when_to_look_again"),
-                detail: tr("a_timed_reminder_moves_this_to"),
+                title: tr("when_must_you_have_it"),
+                detail: tr("deadline_detail_waiting"),
                 icon: "clock"
             ) {
-                LightAnchorChoiceField(
-                    tr("how_to_get_back"),
-                    selection: $returnTiming,
-                    options: WaitingReturnTiming.allCases,
-                    titleForValue: { $0.title },
-                    iconForValue: { $0 == .scheduled ? "clock" : "circle-check" }
-                )
-                if returnTiming == .scheduled {
-                    HStack {
-                        Text(tr("reminder_time"))
-                            .font(LightAnchorTheme.controlFont())
-                        Spacer()
-                        LightAnchorDateField(tr("reminder_time"), selection: $reminderDate, in: Date()...)
-                    }
+                HStack {
+                    Text(tr("must_have_it_by"))
+                        .font(LightAnchorTheme.controlFont())
+                    Spacer()
+                    waitingDueField($dueAt)
                 }
             }
 
@@ -3721,12 +3534,9 @@ struct WaitingEditorView: View {
                 Button(tr("start_waiting")) {
                     guard workspace.beginWaiting(
                         episodeID: episodeID,
-                                description: description,
+                        description: description,
                         completionCondition: returnCue,
-                        restorePolicy: returnTiming == .scheduled ? .notify : .manual,
-                        monitor: returnTiming == .scheduled
-                            ? WaitingMonitorConfiguration(kind: .date, date: reminderDate)
-                            : nil
+                        dueAt: dueAt
                     ) != nil else { return }
                     dismiss()
                 }
@@ -3858,6 +3668,8 @@ struct CaptureView: View {
     /// 无标题行；底部一排无描边小图标工具 + 类型 chip + 取消 / 纸飞机发送键。
     private var windowComposer: some View {
         VStack(alignment: .leading, spacing: 0) {
+            settleWaitingRow
+
             inputView
                 .padding(.top, 2)
                 .padding(.bottom, 26)
@@ -3872,6 +3684,59 @@ struct CaptureView: View {
         .background(LightAnchorTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: .black.opacity(0.05), radius: 2, y: 1)
         .shadow(color: .black.opacity(0.10), radius: 22, y: 10)
+    }
+
+    /// 销账入口：「这是我在等的：〔…〕〔…〕」。
+    ///
+    /// 结果到达的那一刻，**你人在邮箱里，不在轻锚里**。要求你切过来、翻到清单、
+    /// 找到那行、点一下——比直接把事处理掉还麻烦，没人会干。所以这一下要发生在
+    /// 你人所在的地方：随手记的小窗本来就是为「在别处随手记一笔」存在的，
+    /// 顶上多一行，瞄一眼点一下，窗关掉，光标回到邮件里。
+    /// 手上那点草稿（那段话、那个链接）顺手存成「结果是什么」的凭据。
+    @ViewBuilder
+    private var settleWaitingRow: some View {
+        let waits = Array(
+            workspace.snapshot.waitingItems.values
+                .filter { $0.status == .waiting }
+                .sorted { ($0.dueAt ?? .distantFuture, $0.startedAt) < ($1.dueAt ?? .distantFuture, $1.startedAt) }
+                .prefix(3)
+        )
+        if !waits.isEmpty {
+            VStack(alignment: .leading, spacing: 7) {
+                Text(tr("this_is_what_i_was_waiting_for"))
+                    .font(LightAnchorTheme.supportingFont(size: 11.5))
+                    .foregroundStyle(LightAnchorTheme.faintInk)
+                HStack(spacing: 6) {
+                    ForEach(waits) { waiting in
+                        Button {
+                            settle(waiting)
+                        } label: {
+                            Text(waiting.description)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        .buttonStyle(LightAnchorQuietButtonStyle(compact: true))
+                        .help(tr("mark_this_result_as_arrived"))
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.bottom, 16)
+        }
+    }
+
+    private func settle(_ waiting: WaitingItem) {
+        let draft = [text, linkText]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first(where: { !$0.isEmpty })
+        guard workspace.completeWaiting(
+            waiting.id,
+            evidence: draft ?? tr("confirmed_from_the_capture_window")
+        ) else { return }
+        CaptureDraftCoordinator.shared.end(draftID: draftID)
+        returnFocusToSourceApplication()
+        dismiss()
     }
 
     @ViewBuilder

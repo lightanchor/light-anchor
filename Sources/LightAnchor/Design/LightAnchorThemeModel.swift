@@ -195,6 +195,9 @@ enum LightAnchorThemeRole: String, CaseIterable, Hashable, Sendable {
     case background
     case foreground
     case card
+    /// 卡片头 / 窗底状态栏那一条：比内容面**亮**半档的暖白（样机 --card-hd）。
+    /// 分带靠提亮，不靠压深——压深就成了米色凹槽。
+    case cardHeader
     case popover
     case muted
     case mutedForeground
@@ -203,6 +206,8 @@ enum LightAnchorThemeRole: String, CaseIterable, Hashable, Sendable {
     case accent
     case destructive
     case border
+    /// 比 border 再轻一档的暖发丝线（样机 --line-soft）：带与带之间的分界。
+    case lineSoft
     case sidebar
     case sidebarAccent
     case sidebarBorder
@@ -307,6 +312,7 @@ struct LightAnchorThemePalette {
         "background": "#FBF8F3",
         "foreground": "#3B3644",
         "card": "#FFFFFF",
+        "cardHeader": "#FCFAF7",
         "popover": "#FFFFFF",
         "primary": "#5BA7CE",
         "primaryForeground": "#FFFFFF",
@@ -315,6 +321,7 @@ struct LightAnchorThemePalette {
         "accent": "#5BA7CE29",
         "destructive": "#B4524B",
         "border": "#E7E0D4",
+        "lineSoft": "#F2EDE4",
         "sidebar": "#F5F1EA",
         "sidebarAccent": "#EBE4D8",
         "sidebarBorder": "#EEE8DD",
@@ -368,6 +375,7 @@ struct LightAnchorThemePalette {
         "background": "#211E28",
         "foreground": "#ECE8F1",
         "card": "#2A2733",
+        "cardHeader": "#262330",
         "popover": "#322E3C",
         "primary": "#79C0E6",
         "primaryForeground": "#142430",
@@ -376,6 +384,7 @@ struct LightAnchorThemePalette {
         "accent": "#79C0E624",
         "destructive": "#E08A80",
         "border": "#35313F",
+        "lineSoft": "#2A2833",
         "sidebar": "#1C1922",
         "sidebarAccent": "#322E3C",
         "sidebarBorder": "#2E2A38",

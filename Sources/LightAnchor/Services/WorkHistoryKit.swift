@@ -1,5 +1,34 @@
 import Foundation
 
+struct WorkSegment: Identifiable, Equatable {
+    let episode: AttentionEpisode
+    let scene: SceneSnapshot?
+
+    var id: UUID { episode.id }
+}
+
+extension AttentionSnapshot {
+    func workSegments(for targetID: UUID) -> [WorkSegment] {
+        let scenesByEpisode = Dictionary(grouping: sceneSnapshots.values.filter {
+            $0.targetID == targetID && $0.episodeID != nil
+        }, by: \.episodeID)
+
+        return episodes.values
+            .filter { $0.targetID == targetID }
+            .sorted {
+                if $0.startedAt != $1.startedAt { return $0.startedAt > $1.startedAt }
+                return $0.id.uuidString < $1.id.uuidString
+            }
+            .map { episode in
+                let scene = scenesByEpisode[episode.id]?.max {
+                    if $0.capturedAt != $1.capturedAt { return $0.capturedAt < $1.capturedAt }
+                    return $0.id.uuidString < $1.id.uuidString
+                }
+                return WorkSegment(episode: episode, scene: scene)
+            }
+    }
+}
+
 /// 一段可读的近期工作经过。它由现有事件、episode、等待与现场推导，
 /// 不额外记录点击、按键或连续截图。
 struct RecentWorkTrace: Identifiable, Equatable {
@@ -26,7 +55,6 @@ struct RecentWorkTrace: Identifiable, Equatable {
         switch state {
         case .active: return tr("active")
         case .paused: return tr("paused")
-        case .waiting: return tr("waiting_3")
         case .returning: return tr("returning")
         case .ended: return tr("ended")
         }
@@ -165,7 +193,6 @@ enum WorkHistoryBuilder {
         switch episode.state {
         case .active, .returning: return tr("this_work_session_is_still_active")
         case .paused: return tr("this_work_session_is_paused_and")
-        case .waiting: return tr("this_work_session_is_waiting_for")
         case .ended: return tr("this_work_session_has_ended")
         }
     }

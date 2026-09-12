@@ -78,7 +78,6 @@ final class BrandMarkTests: XCTestCase {
     func testEveryEpisodeStateMapsToAMarkState() {
         XCTAssertEqual(LightAnchorMarkState(episodeState: .active), .active)
         XCTAssertEqual(LightAnchorMarkState(episodeState: .returning), .returning)
-        XCTAssertEqual(LightAnchorMarkState(episodeState: .waiting), .waiting)
         XCTAssertEqual(LightAnchorMarkState(episodeState: .paused), .idle)
         XCTAssertEqual(LightAnchorMarkState(episodeState: .ended), .idle)
         XCTAssertEqual(LightAnchorMarkState(episodeState: nil), .idle)
